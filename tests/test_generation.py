@@ -22,7 +22,12 @@ def generated(tmp_path_factory):
     root = tmp_path_factory.mktemp("real-generators")
     rest, graphql = root / "rest", root / "graphql"
     rest_report = generate(rest, "sample-rest", openapi=FIXTURES / "openapi.json")
-    graphql_report = generate(graphql, "sample-graphql", schema=FIXTURES / "schema.graphql", operations=FIXTURES / "operations.graphql")
+    graphql_report = generate(
+        graphql,
+        "sample-graphql",
+        schema=FIXTURES / "schema.graphql",
+        operations=FIXTURES / "operations.graphql",
+    )
     return rest, graphql, rest_report, graphql_report
 
 
@@ -30,25 +35,38 @@ def generated(tmp_path_factory):
 def service():
     counts = {"reads": 0, "writes": 0}
     schema = build_schema((FIXTURES / "schema.graphql").read_text())
-    root = {"item": lambda _info, id: {"id": id, "name": "Example"},
-            "createItem": lambda _info, name: {"id": "2", "name": name}}
+    root = {
+        "item": lambda _info, id: {"id": id, "name": "Example"},
+        "createItem": lambda _info, name: {"id": "2", "name": name},
+    }
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *_args): pass
+        def log_message(self, *_args):
+            pass
+
         def send(self, value, status=200):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(value).encode())
+
         def do_GET(self):
             counts["reads"] += 1
             self.send({"id": int(self.path.rsplit("/", 1)[-1]), "name": "Example"})
+
         def do_POST(self):
             value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             if self.path == "/graphql":
                 key = "writes" if "mutation" in value["query"] else "reads"
                 counts[key] += 1
-                self.send(graphql_sync(schema, value["query"], root_value=root, variable_values=value.get("variables")).formatted)
+                self.send(
+                    graphql_sync(
+                        schema,
+                        value["query"],
+                        root_value=root,
+                        variable_values=value.get("variables"),
+                    ).formatted
+                )
             else:
                 assert value == {"name": "Created"}
                 counts["writes"] += 1
@@ -64,7 +82,13 @@ def service():
 
 def command(project, package, args):
     environment = {**os.environ, "PYTHONPATH": str(project)}
-    return subprocess.run([sys.executable, "-m", package + "._cli", *args], env=environment, capture_output=True, text=True, timeout=20)
+    return subprocess.run(
+        [sys.executable, "-m", package + "._cli", *args],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
 
 
 def test_real_upstream_generators_emit_standalone_packages(generated):
@@ -74,7 +98,10 @@ def test_real_upstream_generators_emit_standalone_packages(generated):
     for project in (rest, graphql):
         assert (project / "pyproject.toml").exists()
         assert not list(project.rglob("*.js"))
-        assert all("import website_client" not in path.read_text() for path in project.rglob("*.py"))
+        assert all(
+            "import website_client" not in path.read_text()
+            for path in project.rglob("*.py")
+        )
         assert "websocket-client" in (project / "pyproject.toml").read_text()
     assert (graphql / "sample_graphql/client.py").exists()
     assert (rest / "sample_rest/api/default/get_item.py").exists()
@@ -82,45 +109,92 @@ def test_real_upstream_generators_emit_standalone_packages(generated):
 
 def test_generated_help_has_actual_inputs_and_write_labels(generated):
     rest, graphql, *_ = generated
-    for project, package, operation, field in ((rest, "sample_rest", "get_item", "item_id"), (graphql, "sample_graphql", "GetItem", "id")):
+    for project, package, operation, field in (
+        (rest, "sample_rest", "get_item", "item_id"),
+        (graphql, "sample_graphql", "GetItem", "id"),
+    ):
         result = command(project, package, [operation, "--help"])
         assert result.returncode == 0, result.stderr
-        assert field in result.stdout and "required" in result.stdout and "READS remote data" in result.stdout
+        assert (
+            field in result.stdout
+            and "required" in result.stdout
+            and "READS remote data" in result.stdout
+        )
         assert "--login" in result.stdout and "--login-url" in result.stdout
     result = command(graphql, "sample_graphql", ["CreateItem", "--help"])
     assert "WRITES remote data" in result.stdout
 
 
-def test_generated_openapi_cli_calls_typed_methods_and_guards_writes(generated, service, tmp_path):
+def test_generated_openapi_cli_calls_typed_methods_and_guards_writes(
+    generated, service, tmp_path
+):
     rest = generated[0]
     url, counts = service
     inputs = tmp_path / "input.json"
     inputs.write_text('{"item_id": 7}')
-    result = command(rest, "sample_rest", ["get_item", "--url", url, "--input", str(inputs)])
+    result = command(
+        rest, "sample_rest", ["get_item", "--url", url, "--input", str(inputs)]
+    )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"id": 7, "name": "Example"}
     assert counts == {"reads": 1, "writes": 0}
     inputs.write_text('{"body": {"name": "Created"}}')
-    denied = command(rest, "sample_rest", ["create_item", "--url", url, "--input", str(inputs)])
+    denied = command(
+        rest, "sample_rest", ["create_item", "--url", url, "--input", str(inputs)]
+    )
     assert denied.returncode != 0 and counts["writes"] == 0
-    result = command(rest, "sample_rest", ["create_item", "--url", url, "--input", str(inputs), "--confirm-write", "create_item"])
+    result = command(
+        rest,
+        "sample_rest",
+        [
+            "create_item",
+            "--url",
+            url,
+            "--input",
+            str(inputs),
+            "--confirm-write",
+            "create_item",
+        ],
+    )
     assert result.returncode == 0, result.stderr
     assert counts["writes"] == 1
 
 
-def test_generated_graphql_cli_calls_typed_methods_and_guards_writes(generated, service, tmp_path):
+def test_generated_graphql_cli_calls_typed_methods_and_guards_writes(
+    generated, service, tmp_path
+):
     graphql = generated[1]
     url, counts = service
     inputs = tmp_path / "input.json"
     inputs.write_text('{"id": "7"}')
-    result = command(graphql, "sample_graphql", ["GetItem", "--url", url + "/graphql", "--input", str(inputs)])
+    result = command(
+        graphql,
+        "sample_graphql",
+        ["GetItem", "--url", url + "/graphql", "--input", str(inputs)],
+    )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"item": {"id": "7", "name": "Example"}}
     assert counts == {"reads": 1, "writes": 0}
     inputs.write_text('{"name": "Created"}')
-    denied = command(graphql, "sample_graphql", ["CreateItem", "--url", url + "/graphql", "--input", str(inputs)])
+    denied = command(
+        graphql,
+        "sample_graphql",
+        ["CreateItem", "--url", url + "/graphql", "--input", str(inputs)],
+    )
     assert denied.returncode != 0 and counts["writes"] == 0
-    result = command(graphql, "sample_graphql", ["CreateItem", "--url", url + "/graphql", "--input", str(inputs), "--confirm-write", "CreateItem"])
+    result = command(
+        graphql,
+        "sample_graphql",
+        [
+            "CreateItem",
+            "--url",
+            url + "/graphql",
+            "--input",
+            str(inputs),
+            "--confirm-write",
+            "CreateItem",
+        ],
+    )
     assert result.returncode == 0, result.stderr
     assert counts["writes"] == 1
 
@@ -136,18 +210,32 @@ def test_generation_rejects_existing_output_and_invalid_graphql(tmp_path):
     operations = tmp_path / "invalid.graphql"
     operations.write_text("query Invalid { missing }")
     with pytest.raises(BrowserError, match="valid against the schema"):
-        generate(tmp_path / "invalid", schema=FIXTURES / "schema.graphql", operations=operations)
+        generate(
+            tmp_path / "invalid",
+            schema=FIXTURES / "schema.graphql",
+            operations=operations,
+        )
     assert not (tmp_path / "invalid").exists()
 
 
-def test_generated_login_rejects_pipes_and_unconfirmed_writes_before_launch(generated, service, tmp_path):
+def test_generated_login_rejects_pipes_and_unconfirmed_writes_before_launch(
+    generated, service, tmp_path
+):
     url, counts = service
     inputs = tmp_path / "input.json"
     inputs.write_text('{"item_id": 7}')
-    result = command(generated[0], "sample_rest", ["get_item", "--url", url, "--input", str(inputs), "--login"])
+    result = command(
+        generated[0],
+        "sample_rest",
+        ["get_item", "--url", url, "--input", str(inputs), "--login"],
+    )
     assert result.returncode != 0 and "interactive terminal" in result.stderr
-    result = command(generated[0], "sample_rest", ["create_item", "--url", url, "--login"])
+    result = command(
+        generated[0], "sample_rest", ["create_item", "--url", url, "--login"]
+    )
     assert result.returncode != 0 and "requires --confirm-write" in result.stderr
-    result = command(generated[0], "sample_rest", ["get_item", "--url", url, "--browser", "chrome"])
+    result = command(
+        generated[0], "sample_rest", ["get_item", "--url", url, "--browser", "chrome"]
+    )
     assert result.returncode != 0 and "Browser options require --login" in result.stderr
     assert counts == {"reads": 0, "writes": 0}
