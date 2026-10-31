@@ -1,12 +1,12 @@
 # Delivery plan
 
-## Review readability
+## Code readability
 
-- [ ] Name transport limits and time units, deriving the base64 limit from the
+- [x] Name transport limits and time units, deriving the base64 limit from the
   decoded response limit. Separate request, response and cleanup responsibilities.
-- [ ] Separate the HTTPS fixture, terminal driver and container scenarios. Expand
+- [x] Separate the HTTPS fixture, terminal driver and container scenarios. Expand
   compact statements and explain lifecycle and isolation decisions in comments.
-- [ ] Run focused transport tests and the complete installed-client container flow,
+- [x] Run focused transport tests and the complete installed-client container flow,
   then push the review changes to the existing PR.
 
 ## Generated client browser login
@@ -20,7 +20,7 @@
    codes, authenticated reads, confirmed writes, cancellation and cleanup in Docker.
    Document the complete install-to-endpoint procedure and open a separate PR.
 
-Verification covers 60 Python tests and 15 container scenarios. Generated clients
+Verification covers 62 Python tests and 15 container scenarios. Generated clients
 are installed in separate fresh environments with only their declared runtime
 dependencies. Both formats complete browser login, verification codes, authenticated
 reads and confirmed writes. Cancellation, browser closure and redirect rejection
