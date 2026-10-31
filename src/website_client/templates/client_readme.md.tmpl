@@ -1,0 +1,35 @@
+# $name
+
+From this directory, install the package and list its operations:
+
+```sh
+poetry install
+poetry run $name --help
+```
+
+Choose a listed operation and run `poetry run $name OPERATION --help`, replacing
+`OPERATION` with its actual name. Help describes required JSON inputs and whether
+the operation reads or writes data. JSON input names match the upstream Python
+arguments; the commands call those generated typed methods.
+
+Use `--url` for the service base URL or GraphQL endpoint. Add `--login` to open
+Chrome, sign in and complete verification codes, then press Enter to call the
+endpoint through that browser session. If the sign-in website differs from the
+API, supply its address with `--login-url`.
+
+Chrome must be installed and login needs an interactive terminal. Chromium uses
+`--browser chromium`; custom executable locations use `--browser-path`. Operation
+help explains `--session-header` for additional observed session-header names.
+
+The temporary browser closes after the operation. Each command requires a fresh
+sign-in. Ctrl+C cancels. Browser session state is not saved or printed. As an
+alternative to browser login, `--headers-stdin` accepts temporary headers as a JSON
+object. Do not combine the two authentication methods.
+
+Writes require `--confirm-write` followed by the exact operation name. Requests
+are never retried automatically. Use `--output NEW_FILE` for private JSON output.
+If a request fails, check the service before retrying because it may have succeeded.
+
+Complex input conversions and custom scalar mappings may require the Python API.
+Multi-step service workflows require separate extensions.
+

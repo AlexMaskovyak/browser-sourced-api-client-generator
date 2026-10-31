@@ -1,306 +1,373 @@
-"""Drive the installed Python CLI through a real terminal and native browser."""
+"""Verify installed commands against real terminal, browser and HTTPS behavior."""
 
-import http.server
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import pty
-import select
 import shutil
 import signal
-import ssl
 import subprocess
 import sys
 import tempfile
-import threading
 import time
-from urllib.parse import parse_qs, urlsplit, urlencode
-from urllib.request import ProxyHandler, build_opener
-import uuid
+from urllib.parse import urlencode
 
-from website_client.browser import Connection
+from graphql import get_introspection_query
 import website_client
-from graphql import build_schema, get_introspection_query, graphql_sync
+
+from fixture_site import FIXTURES_DIRECTORY, Site
+from terminal_command import Command, eventually
+
+NETWORK_CAPTURE_SETTLE_SECONDS = 0.2
+LOGIN_SCENARIOS = ("success", "unfinished", "cancelled", "closed", "terminated")
+CLIENT_SCENARIOS = {
+    "openapi": ("read", "write", "cancel", "redirect"),
+    "graphql": ("read", "write", "closed"),
+}
 
 
-def eventually(check, timeout=15):
-    deadline = time.monotonic() + timeout
-    last = None
-    while time.monotonic() < deadline:
-        try:
-            result = check()
-            if result: return result
-        except Exception as error:
-            last = type(error).__name__
-        time.sleep(0.05)
-    raise AssertionError(f"Condition did not complete within {timeout} seconds ({last})")
+@dataclass(frozen=True)
+class GeneratedClient:
+    kind: str
+    executable: Path
 
 
-class Site:
-    def __init__(self, root):
-        def run(*args): subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.secrets = {"username": f"user-{uuid.uuid4()}@example.test", "password": str(uuid.uuid4()),
-                        "cookie": str(uuid.uuid4()), "challenge": str(uuid.uuid4()), "code": "123456"}
-        self.counts = {"password": 0, "mfa": 0, "app": 0}
-        self.api_reads = 0
-        fixtures = Path(__file__).resolve().parents[1] / "tests/fixtures"
-        self.schema = build_schema((fixtures / "schema.graphql").read_text())
-        self.openapi = json.loads((fixtures / "openapi.json").read_text())
-        ca, key, cert, csr, cakey = [root / name for name in ("ca.crt", "server.key", "server.crt", "server.csr", "ca.key")]
-        run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(cakey), "-out", str(ca), "-subj", "/CN=Website Client Test CA", "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign")
-        run("openssl", "req", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(csr), "-subj", "/CN=localhost")
-        extensions = root / "extensions.cnf"
-        extensions.write_text("subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\n")
-        run("openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(cakey), "-CAcreateserial", "-days", "1", "-out", str(cert), "-extfile", str(extensions))
-        nss = Path.home() / ".pki/nssdb"
-        nss.mkdir(parents=True, exist_ok=True)
-        run("certutil", "-N", "--empty-password", "-d", f"sql:{nss}")
-        run("certutil", "-A", "-d", f"sql:{nss}", "-n", "website-client-test", "-t", "C,,", "-i", str(ca))
-        site = self
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *_args): pass
-
-            def redirect(self, path, cookie=None):
-                self.send_response(303)
-                self.send_header("Location", path)
-                if cookie: self.send_header("Set-Cookie", cookie + "; Path=/; Secure; HttpOnly; SameSite=Lax")
-                self.end_headers()
-
-            def do_GET(self):
-                cookie = self.headers.get("Cookie", "")
-                target = urlsplit(self.path)
-                if "session=" + site.secrets["cookie"] in cookie and target.path in {"/items/7", "/openapi.json", "/graphql"}:
-                    site.api_reads += 1
-                    if target.path == "/items/7": body = {"id": 7, "name": site.secrets["username"]}
-                    elif target.path == "/openapi.json": body = site.openapi
-                    else:
-                        fields = parse_qs(target.query)
-                        body = graphql_sync(site.schema, fields["query"][0],
-                            root_value={"item": lambda _info, id: {"id": id, "name": site.secrets["username"]}},
-                            variable_values=json.loads(fields.get("variables", ["{}"])[0]),
-                            operation_name=fields.get("operationName", [None])[0]).formatted
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(body).encode())
-                    return
-                if self.path == "/login":
-                    body = '<form method="post" action="/login"><label>Username<input name="username"></label><label>Password<input name="password" type="password"></label><button>Sign in</button></form>'
-                elif self.path == "/mfa":
-                    body = '<form method="post" action="/mfa"><label>Verification code<input name="code"></label><button>Verify</button></form>'
-                elif self.path == "/favicon.ico":
-                    self.send_response(204); self.end_headers(); return
-                elif "session=" + site.secrets["cookie"] in cookie:
-                    site.counts["app"] += 1
-                    body = "<h1>Signed in</h1>"
-                else:
-                    self.redirect("/login"); return
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(body.encode())
-
-            def do_POST(self):
-                size = int(self.headers.get("Content-Length", "0"))
-                if size > 4096: self.send_error(413); return
-                fields = parse_qs(self.rfile.read(size).decode())
-                if self.path == "/login" and all(fields.get(key) == [site.secrets[key]] for key in ("username", "password")):
-                    site.counts["password"] += 1
-                    self.redirect("/mfa", "challenge=" + site.secrets["challenge"])
-                elif (self.path == "/mfa" and fields.get("code") == [site.secrets["code"]]
-                      and "challenge=" + site.secrets["challenge"] in self.headers.get("Cookie", "")):
-                    site.counts["mfa"] += 1
-                    self.redirect("/app", "session=" + site.secrets["cookie"])
-                else: self.send_error(401)
-
-        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(cert, key)
-        self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.url = f"https://127.0.0.1:{self.server.server_port}/app"
-
-    def close(self):
-        self.server.shutdown()
-        self.server.server_close()
+def run_program(arguments, *, check=True):
+    """Capture build output; the interactive commands use Command instead."""
+    return subprocess.run(
+        arguments,
+        check=check,
+        capture_output=True,
+        text=True,
+    )
 
 
-class Command:
-    def __init__(self, site, *, discover_output=None):
-        self.baseline = set(Path(tempfile.gettempdir()).glob("website-client-browser-*"))
-        executable = shutil.which("website-client")
-        self.pid, self.terminal = pty.fork()
-        if self.pid == 0:
-            args = [executable, "discover" if discover_output else "login", "--url", site.url, "--browser", "chromium", "--browser-path", "/work/docker/test-chromium.sh"]
-            if discover_output: args += ["--output", str(discover_output)]
-            os.execv(executable, args)
-        self.output = ""
-        self.status = None
-        self.connection = None
-        self.port = None
+def complete_login(command, site):
+    """Act as the human through the real password and verification forms."""
+    command.fill('input[name="username"]', site.secrets["username"])
+    command.fill('input[name="password"]', site.secrets["password"])
+    command.click()
+    command.fill('input[name="code"]', site.secrets["code"])
+    command.click()
+    eventually(lambda: command.node("h1"))
 
-    def pump(self):
-        if select.select([self.terminal], [], [], 0)[0]:
-            try: data = os.read(self.terminal, 65536)
-            except OSError: data = b""
-            self.output += data.decode(errors="replace")
-            assert len(self.output) < 1024 * 1024
-        if self.status is None:
-            child, status = os.waitpid(self.pid, os.WNOHANG)
-            if child: self.status = os.waitstatus_to_exitcode(status)
 
-    def ready(self):
-        self.pump()
-        if self.status is not None: raise AssertionError("CLI exited before login prompt: " + self.output)
-        return "press Enter here to finish" in self.output or "Press Enter here to start capture" in self.output
+def assert_no_credentials(value, site):
+    for secret in site.secrets.values():
+        assert secret not in value
 
-    def connect(self):
-        profiles = set(Path(tempfile.gettempdir()).glob("website-client-browser-*")) - self.baseline
-        assert len(profiles) == 1
-        self.profile = profiles.pop()
-        self.port = int((self.profile / "DevToolsActivePort").read_text().splitlines()[0])
-        opener = build_opener(ProxyHandler({}))
-        with opener.open(f"http://127.0.0.1:{self.port}/json/list") as response:
-            pages = json.load(response)
-        self.connection = Connection(next(page["webSocketDebuggerUrl"] for page in pages if page["type"] == "page"), self.port)
 
-    def node(self, selector):
-        root = self.connection.call("DOM.getDocument")["root"]["nodeId"]
-        return self.connection.call("DOM.querySelector", {"nodeId": root, "selector": selector})["nodeId"]
+def close_browser(command):
+    try:
+        command.connection.call("Browser.close")
+    except Exception:
+        # Closing Chrome can disconnect the driver before the reply arrives.
+        pass
 
-    def fill(self, selector, value):
-        node = eventually(lambda: self.node(selector))
-        self.connection.call("DOM.focus", {"nodeId": node})
-        self.connection.call("Input.insertText", {"text": value})
 
-    def click(self):
-        node = eventually(lambda: self.node("button"))
-        quad = self.connection.call("DOM.getBoxModel", {"nodeId": node})["model"]["content"]
-        position = {"x": (quad[0] + quad[4]) / 2, "y": (quad[1] + quad[5]) / 2, "button": "left", "clickCount": 1}
-        for kind in ("mousePressed", "mouseReleased"):
-            self.connection.call("Input.dispatchMouseEvent", {"type": kind, **position})
+def verify_login_scenario(site, scenario):
+    site.counts = dict.fromkeys(site.counts, 0)
+    command = Command(site)
+    try:
+        eventually(command.ready)
+        command.connect()
+        eventually(lambda: command.node('input[name="username"]'))
 
-    def wait(self):
-        def done(): self.pump(); return self.status is not None
-        eventually(done)
-        return self.status
+        if scenario == "success":
+            complete_login(command, site)
+            os.write(command.terminal, b"\n")
+        elif scenario == "unfinished":
+            os.write(command.terminal, b"\n")
+        elif scenario == "cancelled":
+            os.write(command.terminal, b"\x03")
+        elif scenario == "terminated":
+            os.kill(command.pid, signal.SIGTERM)
+        else:
+            close_browser(command)
 
-    def cleanup_verified(self):
-        assert not self.profile.exists(), "Temporary browser profile remains"
-        opener = build_opener(ProxyHandler({}))
-        try: opener.open(f"http://127.0.0.1:{self.port}/json/list", timeout=1)
-        except OSError: return
-        raise AssertionError("Owned browser listener remains open")
+        exit_code = command.wait()
+        if scenario == "success":
+            assert exit_code == 0, command.output
+            assert '"sessionReady": true' in command.output
+            assert '"apiVerified": false' in command.output
+            assert site.counts == {"password": 1, "mfa": 1, "app": 1}
+        else:
+            assert exit_code != 0, command.output
 
-    def stop(self):
-        if self.status is None:
-            os.kill(self.pid, signal.SIGTERM)
-            self.wait()
-        if self.connection:
-            try: self.connection.close()
-            except Exception: pass
-        os.close(self.terminal)
+        assert_no_credentials(command.output, site)
+        command.cleanup_verified()
+        print(f"PASS installed Python CLI: {scenario}", flush=True)
+    finally:
+        command.stop()
+
+
+def capture_urls(site):
+    base_url = site.url.rsplit("/", 1)[0]
+    query_parameters = {
+        "operationName": "GetItem",
+        "query": "query GetItem($id: ID!) { item(id: $id) { id name } }",
+        "variables": '{"id":"7"}',
+    }
+    introspection_parameters = {
+        "operationName": "IntrospectionQuery",
+        "query": get_introspection_query(),
+    }
+    return [
+        base_url + "/items/7?search=" + site.secrets["password"],
+        base_url + "/openapi.json",
+        base_url + "/graphql?" + urlencode(query_parameters),
+        base_url + "/graphql?" + urlencode(introspection_parameters),
+    ]
+
+
+def verify_capture(site, root):
+    capture_output = root / "capture"
+    command = Command(site, discover_output=capture_output)
+    try:
+        eventually(command.ready)
+        command.connect()
+        complete_login(command, site)
+        os.write(command.terminal, b"\n")
+
+        def capturing():
+            command.pump()
+            return "Capture started." in command.output
+
+        eventually(capturing)
+        initial_read_count = site.api_reads
+        urls = capture_urls(site)
+        for expected_read_count, url in enumerate(urls, initial_read_count + 1):
+            command.connection.call("Page.navigate", {"url": url})
+            eventually(lambda: site.api_reads == expected_read_count)
+            # Let completed-response events reach the recorder before navigating.
+            time.sleep(NETWORK_CAPTURE_SETTLE_SECONDS)
+
+        os.write(command.terminal, b"\n")
+        assert command.wait() == 0, command.output
+        assert site.api_reads == initial_read_count + len(urls), (
+            "Discovery replayed an API request"
+        )
+        command.cleanup_verified()
+
+        report = json.loads((capture_output / "discovery.json").read_text())
+        assert report["source"] == "browser"
+        assert report["liveVerified"] is False
+        assert report["harEntries"] >= len(urls), report
+        assert list(capture_output.glob("openapi-downloaded-*.json"))
+        assert list(capture_output.glob("graphql-schema-downloaded-*.graphql"))
+        assert list(capture_output.glob("operations-*.graphql"))
+        for output_file in capture_output.iterdir():
+            assert_no_credentials(output_file.read_text(), site)
+
+        run_program(
+            [
+                shutil.which("website-client"),
+                "discover",
+                "--har",
+                str(capture_output / "capture.har"),
+                "--output",
+                str(root / "offline"),
+            ]
+        )
+        assert (root / "offline/discovery.json").exists()
+        print(
+            "PASS installed Python CLI: authenticated capture and offline HAR import",
+            flush=True,
+        )
+        return capture_output
+    finally:
+        command.stop()
+
+
+def generate_and_install_client(kind, capture_output, root):
+    """Build a wheel, then install only its declared runtime dependencies."""
+    project = root / (kind + "-client")
+    name = "fixture-" + kind
+    arguments = [
+        shutil.which("website-client"),
+        "generate",
+        "--name",
+        name,
+        "--output",
+        str(project),
+    ]
+    if kind == "openapi":
+        definition = next(capture_output.glob("openapi-downloaded-*.json"))
+        arguments += ["--openapi", str(definition)]
+    else:
+        schema = next(capture_output.glob("graphql-schema-downloaded-*.graphql"))
+        arguments += [
+            "--graphql-schema",
+            str(schema),
+            "--operations",
+            str(FIXTURES_DIRECTORY / "operations.graphql"),
+        ]
+    run_program(arguments)
+    run_program(
+        [
+            "poetry",
+            "--directory",
+            str(project),
+            "build",
+            "--format",
+            "wheel",
+        ]
+    )
+
+    environment = root / (kind + "-installed")
+    run_program([sys.executable, "-m", "venv", str(environment)])
+    runtime_python = environment / "bin/python"
+    wheel = next((project / "dist").glob("*.whl"))
+    run_program(
+        [
+            str(runtime_python),
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links",
+            "/opt/client-wheels",
+            str(wheel),
+        ]
+    )
+
+    # A generated client must run without the generator or either source tool.
+    runtime_check = (
+        "import importlib.util\n"
+        "for package in (\n"
+        "    'website_client', 'ariadne_codegen', 'openapi_python_client'\n"
+        "):\n"
+        "    assert importlib.util.find_spec(package) is None, package\n"
+    )
+    run_program([str(runtime_python), "-c", runtime_check])
+
+    executable = environment / "bin" / name
+    help_result = run_program([str(executable), "--help"])
+    read_operation = "get_item" if kind == "openapi" else "GetItem"
+    assert read_operation in help_result.stdout
+    print(
+        f"PASS installed generated Python client: {kind} wheel and endpoint help",
+        flush=True,
+    )
+    return GeneratedClient(kind=kind, executable=executable)
+
+
+def operation_inputs(kind, scenario):
+    if scenario == "write":
+        if kind == "openapi":
+            return "create_item", {"body": {"name": "Created"}}
+        return "CreateItem", {"name": "Created"}
+
+    if kind == "openapi":
+        # Item 7 is the normal fixture; item 8 intentionally returns a redirect.
+        item_id = 8 if scenario == "redirect" else 7
+        return "get_item", {"item_id": item_id}
+    return "GetItem", {"id": "7"}
+
+
+def generated_arguments(client, site, scenario, root):
+    operation, inputs = operation_inputs(client.kind, scenario)
+    input_path = root / f"{client.kind}-{scenario}.json"
+    input_path.write_text(json.dumps(inputs))
+    base_url = site.url.rsplit("/", 1)[0]
+    endpoint_url = base_url if client.kind == "openapi" else base_url + "/graphql"
+
+    arguments = [
+        operation,
+        "--url",
+        endpoint_url,
+        "--input",
+        str(input_path),
+        "--login",
+        "--login-url",
+        site.url,
+        "--browser",
+        "chromium",
+        "--browser-path",
+        "/work/docker/test-chromium.sh",
+    ]
+    if scenario == "write":
+        # This must fail before login, even with valid inputs and browser flags.
+        denied = run_program([str(client.executable), *arguments], check=False)
+        assert denied.returncode != 0
+        assert "requires --confirm-write" in denied.stderr
+        arguments += ["--confirm-write", operation]
+    return arguments
+
+
+def assert_generated_request_counts(site, scenario, reads_before, writes_before):
+    expected_reads = 1 if scenario in {"read", "redirect"} else 0
+    expected_writes = 1 if scenario == "write" else 0
+    assert site.api_reads == reads_before + expected_reads
+    assert site.api_writes == writes_before + expected_writes
+    assert site.redirect_hits == 0
+
+
+def verify_generated_scenario(client, site, scenario, root):
+    arguments = generated_arguments(client, site, scenario, root)
+    reads_before = site.api_reads
+    writes_before = site.api_writes
+    command = Command(site, executable=str(client.executable), args=arguments)
+    try:
+        eventually(command.ready)
+        command.connect()
+        if scenario == "cancel":
+            os.write(command.terminal, b"\x03")
+        elif scenario == "closed":
+            close_browser(command)
+        else:
+            complete_login(command, site)
+            os.write(command.terminal, b"\n")
+
+        exit_code = command.wait()
+        if scenario in {"read", "write"}:
+            assert exit_code == 0, command.output
+            assert '"id":' in command.output
+        else:
+            assert exit_code != 0, command.output
+
+        assert_generated_request_counts(
+            site,
+            scenario,
+            reads_before,
+            writes_before,
+        )
+        assert_no_credentials(command.output, site)
+        command.cleanup_verified()
+        print(
+            f"PASS generated browser login: {client.kind} {scenario}",
+            flush=True,
+        )
+    finally:
+        command.stop()
+
+
+def assert_container_environment():
+    assert sys.platform == "linux"
+    assert os.getuid() != 0
+    assert shutil.which("node") is None
+    assert shutil.which("npm") is None
+    assert not Path("/var/run/docker.sock").exists()
+    assert not str(Path(website_client.__file__)).startswith("/work/src")
 
 
 def main():
-    assert sys.platform == "linux" and os.getuid() != 0
-    assert shutil.which("node") is None and shutil.which("npm") is None
-    assert not Path("/var/run/docker.sock").exists()
-    assert not str(Path(website_client.__file__)).startswith("/work/src")
+    assert_container_environment()
     with tempfile.TemporaryDirectory(prefix="website-client-fixture-") as directory:
-        site = Site(Path(directory))
+        root = Path(directory)
+        site = Site(root)
         try:
-            for scenario in ("success", "unfinished", "cancelled", "closed", "terminated"):
-                site.counts = dict.fromkeys(site.counts, 0)
-                command = Command(site)
-                try:
-                    eventually(command.ready)
-                    command.connect()
-                    eventually(lambda: command.node('input[name="username"]'))
-                    if scenario == "success":
-                        command.fill('input[name="username"]', site.secrets["username"])
-                        command.fill('input[name="password"]', site.secrets["password"])
-                        command.click()
-                        command.fill('input[name="code"]', site.secrets["code"])
-                        command.click()
-                        eventually(lambda: site.counts["app"] == 1)
-                        os.write(command.terminal, b"\n")
-                    elif scenario == "unfinished": os.write(command.terminal, b"\n")
-                    elif scenario == "cancelled": os.write(command.terminal, b"\x03")
-                    elif scenario == "terminated": os.kill(command.pid, signal.SIGTERM)
-                    else:
-                        try: command.connection.call("Browser.close")
-                        except Exception: pass
-                    code = command.wait()
-                    if scenario == "success":
-                        assert code == 0, command.output
-                        assert '"sessionReady": true' in command.output
-                        assert '"apiVerified": false' in command.output
-                        assert site.counts == {"password": 1, "mfa": 1, "app": 1}
-                    else: assert code != 0, command.output
-                    for secret in site.secrets.values(): assert secret not in command.output
-                    command.cleanup_verified()
-                    print(f"PASS installed Python CLI: {scenario}", flush=True)
-                finally: command.stop()
+            for scenario in LOGIN_SCENARIOS:
+                verify_login_scenario(site, scenario)
 
-            capture_output = Path(directory) / "capture"
-            command = Command(site, discover_output=capture_output)
-            try:
-                eventually(command.ready)
-                command.connect()
-                command.fill('input[name="username"]', site.secrets["username"])
-                command.fill('input[name="password"]', site.secrets["password"])
-                command.click()
-                command.fill('input[name="code"]', site.secrets["code"])
-                command.click()
-                eventually(lambda: command.node("h1"))
-                os.write(command.terminal, b"\n")
-                def capturing(): command.pump(); return "Capture started." in command.output
-                eventually(capturing)
-                initial_reads = site.api_reads
-                base = site.url.rsplit("/", 1)[0]
-                urls = [base + "/items/7?search=" + site.secrets["password"], base + "/openapi.json",
-                    base + "/graphql?" + urlencode({"operationName": "GetItem", "query": "query GetItem($id: ID!) { item(id: $id) { id name } }", "variables": '{"id":"7"}'}),
-                    base + "/graphql?" + urlencode({"operationName": "IntrospectionQuery", "query": get_introspection_query()})]
-                for expected, url in enumerate(urls, initial_reads + 1):
-                    command.connection.call("Page.navigate", {"url": url})
-                    eventually(lambda: site.api_reads == expected)
-                    time.sleep(0.2)
-                os.write(command.terminal, b"\n")
-                assert command.wait() == 0, command.output
-                assert site.api_reads == initial_reads + len(urls), "Discovery replayed an API request"
-                command.cleanup_verified()
-                report = json.loads((capture_output / "discovery.json").read_text())
-                assert report["source"] == "browser" and report["liveVerified"] is False
-                assert report["harEntries"] >= 4, report
-                assert list(capture_output.glob("openapi-downloaded-*.json"))
-                assert list(capture_output.glob("graphql-schema-downloaded-*.graphql"))
-                assert list(capture_output.glob("operations-*.graphql"))
-                for path in capture_output.iterdir():
-                    for secret in site.secrets.values(): assert secret not in path.read_text(), path.name
-                offline = Path(directory) / "offline"
-                subprocess.run([shutil.which("website-client"), "discover", "--har", str(capture_output / "capture.har"), "--output", str(offline)], check=True, capture_output=True)
-                assert (offline / "discovery.json").exists()
-                print("PASS installed Python CLI: authenticated capture and offline HAR import", flush=True)
-
-                for kind in ("openapi", "graphql"):
-                    output = Path(directory) / (kind + "-client")
-                    name = "fixture-" + kind
-                    args = [shutil.which("website-client"), "generate", "--name", name, "--output", str(output)]
-                    if kind == "openapi": args += ["--openapi", str(next(capture_output.glob("openapi-downloaded-*.json")))]
-                    else: args += ["--graphql-schema", str(next(capture_output.glob("graphql-schema-downloaded-*.graphql"))), "--operations", str(next(capture_output.glob("operations-*.graphql")))]
-                    subprocess.run(args, check=True, capture_output=True)
-                    subprocess.run(["poetry", "--directory", str(output), "build", "--format", "wheel"], check=True, capture_output=True)
-                    installed = Path(directory) / (kind + "-installed")
-                    wheel = next((output / "dist").glob("*.whl"))
-                    subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--target", str(installed), str(wheel)], check=True, capture_output=True)
-                    executable = installed / "bin" / name
-                    help_result = subprocess.run([str(executable), "--help"], env={**os.environ, "PYTHONPATH": str(installed)}, check=True, capture_output=True, text=True)
-                    assert ("get_item" if kind == "openapi" else "GetItem") in help_result.stdout
-                    print(f"PASS installed generated Python client: {kind} wheel and endpoint help", flush=True)
-            finally: command.stop()
-        finally: site.close()
+            capture_output = verify_capture(site, root)
+            for kind, scenarios in CLIENT_SCENARIOS.items():
+                client = generate_and_install_client(kind, capture_output, root)
+                for scenario in scenarios:
+                    verify_generated_scenario(client, site, scenario, root)
+        finally:
+            site.close()
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()
