@@ -1,0 +1,46 @@
+"""Python command for website client generation."""
+
+import argparse
+import json
+import sys
+
+from .browser import BrowserSession, BrowserError, origin
+
+
+def main(args=None):
+    parser = argparse.ArgumentParser(prog="website-client", description="Create standalone Python website clients. Browser login is the first implemented step.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    login = commands.add_parser("login", help="Open a browser and sign in manually.",
+        description="Open a temporary browser, sign in and complete verification codes there, "
+        "then press Enter in this terminal. The browser closes afterward. This does not save "
+        "a login or generate a client. Ctrl+C cancels.")
+    login.add_argument("--url", required=True, help="HTTPS address of the website to sign into.")
+    login.add_argument("--browser", choices=["chrome", "chromium"], default="chrome")
+    login.add_argument("--browser-path", help="Absolute path to an installed browser executable, if needed.")
+    options = parser.parse_args(args)
+    try:
+        origin(options.url)
+        if not sys.stdin.isatty():
+            raise BrowserError("Login requires an interactive terminal, without piped input.")
+        print("Opening a temporary browser. Enter credentials only into the website.", file=sys.stderr, flush=True)
+        with BrowserSession(options.url, options.browser, options.browser_path) as session:
+            result = session.confirm_login()
+        print(json.dumps({**result, "sessionClosed": True, "clientGenerated": False}))
+        return 0
+    except KeyboardInterrupt:
+        print("Login cancelled. The temporary browser was closed.", file=sys.stderr)
+        return 130
+    except BrowserError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except Exception:
+        print("Login failed. Start a fresh command to retry.", file=sys.stderr)
+        return 1
+
+
+def entrypoint():
+    sys.exit(main())
+
+
+if __name__ == "__main__":
+    entrypoint()
