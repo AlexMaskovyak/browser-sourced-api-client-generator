@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=2.2,<3.0"]
+build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "browser-sourced-api-client-generator"
@@ -11,14 +11,15 @@ readme = "README.md"
 license = "MIT"
 dependencies = ["websocket-client>=1.9,<2"]
 
-[project.optional-dependencies]
-test = ["pytest>=8,<10", "build>=1,<2", "setuptools>=77"]
+[tool.poetry]
+requires-poetry = ">=2.2,<3.0"
+packages = [{ include = "website_client", from = "src" }]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
 
 [project.scripts]
 website-client = "website_client.cli:entrypoint"
-
-[tool.setuptools.packages.find]
-where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

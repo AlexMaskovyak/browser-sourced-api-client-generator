@@ -2,16 +2,22 @@
 
 ## Poetry packaging
 
-- [ ] Replace setuptools metadata and the requirements lock with Poetry metadata,
+- [x] Replace setuptools metadata and the requirements lock with Poetry metadata,
   a development dependency group, `poetry.lock` and an in-project environment.
-- [ ] Update installation, login, test and build instructions. Make Docker install
+- [x] Update installation, login, test and build instructions. Make Docker install
   from the Poetry lock and test the wheel built by Poetry.
-- [ ] Run Poetry validation, unit tests, wheel inspection and Docker login scenarios.
+- [x] Run Poetry validation, unit tests, wheel inspection and Docker login scenarios.
   Commit the change and open a separate PR against merged main.
 
 Poetry owns dependency resolution and package builds. This change does not alter
 the browser session or endpoint-generation milestones. Completion requires the
 installed Poetry-built command to pass the existing real-browser tests.
+
+Verified with Poetry 2.5.1 on October 31, 2026: strict metadata/lock validation,
+26 Python unit tests, source and wheel builds, installed command help, and wheel
+inspection passed. The Docker run passed all 26 tests and five browser-login
+scenarios using the Poetry-built wheel. Runtime dependency remains websocket-client;
+pytest belongs only to the development group. No browser implementation changed.
 
 1. [x] Browser login: install the Python command, open a temporary Chrome or Chromium
    window, let the human sign in and finish verification codes, then accept terminal

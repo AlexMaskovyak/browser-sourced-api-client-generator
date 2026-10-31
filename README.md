@@ -6,19 +6,19 @@ and client generation are not implemented yet.
 
 ## Install and open a website
 
-You need Python 3.11 or newer and installed Google Chrome or Chromium. From this
-repository, install the Python command:
+You need Python 3.11 or newer, Poetry 2.2 or newer, and installed Google Chrome or
+Chromium. If Poetry is missing, install it using the [official instructions](https://python-poetry.org/docs/#installation).
+From this repository, install the locked dependencies and Python command:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/website-client --help
+poetry sync --with dev
+poetry run website-client --help
 ```
 
 Open Gusto, for example:
 
 ```sh
-.venv/bin/website-client login --url https://app.gusto.com
+poetry run website-client login --url https://app.gusto.com
 ```
 
 1. A separate temporary Chrome window opens.
@@ -49,13 +49,23 @@ temporary browser files.
 ## Tests
 
 ```sh
-.venv/bin/python -m pip install -e '.[test]'
-.venv/bin/python -m pytest -q
+poetry check
+poetry run pytest -q
+poetry build
 sh scripts/test-docker.sh
 ```
 
 Docker is needed only for the last command. It builds and installs the Python
-wheel and tests a real terminal and headed Chromium against a local HTTPS login
+wheel using Poetry and tests a real terminal and headed Chromium against a local HTTPS login
 and verification-code fixture. The container has no host mounts or external
 network during execution. It has no Node installation or production credentials.
 These tests do not establish production service compatibility.
+
+Poetry creates an ignored `.venv/` inside this repository. `poetry sync` reads
+the committed `poetry.lock`; it installs the locked dependencies and the command,
+and removes packages that are no longer in the selected dependency groups, without
+opening a browser. `poetry run` uses that environment without requiring activation.
+`poetry build` creates the wheel and source archive in `dist/`. If Poetry reports
+that the lock is stale after an intentional dependency edit, run `poetry lock`
+and review both `pyproject.toml` and `poetry.lock` before committing. To change
+dependencies, use `poetry add PACKAGE` or `poetry add --group dev PACKAGE`.

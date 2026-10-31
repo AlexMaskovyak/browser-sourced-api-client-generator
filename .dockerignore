@@ -1,6 +1,7 @@
 **
 !pyproject.toml
-!requirements-test.lock
+!poetry.lock
+!poetry.toml
 !README.md
 !LICENSE
 !src/
