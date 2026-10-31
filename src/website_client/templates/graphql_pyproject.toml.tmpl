@@ -1,0 +1,16 @@
+[build-system]
+requires = ["poetry-core>=2.2,<3"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "$name"
+version = "0.1.0"
+description = "Generated GraphQL service client"
+requires-python = ">=3.11,<4"
+dependencies = ["httpx>=0.28,<0.29", "pydantic>=2.10,<3", "websocket-client>=1.9,<2"]
+
+[project.scripts]
+$name = "$package._cli:entrypoint"
+
+[tool.poetry]
+packages = [{ include = "$package" }]
