@@ -43,6 +43,23 @@ class Connection:
             raise BrowserError("The temporary browser returned an invalid control connection.")
         self._socket = websocket.create_connection(url, timeout=3, suppress_origin=True, http_no_proxy=["127.0.0.1"], redirect_limit=0)
         self._next_id = 0
+        self.on_event = None
+
+    def _event(self, response):
+        if "method" in response and self.on_event:
+            self.on_event(response["method"], response.get("params", {}))
+
+    def pump(self, timeout=0.1, max_messages=100):
+        deadline = time.monotonic() + timeout
+        for _ in range(max_messages):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: break
+            self._socket.settimeout(remaining)
+            try: raw = self._socket.recv()
+            except websocket.WebSocketTimeoutException: break
+            if not raw or len(raw) > 4 * 1024 * 1024:
+                raise BrowserError("The browser control response was unavailable or too large.")
+            self._event(json.loads(raw))
 
     def __repr__(self):
         return "<BrowserConnection private>"
@@ -52,11 +69,13 @@ class Connection:
         self._socket.send(json.dumps({"id": self._next_id, "method": method, "params": params or {}}))
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
+            self._socket.settimeout(min(3, max(0.01, deadline - time.monotonic())))
             raw = self._socket.recv()
             if not raw or len(raw) > 4 * 1024 * 1024:
                 raise BrowserError("The browser control response was unavailable or too large.")
             response = json.loads(raw)
             if response.get("id") != self._next_id:
+                self._event(response)
                 continue
             if "error" in response:
                 raise BrowserError("The browser could not complete a control request.")
@@ -169,18 +188,18 @@ class BrowserSession:
                 continue
         return False
 
-    def confirm_login(self, input_stream=None, output_stream=None):
+    def wait_for_enter(self, prompt, input_stream=None, output_stream=None, poll=None):
         incoming = sys.stdin if input_stream is None else input_stream
         outgoing = sys.stderr if output_stream is None else output_stream
         if not incoming.isatty():
             raise BrowserError("Login requires an interactive terminal, without piped input.")
-        print("Log in in the browser, including verification codes. Return to the requested website, "
-              "then press Enter here to finish. Ctrl+C cancels.", file=outgoing, flush=True)
+        print(prompt, file=outgoing, flush=True)
         try:
             if sys.platform == "win32":
                 import msvcrt
                 while True:
                     self.current_url()
+                    if poll: poll()
                     if msvcrt.kbhit():
                         key = msvcrt.getwch()
                         if key == "\x03": raise KeyboardInterrupt()
@@ -191,10 +210,20 @@ class BrowserSession:
                     terminal.register(incoming, selectors.EVENT_READ)
                     while True:
                         self.current_url()
+                        if poll: poll()
                         if terminal.select(timeout=0.1):
                             if not incoming.readline():
                                 raise BrowserError("Terminal input closed. Start a fresh command to retry.")
                             break
+        except (BrowserError, KeyboardInterrupt):
+            raise
+        except Exception:
+            raise BrowserError("The browser session ended unexpectedly. Start a fresh command to retry.") from None
+
+    def confirm_login(self, input_stream=None, output_stream=None, prompt=None):
+        self.wait_for_enter(prompt or "Log in in the browser, including verification codes. Return to the requested website, "
+                            "then press Enter here to finish. Ctrl+C cancels.", input_stream, output_stream)
+        try:
             current = self.current_url()
             path = urlsplit(current).path.rstrip("/").split("/")[-1].lower()
             if (origin(current) != self._origin or path in {"login", "signin", "sign-in", "sign_in", "mfa"}
