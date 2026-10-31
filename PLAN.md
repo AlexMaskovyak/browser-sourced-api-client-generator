@@ -1,5 +1,16 @@
 # Delivery plan
 
+## Generated client browser login
+
+1. [ ] Include standalone Python browser-session support in generated packages.
+   Add operation-level login options and keep help local and writes explicitly confirmed.
+2. [ ] Pass requests from upstream typed methods through the authenticated native
+   browser connection. Keep credentials in memory, restrict the API origin, block
+   redirects, prevent response scripts from running and perform no automatic retry.
+3. [ ] Generate and install both client formats, then test manual login, verification
+   codes, authenticated reads, confirmed writes, cancellation and cleanup in Docker.
+   Document the complete install-to-endpoint procedure and open a separate PR.
+
 1. [x] Capture browser traffic after login and import existing HAR files through
    the same bounded analysis. Export a sanitized HAR and endpoint evidence.
 2. [x] Validate observed OpenAPI documents and GraphQL schemas. Keep inferred
@@ -21,5 +32,5 @@ the container scenarios to pass. Container tests exercise a local HTTPS service
 and establish installation and behavior within that environment. Compatibility
 with another service requires its own authenticated verification.
 
-Service-specific workflows and authentication helpers belong in separate client
-extensions. See ARCHITECTURE.md for component ownership and recovery behavior.
+Service-specific workflows belong in separate client extensions. Generated packages
+own their browser-login support. See ARCHITECTURE.md for ownership and recovery.
