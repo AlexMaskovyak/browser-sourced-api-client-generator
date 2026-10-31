@@ -1,6 +1,6 @@
 # Delivery plan
 
-1. Browser login: install the Python command, open a temporary Chrome or Chromium
+1. [x] Browser login: install the Python command, open a temporary Chrome or Chromium
    window, let the human sign in and finish verification codes, then accept terminal
    confirmation. Test login, unfinished login, browser closure, cancellation and
    termination in a clean Docker container. No Node or JavaScript implementation.
@@ -16,6 +16,14 @@
    orchestration. Verify authenticated reads before claiming live compatibility.
 
 Each milestone requires a focused commit and relevant tests. The first milestone
-is current; the others are not implemented. Full relevant tests must pass before
+is implemented; the others are not implemented. Full relevant tests must pass before
 push or handoff. The existing browser-session-rest-client repository is independent
 and is not changed by this work.
+
+Verification on October 31, 2026: the installed Python wheel passed 26 unit tests
+and five headed-Chromium scenarios in a non-root Linux/arm64 Docker container:
+HTTPS login with a verification code, unfinished login, Ctrl+C, browser closure
+and SIGTERM. The container has no Node or npm executable, host mounts, production
+credentials or external network during execution. The test-only browser wrapper
+disables the browser sandbox inside the disposable container; production launch
+does not. No project JavaScript or JavaScript driver is used.
