@@ -14,6 +14,7 @@ COPY src ./src
 COPY tests ./tests
 COPY docker ./docker
 RUN poetry build --format wheel && python -m pip install --no-deps dist/*.whl
+RUN python docker/cache_client_dependencies.py
 RUN useradd --create-home --uid 1000 tester
 USER tester
 ENV HOME=/home/tester

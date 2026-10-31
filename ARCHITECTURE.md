@@ -58,3 +58,22 @@ Standalone Python source generation delegates to openapi-python-client for OpenA
 and Ariadne Codegen for GraphQL schemas plus operation documents. Service workflows
 remain outside these generated layers. Inputs and output directories are bounded
 and validated before generation; no credentials are embedded in generated clients.
+
+## Generated client authentication
+
+Generated packages include their own Python browser support and websocket-client
+dependency. An operation's --login option opens a fresh browser, waits for manual
+sign-in and verification codes, and then calls the upstream typed method. A custom
+login URL handles services whose application and API use different origins.
+
+An HTTPX transport sends that method's exact request through a separate background
+target in the same native browser. Request interception supplies its method and
+body. Response interception reads the bytes and stops navigation before response
+scripts run. Redirects are returned without following them. Only the chosen API
+origin and operation method are permitted, and each transport sends one request.
+
+Browser cookies stay in the browser. Observed authorization and CSRF headers are
+kept transiently for the exact API origin. Additional session-header names can be
+explicitly selected; their values are read from that session, not copied by the
+user. No authentication state enters generated source, HAR files or command output.
+Failure and cancellation close owned targets, browser processes and profiles.

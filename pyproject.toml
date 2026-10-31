@@ -9,7 +9,7 @@ description = "Generate standalone Python clients from authenticated websites"
 requires-python = ">=3.11,<4.0"
 readme = "README.md"
 license = "MIT"
-dependencies = ["websocket-client>=1.9,<2", "graphql-core (>=3.2,<3.4)", "openapi-spec-validator (>=0.7,<0.9)", "pyyaml (>=6,<7)", "openapi-python-client (>=0.27,<0.40)", "ariadne-codegen (>=0.15,<0.30)"]
+dependencies = ["websocket-client>=1.9,<2", "graphql-core (>=3.2,<3.4)", "openapi-spec-validator (>=0.7,<0.9)", "pyyaml (>=6,<7)", "openapi-python-client (>=0.27,<0.40)", "ariadne-codegen (>=0.15,<0.30)", "httpx (>=0.28,<0.29)"]
 
 [tool.poetry]
 requires-poetry = ">=2.2,<3.0"

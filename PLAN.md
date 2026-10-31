@@ -1,5 +1,36 @@
 # Delivery plan
 
+## Code readability
+
+- [x] Separate generation by backend and move generated package text into templates.
+  Give the CLI named steps for parsing, validation, model conversion, execution
+  and output, with explicit limits for JSON files and runtime headers.
+- [x] Verify the refactor with generated-client tests and the full container flow.
+
+- [x] Name transport limits and time units, deriving the base64 limit from the
+  decoded response limit. Separate request, response and cleanup responsibilities.
+- [x] Separate the HTTPS fixture, terminal driver and container scenarios. Expand
+  compact statements and explain lifecycle and isolation decisions in comments.
+- [x] Run focused transport tests and the complete installed-client container flow,
+  then push the review changes to the existing PR.
+
+## Generated client browser login
+
+1. [x] Include standalone Python browser-session support in generated packages.
+   Add operation-level login options and keep help local and writes explicitly confirmed.
+2. [x] Pass requests from upstream typed methods through the authenticated native
+   browser connection. Keep credentials in memory, restrict the API origin, block
+   redirects, prevent response scripts from running and perform no automatic retry.
+3. [x] Generate and install both client formats, then test manual login, verification
+   codes, authenticated reads, confirmed writes, cancellation and cleanup in Docker.
+   Document the complete install-to-endpoint procedure and open a separate PR.
+
+Verification covers 65 Python tests and 15 container scenarios. Generated clients
+are installed in separate fresh environments with only their declared runtime
+dependencies. Both formats complete browser login, verification codes, authenticated
+reads and confirmed writes. Cancellation, browser closure and redirect rejection
+preserve request counts and remove owned browser profiles.
+
 1. [x] Capture browser traffic after login and import existing HAR files through
    the same bounded analysis. Export a sanitized HAR and endpoint evidence.
 2. [x] Validate observed OpenAPI documents and GraphQL schemas. Keep inferred
@@ -21,5 +52,5 @@ the container scenarios to pass. Container tests exercise a local HTTPS service
 and establish installation and behavior within that environment. Compatibility
 with another service requires its own authenticated verification.
 
-Service-specific workflows and authentication helpers belong in separate client
-extensions. See ARCHITECTURE.md for component ownership and recovery behavior.
+Service-specific workflows belong in separate client extensions. Generated packages
+own their browser-login support. See ARCHITECTURE.md for ownership and recovery.
