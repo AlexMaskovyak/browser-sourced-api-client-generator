@@ -75,6 +75,7 @@ def test_real_upstream_generators_emit_standalone_packages(generated):
         assert (project / "pyproject.toml").exists()
         assert not list(project.rglob("*.js"))
         assert all("import website_client" not in path.read_text() for path in project.rglob("*.py"))
+        assert "websocket-client" in (project / "pyproject.toml").read_text()
     assert (graphql / "sample_graphql/client.py").exists()
     assert (rest / "sample_rest/api/default/get_item.py").exists()
 
@@ -85,6 +86,7 @@ def test_generated_help_has_actual_inputs_and_write_labels(generated):
         result = command(project, package, [operation, "--help"])
         assert result.returncode == 0, result.stderr
         assert field in result.stdout and "required" in result.stdout and "READS remote data" in result.stdout
+        assert "--login" in result.stdout and "--login-url" in result.stdout
     result = command(graphql, "sample_graphql", ["CreateItem", "--help"])
     assert "WRITES remote data" in result.stdout
 
@@ -136,3 +138,16 @@ def test_generation_rejects_existing_output_and_invalid_graphql(tmp_path):
     with pytest.raises(BrowserError, match="valid against the schema"):
         generate(tmp_path / "invalid", schema=FIXTURES / "schema.graphql", operations=operations)
     assert not (tmp_path / "invalid").exists()
+
+
+def test_generated_login_rejects_pipes_and_unconfirmed_writes_before_launch(generated, service, tmp_path):
+    url, counts = service
+    inputs = tmp_path / "input.json"
+    inputs.write_text('{"item_id": 7}')
+    result = command(generated[0], "sample_rest", ["get_item", "--url", url, "--input", str(inputs), "--login"])
+    assert result.returncode != 0 and "interactive terminal" in result.stderr
+    result = command(generated[0], "sample_rest", ["create_item", "--url", url, "--login"])
+    assert result.returncode != 0 and "requires --confirm-write" in result.stderr
+    result = command(generated[0], "sample_rest", ["get_item", "--url", url, "--browser", "chrome"])
+    assert result.returncode != 0 and "Browser options require --login" in result.stderr
+    assert counts == {"reads": 0, "writes": 0}

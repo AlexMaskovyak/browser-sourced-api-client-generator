@@ -2,14 +2,20 @@
 
 ## Generated client browser login
 
-1. [ ] Include standalone Python browser-session support in generated packages.
+1. [x] Include standalone Python browser-session support in generated packages.
    Add operation-level login options and keep help local and writes explicitly confirmed.
-2. [ ] Pass requests from upstream typed methods through the authenticated native
+2. [x] Pass requests from upstream typed methods through the authenticated native
    browser connection. Keep credentials in memory, restrict the API origin, block
    redirects, prevent response scripts from running and perform no automatic retry.
-3. [ ] Generate and install both client formats, then test manual login, verification
+3. [x] Generate and install both client formats, then test manual login, verification
    codes, authenticated reads, confirmed writes, cancellation and cleanup in Docker.
    Document the complete install-to-endpoint procedure and open a separate PR.
+
+Verification covers 60 Python tests and 15 container scenarios. Generated clients
+are installed in separate fresh environments with only their declared runtime
+dependencies. Both formats complete browser login, verification codes, authenticated
+reads and confirmed writes. Cancellation, browser closure and redirect rejection
+preserve request counts and remove owned browser profiles.
 
 1. [x] Capture browser traffic after login and import existing HAR files through
    the same bounded analysis. Export a sanitized HAR and endpoint evidence.

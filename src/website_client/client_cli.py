@@ -159,6 +159,7 @@ def entrypoint():
         else: print(text, end="")
     except KeyboardInterrupt:
         print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
+        if sent: print("The request may have succeeded; check the service before retrying.", file=sys.stderr)
         raise SystemExit(130)
     except Exception as error:
         if isinstance(error, ValueError) and not sent:

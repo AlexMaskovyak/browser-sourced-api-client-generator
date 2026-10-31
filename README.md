@@ -171,13 +171,53 @@ Reads send remote requests. Writes require `--confirm-write` followed by the exa
 operation name. POST HTTP operations are conservatively treated as writes. No
 request is retried automatically, and redirects are not followed.
 
-Authentication is provided through `--headers-stdin` as a JSON object of temporary
-header values. No browser-login or credential-capture helper is bundled into the
-generated client yet. Do not put credentials in command arguments or source files.
-Use `--output NEW_FILE` to save private JSON results. If a request fails, reconcile
-the service before retrying because a write may already have succeeded. Complex
-input types, custom GraphQL scalars and multi-step service workflows may require
-the generated Python API or service-specific extensions.
+## Log into a generated client
+
+The generated package includes its own Python browser support. It needs installed
+Chrome or Chromium and an interactive terminal. From the generated package's
+directory, run `poetry install`, then `poetry run example-client --help`.
+
+Choose an operation listed by that help and inspect it with
+`poetry run example-client OPERATION --help`. Replace `OPERATION` with its actual
+name and create `input.json` with the required fields shown there. In the example
+below, also replace both URLs with the service's API and application addresses:
+
+```sh
+poetry run example-client OPERATION --url https://api.example.com --input input.json --login --login-url https://app.example.com
+```
+
+1. A fresh Chrome window opens at the application address. Sign in and complete
+   verification codes there. Enter credentials only into the website.
+2. Open the application page you normally use, then return to the terminal and
+   press Enter. The generated typed method sends its request through that native
+   browser session and prints the parsed result.
+3. The temporary browser and profile close after the operation. Ctrl+C cancels.
+   Each command starts a fresh session; authentication state is not saved.
+
+`--url` is the OpenAPI base URL or exact GraphQL endpoint. `--login-url` defaults
+to `--url`; supply it when the sign-in website differs from the API. Select
+Chromium with `--browser chromium`, or supply an installed executable with
+`--browser-path`. No generator installation is needed by the generated package.
+
+Cookies stay in the native browser. Authorization and common CSRF headers observed
+for the selected API origin are held in memory. If the application uses another
+session header, add `--session-header HEADER_NAME` and visit the relevant page
+before pressing Enter; the value is observed from that session. No token copying
+or browser debugging setup is required.
+
+Inputs and write confirmation are checked before opening the browser. For a write,
+add `--confirm-write OPERATION`, using the same operation name. Each session permits
+one request to the selected API origin and method. Redirects are blocked, responses
+are read without running their scripts, and no automatic retry occurs. Browser
+requests and responses are limited to 8 MiB. Compatibility with a specific service
+still requires authenticated verification.
+
+For environments that already supply credentials, `--headers-stdin` accepts a JSON
+object of temporary headers. Use it as an alternative to `--login`. Do not put
+credentials in command arguments or source files. Use `--output NEW_FILE` for private
+JSON results. If a request fails, check the service before retrying because a write
+may already have succeeded. Complex inputs, custom scalars and multi-step workflows
+may require the generated Python API or service-specific extensions.
 
 ## Dependency management
 
