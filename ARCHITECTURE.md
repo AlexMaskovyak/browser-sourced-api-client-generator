@@ -36,3 +36,25 @@ Unit tests cover parsing and failure handling. Docker tests install the Python
 wheel, use a real terminal and headed Chromium, and complete a local HTTPS login
 with a verification code. They contain no production data and prove neither
 production compatibility nor endpoint completeness.
+
+## Discovery sources and definitions
+
+Browser capture starts after login confirmation. Python receives native network
+events from the owned tab, including requests initiated by that page to API origins.
+An existing HAR is a second, offline source feeding the same analysis. Neither
+source replays captured requests. Request headers, cookies and raw payload values
+are removed before durable output. Captured GraphQL documents exclude literal
+values and comments; variables are not exported. Bounds and omissions are reported.
+
+The outputs distinguish a sanitized HAR, endpoint evidence, GraphQL operation
+documents, inferred OpenAPI, and actual downloaded schemas. Inferred OpenAPI
+describes only observed routes, methods and sample shapes. It is not a complete
+service specification. GraphQL operation documents are not a full GraphQL schema.
+Actual introspection data is validated and converted to schema definition language.
+Actual OpenAPI documents are validated separately. External references require
+bundling before generation rather than implicit network resolution.
+
+Standalone Python source generation delegates to openapi-python-client for OpenAPI
+and Ariadne Codegen for GraphQL schemas plus operation documents. Service workflows
+remain outside these generated layers. Inputs and output directories are bounded
+and validated before generation; no credentials are embedded in generated clients.
