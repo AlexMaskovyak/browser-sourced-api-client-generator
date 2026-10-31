@@ -1,6 +1,7 @@
 """Standalone command wrapper copied into generated packages."""
 
 import argparse
+from contextlib import ExitStack
 from datetime import date, datetime
 from enum import Enum
 import importlib
@@ -82,6 +83,11 @@ def entrypoint():
         command.add_argument("--url", required=True, help="Service base URL for OpenAPI; exact endpoint URL for GraphQL.")
         command.add_argument("--input", help="JSON object file containing the input fields shown below.")
         command.add_argument("--headers-stdin", action="store_true", help="Read temporary header values as a JSON object from standard input, up to 64 KiB.")
+        command.add_argument("--login", action="store_true", help="Open a temporary browser, sign in, then press Enter to run this endpoint through that session.")
+        command.add_argument("--login-url", help="Website address for sign-in when different from --url; requires --login.")
+        command.add_argument("--browser", choices=["chrome", "chromium"], help="Login browser (default chrome); requires --login.")
+        command.add_argument("--browser-path", help="Absolute path to the login browser executable; requires --login.")
+        command.add_argument("--session-header", action="append", default=[], help="Additional header name to observe during login; its value stays in memory. Requires --login.")
         command.add_argument("--confirm-write", help="For writes, repeat this exact operation name.")
         command.add_argument("--output", help="Save JSON to a new private file instead of stdout.")
     options = parser.parse_args()
@@ -90,6 +96,10 @@ def entrypoint():
     try:
         if operation["write"] and options.confirm_write != options.operation:
             raise ValueError("This write requires --confirm-write " + options.operation)
+        if options.login and options.headers_stdin: raise ValueError("Browser login cannot be combined with --headers-stdin")
+        if not options.login and (options.login_url or options.browser or options.browser_path or options.session_header):
+            raise ValueError("Browser options require --login")
+        if options.login and not sys.stdin.isatty(): raise ValueError("Browser login requires an interactive terminal")
         parsed = urlsplit(options.url)
         if (parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"})) or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             raise ValueError("Use HTTPS, or HTTP on a loopback address, without embedded credentials.")
@@ -115,16 +125,31 @@ def entrypoint():
             if signature.parameters[name].default is inspect.Parameter.empty and name not in kwargs:
                 raise ValueError("A required input is missing: " + name)
         module = importlib.import_module(__package__ + ".client")
-        if operation["kind"] == "openapi":
-            with module.Client(base_url=options.url, headers=headers, follow_redirects=False) as client:
+        with ExitStack() as stack:
+            transport = None
+            if options.login:
+                from .session_http import BrowserLoginTransport
+                transport = stack.enter_context(BrowserLoginTransport(options.url,
+                    operation.get("httpMethod", "POST"), options.login_url, options.browser or "chrome",
+                    options.browser_path, options.session_header))
+            if operation["kind"] == "openapi":
+                client = module.Client(base_url=options.url, headers=headers, follow_redirects=False)
+                if transport:
+                    import httpx
+                    client.set_httpx_client(httpx.Client(base_url=options.url, transport=transport, follow_redirects=False))
+                client = stack.enter_context(client)
                 sent = True
                 response = function(client=client, **kwargs)
                 if int(response.status_code) >= 300: raise RuntimeError("Endpoint returned a non-success status")
                 result = response.parsed
                 if result is None:
                     result = {"status": int(response.status_code)}
-        else:
-            with module.Client(url=options.url, headers=headers) as client:
+            else:
+                arguments = {"url": options.url, "headers": headers}
+                if transport:
+                    import httpx
+                    arguments["http_client"] = httpx.Client(transport=transport, follow_redirects=False)
+                client = stack.enter_context(module.Client(**arguments))
                 sent = True
                 result = getattr(client, operation["method"])(**kwargs)
         text = json.dumps(serialize(result)) + "\n"
@@ -132,13 +157,18 @@ def entrypoint():
             descriptor = os.open(options.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w") as stream: stream.write(text)
         else: print(text, end="")
+    except KeyboardInterrupt:
+        print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
+        raise SystemExit(130)
     except Exception as error:
         if isinstance(error, ValueError) and not sent:
             # Validation libraries can echo private input values. Only our small
             # static set of messages is suitable for terminal output.
             message = str(error)
-            prefixes = ("This write requires", "Use HTTPS", "Output already exists", "Input exceeds", "Input must", "Headers exceed", "Invalid runtime", "Input has unknown", "A required input is missing")
+            prefixes = ("This write requires", "Use HTTPS", "Output already exists", "Input exceeds", "Input must", "Headers exceed", "Invalid runtime", "Input has unknown", "A required input is missing", "Browser login", "Browser options")
             print(message if message.startswith(prefixes) else "Input validation failed. Check operation help.", file=sys.stderr)
+        elif not sent and type(error).__name__ == "BrowserError":
+            print(str(error), file=sys.stderr)
         else:
             print("Endpoint call failed. A request may have succeeded; check the service before retrying. No automatic retry occurred.", file=sys.stderr)
         raise SystemExit(1)
