@@ -1,0 +1,7 @@
+query GetItem($id: ID!) {
+  item(id: $id) { id name }
+}
+
+mutation CreateItem($name: String!) {
+  createItem(name: $name) { id name }
+}

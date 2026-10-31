@@ -29,8 +29,22 @@ def main(args=None):
     discover.add_argument("--max-entries", type=int, default=1000, help="Maximum retained requests, 1 to 10000 (default 1000).")
     discover.add_argument("--browser", choices=["chrome", "chromium"])
     discover.add_argument("--browser-path")
+    generate_command = commands.add_parser("generate", help="Generate a standalone Python client from a standard definition.",
+        description="Use openapi-python-client for OpenAPI, or Ariadne Codegen for GraphQL schemas plus operation documents. Sends no API requests.")
+    definition = generate_command.add_mutually_exclusive_group(required=True)
+    definition.add_argument("--openapi", help="Local OpenAPI 3.0/3.1 JSON or YAML file with bundled references.")
+    definition.add_argument("--graphql-schema", help="Local GraphQL schema SDL or complete introspection JSON.")
+    generate_command.add_argument("--operations", help="GraphQL operation document, required with --graphql-schema.")
+    generate_command.add_argument("--output", required=True, help="New output directory for the standalone package.")
+    generate_command.add_argument("--name", default="service-client", help="Generated package and CLI name, lowercase with hyphens (default service-client).")
     options = parser.parse_args(args)
     try:
+        if options.command == "generate":
+            from .generation import generate
+            if options.openapi and options.operations: raise BrowserError("--operations is only used with --graphql-schema.")
+            report = generate(options.output, options.name, options.openapi, options.graphql_schema, options.operations)
+            print(json.dumps(report))
+            return 0
         if options.command == "discover":
             output = new_output(options.output)
             if not 1 <= options.max_entries <= 10000: raise BrowserError("--max-entries must be between 1 and 10000.")
