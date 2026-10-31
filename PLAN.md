@@ -1,5 +1,20 @@
 # Delivery plan
 
+## Playwright migration (separate PR)
+
+1. Replace the custom browser process and WebSocket protocol implementation with
+   Playwright's Python API. Preserve temporary profiles, manual login, scoped
+   capture and browser-native endpoint requests.
+2. Keep Chrome-specific request interception behind Playwright CDP sessions.
+   Playwright owns transport, event dispatch, tabs and process shutdown. Python
+   owns request scope, credential handling and the one-request policy.
+3. Update standalone generated dependencies and installation instructions. Run
+   focused lifecycle and transport tests, then all tests, builds and Docker flows.
+
+Complete when installed root and generated CLIs pass the existing login, capture,
+read/write, redirect and cleanup scenarios. Self-discovery is a second PR and
+does not change behavior in this migration.
+
 ## Code readability
 
 - [x] Separate generation by backend and move generated package text into templates.
