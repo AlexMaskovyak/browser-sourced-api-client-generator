@@ -2,6 +2,11 @@
 
 ## Code readability
 
+- [ ] Separate generation by backend and move generated package text into templates.
+  Give the CLI named steps for parsing, validation, model conversion, execution
+  and output, with explicit limits for JSON files and runtime headers.
+- [ ] Verify the refactor with generated-client tests and the full container flow.
+
 - [x] Name transport limits and time units, deriving the base64 limit from the
   decoded response limit. Separate request, response and cleanup responsibilities.
 - [x] Separate the HTTPS fixture, terminal driver and container scenarios. Expand
