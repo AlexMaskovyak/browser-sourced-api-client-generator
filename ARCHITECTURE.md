@@ -1,5 +1,11 @@
 # Architecture
 
+Poetry owns package metadata, dependency resolution, the committed `poetry.lock`,
+development dependency groups and builds. The project environment lives in
+`.venv/` and is ignored by Git. Docker installs the locked dependencies into a
+separate application environment and tests the wheel built by Poetry. Poetry's
+own bootstrap environment is separate from application dependencies.
+
 Python owns the command, browser lifetime, discovery and generation. Chrome or
 Chromium is a separate native browser process. Python communicates with its
 loopback Chrome DevTools Protocol connection using the Python websocket-client
