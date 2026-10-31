@@ -37,7 +37,7 @@ def operation_metadata(project, package):
         if method is None or path.stem in operations:
             raise BrowserError("Generated operation names or methods are ambiguous. Review the OpenAPI operation identifiers.")
         module = ".".join(path.relative_to(project).with_suffix("").parts)
-        operations[path.stem] = {"kind": "openapi", "module": module, "write": method.upper() not in {"GET", "HEAD", "OPTIONS"}, "description": method.upper() + " endpoint"}
+        operations[path.stem] = {"kind": "openapi", "module": module, "httpMethod": method.upper(), "write": method.upper() not in {"GET", "HEAD", "OPTIONS"}, "description": method.upper() + " endpoint"}
     if not operations: raise BrowserError("No callable OpenAPI operations were generated.")
     return operations
 
@@ -78,6 +78,8 @@ def generate(output, name="service-client", openapi=None, schema=None, operation
             metadata = operation_metadata(project, package)
             with (project / "pyproject.toml").open("a") as stream:
                 stream.write(f'\n[tool.poetry.scripts]\n{name} = "{package}._cli:entrypoint"\n')
+            metadata_path = project / "pyproject.toml"
+            metadata_path.write_text(metadata_path.read_text().replace('[tool.poetry.dependencies]\n', '[tool.poetry.dependencies]\nwebsocket-client = ">=1.9,<2"\n', 1))
             backend = "openapi-python-client"
             (project / "openapi.json").write_text(json.dumps(spec, indent=2) + "\n")
         else:
@@ -115,7 +117,7 @@ name = "{name}"
 version = "0.1.0"
 description = "Generated GraphQL service client"
 requires-python = ">=3.11,<4"
-dependencies = ["httpx>=0.28,<0.29", "pydantic>=2.10,<3"]
+dependencies = ["httpx>=0.28,<0.29", "pydantic>=2.10,<3", "websocket-client>=1.9,<2"]
 
 [project.scripts]
 {name} = "{package}._cli:entrypoint"
@@ -128,13 +130,19 @@ packages = [{{ include = "{package}" }}]
             backend = "ariadne-codegen"
         target = project / package
         target.joinpath("_cli.py").write_text(Path(__file__).with_name("client_cli.py").read_text())
+        for module in ("browser.py", "session_http.py"):
+            target.joinpath(module).write_text(Path(__file__).with_name(module).read_text())
         target.joinpath("_operations.json").write_text(json.dumps(metadata, indent=2) + "\n")
         readme = project / "README.md"
         previous = readme.read_text() if readme.exists() else ""
         readme.write_text(f"# {name}\n\nInstall with `poetry install`, then run `poetry run {name} --help`.\n"
             f"Use `poetry run {name} OPERATION --help` for input fields and READ/WRITE behavior.\n"
             "Commands call the generated typed methods. JSON inputs use the Python argument names shown in help.\n"
-            "Pass the service URL with --url. Runtime headers can be supplied as a JSON object through --headers-stdin; no credential helper is bundled.\n"
+            "Pass the service URL with --url. Add --login to open Chrome, sign in, then press Enter to call the endpoint through that browser session.\n"
+            "If the application and API use different addresses, set --login-url to the application sign-in address. Chromium uses --browser chromium; custom locations use --browser-path.\n"
+            "The temporary browser closes after the operation. Fresh commands require a fresh sign-in. Ctrl+C cancels. Authentication is not saved or printed.\n"
+            "A browser must be installed and --login requires an interactive terminal. Operation help lists --session-header for additional observed session-header names.\n"
+            "Alternatively, runtime headers can be supplied as a JSON object through --headers-stdin. Do not combine the two authentication methods.\n"
             "Writes require --confirm-write followed by the exact operation name and are never retried automatically.\n"
             "Use --output NEW_FILE for private JSON output. A failed request may have succeeded; reconcile the service before retrying.\n"
             "Custom scalar mappings and complex input conversions may require the Python API. Multi-step service workflows require separate extensions.\n\n" + previous)
