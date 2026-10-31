@@ -140,7 +140,7 @@ packages = [{{ include = "{package}" }}]
             "Commands call the generated typed methods. JSON inputs use the Python argument names shown in help.\n"
             "Pass the service URL with --url. Add --login to open Chrome, sign in, then press Enter to call the endpoint through that browser session.\n"
             "If the application and API use different addresses, set --login-url to the application sign-in address. Chromium uses --browser chromium; custom locations use --browser-path.\n"
-            "The temporary browser closes after the operation. Fresh commands require a fresh sign-in. Ctrl+C cancels. Authentication is not saved or printed.\n"
+            "The temporary browser closes after the operation. Fresh commands require a fresh sign-in. Ctrl+C cancels. Browser session state is not saved or printed.\n"
             "A browser must be installed and --login requires an interactive terminal. Operation help lists --session-header for additional observed session-header names.\n"
             "Alternatively, runtime headers can be supplied as a JSON object through --headers-stdin. Do not combine the two authentication methods.\n"
             "Writes require --confirm-write followed by the exact operation name and are never retried automatically.\n"

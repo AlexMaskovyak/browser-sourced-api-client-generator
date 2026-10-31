@@ -43,6 +43,8 @@ class Site:
                         "cookie": str(uuid.uuid4()), "challenge": str(uuid.uuid4()), "code": "123456"}
         self.counts = {"password": 0, "mfa": 0, "app": 0}
         self.api_reads = 0
+        self.api_writes = 0
+        self.redirect_hits = 0
         fixtures = Path(__file__).resolve().parents[1] / "tests/fixtures"
         self.schema = build_schema((fixtures / "schema.graphql").read_text())
         self.openapi = json.loads((fixtures / "openapi.json").read_text())
@@ -70,14 +72,19 @@ class Site:
             def do_GET(self):
                 cookie = self.headers.get("Cookie", "")
                 target = urlsplit(self.path)
-                if "session=" + site.secrets["cookie"] in cookie and target.path in {"/items/7", "/openapi.json", "/graphql"}:
+                if target.path == "/redirect-target":
+                    site.redirect_hits += 1
+                    self.send_error(500)
+                    return
+                if "session=" + site.secrets["cookie"] in cookie and target.path in {"/items/7", "/items/8", "/openapi.json", "/graphql"}:
                     site.api_reads += 1
-                    if target.path == "/items/7": body = {"id": 7, "name": site.secrets["username"]}
+                    if target.path == "/items/8": self.redirect("/redirect-target"); return
+                    if target.path == "/items/7": body = {"id": 7, "name": "Example"}
                     elif target.path == "/openapi.json": body = site.openapi
                     else:
                         fields = parse_qs(target.query)
                         body = graphql_sync(site.schema, fields["query"][0],
-                            root_value={"item": lambda _info, id: {"id": id, "name": site.secrets["username"]}},
+                            root_value={"item": lambda _info, id: {"id": id, "name": "Example"}},
                             variable_values=json.loads(fields.get("variables", ["{}"])[0]),
                             operation_name=fields.get("operationName", [None])[0]).formatted
                     self.send_response(200)
@@ -104,7 +111,28 @@ class Site:
             def do_POST(self):
                 size = int(self.headers.get("Content-Length", "0"))
                 if size > 4096: self.send_error(413); return
-                fields = parse_qs(self.rfile.read(size).decode())
+                raw = self.rfile.read(size).decode()
+                if self.path in {"/items", "/graphql"} and "session=" + site.secrets["cookie"] in self.headers.get("Cookie", ""):
+                    assert self.headers.get("Origin") == site.url.rsplit("/", 1)[0]
+                    data = json.loads(raw)
+                    if self.path == "/graphql":
+                        if "mutation" in data["query"]: site.api_writes += 1
+                        else: site.api_reads += 1
+                        result = graphql_sync(site.schema, data["query"], variable_values=data.get("variables"),
+                            root_value={"item": lambda _info, id: {"id": id, "name": "Example"},
+                                        "createItem": lambda _info, name: {"id": "2", "name": name}}).formatted
+                        status = 200
+                    else:
+                        site.api_writes += 1
+                        assert data == {"name": "Created"}
+                        result, status = {"id": 2}, 201
+                    assert "Chrome" in self.headers.get("User-Agent", ""), "Request did not use the native browser"
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode())
+                    return
+                fields = parse_qs(raw)
                 if self.path == "/login" and all(fields.get(key) == [site.secrets[key]] for key in ("username", "password")):
                     site.counts["password"] += 1
                     self.redirect("/mfa", "challenge=" + site.secrets["challenge"])
@@ -127,14 +155,15 @@ class Site:
 
 
 class Command:
-    def __init__(self, site, *, discover_output=None):
+    def __init__(self, site, *, discover_output=None, executable=None, args=None, env=None):
         self.baseline = set(Path(tempfile.gettempdir()).glob("website-client-browser-*"))
-        executable = shutil.which("website-client")
+        executable = executable or shutil.which("website-client")
         self.pid, self.terminal = pty.fork()
         if self.pid == 0:
-            args = [executable, "discover" if discover_output else "login", "--url", site.url, "--browser", "chromium", "--browser-path", "/work/docker/test-chromium.sh"]
-            if discover_output: args += ["--output", str(discover_output)]
-            os.execv(executable, args)
+            if args is None:
+                args = ["discover" if discover_output else "login", "--url", site.url, "--browser", "chromium", "--browser-path", "/work/docker/test-chromium.sh"]
+                if discover_output: args += ["--output", str(discover_output)]
+            os.execve(executable, [executable, *args], {**os.environ, **(env or {})})
         self.output = ""
         self.status = None
         self.connection = None
@@ -153,7 +182,7 @@ class Command:
     def ready(self):
         self.pump()
         if self.status is not None: raise AssertionError("CLI exited before login prompt: " + self.output)
-        return "press Enter here to finish" in self.output or "Press Enter here to start capture" in self.output
+        return "press Enter here to finish" in self.output or "Press Enter here to start capture" in self.output or "press Enter here to run the endpoint" in self.output
 
     def connect(self):
         profiles = set(Path(tempfile.gettempdir()).glob("website-client-browser-*")) - self.baseline
@@ -289,16 +318,65 @@ def main():
                     name = "fixture-" + kind
                     args = [shutil.which("website-client"), "generate", "--name", name, "--output", str(output)]
                     if kind == "openapi": args += ["--openapi", str(next(capture_output.glob("openapi-downloaded-*.json")))]
-                    else: args += ["--graphql-schema", str(next(capture_output.glob("graphql-schema-downloaded-*.graphql"))), "--operations", str(next(capture_output.glob("operations-*.graphql")))]
+                    else: args += ["--graphql-schema", str(next(capture_output.glob("graphql-schema-downloaded-*.graphql"))), "--operations", str(Path(__file__).resolve().parents[1] / "tests/fixtures/operations.graphql")]
                     subprocess.run(args, check=True, capture_output=True)
                     subprocess.run(["poetry", "--directory", str(output), "build", "--format", "wheel"], check=True, capture_output=True)
                     installed = Path(directory) / (kind + "-installed")
                     wheel = next((output / "dist").glob("*.whl"))
-                    subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--target", str(installed), str(wheel)], check=True, capture_output=True)
+                    subprocess.run([sys.executable, "-m", "venv", str(installed)], check=True, capture_output=True)
+                    runtime_python = installed / "bin/python"
+                    subprocess.run([str(runtime_python), "-m", "pip", "install", "--no-index", "--find-links", "/opt/client-wheels", str(wheel)], check=True, capture_output=True)
+                    subprocess.run([str(runtime_python), "-c", "import importlib.util; assert importlib.util.find_spec('website_client') is None; assert importlib.util.find_spec('ariadne_codegen') is None; assert importlib.util.find_spec('openapi_python_client') is None"], check=True, capture_output=True)
                     executable = installed / "bin" / name
-                    help_result = subprocess.run([str(executable), "--help"], env={**os.environ, "PYTHONPATH": str(installed)}, check=True, capture_output=True, text=True)
+                    help_result = subprocess.run([str(executable), "--help"], check=True, capture_output=True, text=True)
                     assert ("get_item" if kind == "openapi" else "GetItem") in help_result.stdout
                     print(f"PASS installed generated Python client: {kind} wheel and endpoint help", flush=True)
+                    for scenario in ("read", "write", "cancel", "redirect") if kind == "openapi" else ("read", "write", "closed"):
+                        inputs = Path(directory) / f"{kind}-{scenario}.json"
+                        if scenario == "write":
+                            inputs.write_text(json.dumps({"body": {"name": "Created"}} if kind == "openapi" else {"name": "Created"}))
+                            operation = "create_item" if kind == "openapi" else "CreateItem"
+                        else:
+                            inputs.write_text(json.dumps({"item_id": 8 if scenario == "redirect" else 7} if kind == "openapi" else {"id": "7"}))
+                            operation = "get_item" if kind == "openapi" else "GetItem"
+                        arguments = [operation, "--url", base if kind == "openapi" else base + "/graphql", "--input", str(inputs),
+                            "--login", "--login-url", site.url, "--browser", "chromium", "--browser-path", "/work/docker/test-chromium.sh"]
+                        if scenario == "write":
+                            denied = subprocess.run([str(executable), *arguments], capture_output=True, text=True)
+                            assert denied.returncode and "requires --confirm-write" in denied.stderr
+                            arguments += ["--confirm-write", operation]
+                        before_reads, before_writes = site.api_reads, site.api_writes
+                        generated = Command(site, executable=str(executable), args=arguments)
+                        try:
+                            eventually(generated.ready)
+                            generated.connect()
+                            if scenario == "cancel": os.write(generated.terminal, b"\x03")
+                            elif scenario == "closed":
+                                try: generated.connection.call("Browser.close")
+                                except Exception: pass
+                            else:
+                                generated.fill('input[name="username"]', site.secrets["username"])
+                                generated.fill('input[name="password"]', site.secrets["password"])
+                                generated.click()
+                                generated.fill('input[name="code"]', site.secrets["code"])
+                                generated.click()
+                                eventually(lambda: generated.node("h1"))
+                                os.write(generated.terminal, b"\n")
+                            result = generated.wait()
+                            if scenario in {"read", "write"}:
+                                assert result == 0, generated.output
+                                assert '"id":' in generated.output
+                                assert site.api_reads == before_reads + (scenario == "read")
+                                assert site.api_writes == before_writes + (scenario == "write")
+                            else:
+                                assert result != 0, generated.output
+                                assert site.api_reads == before_reads + (scenario == "redirect")
+                                assert site.api_writes == before_writes
+                                assert site.redirect_hits == 0
+                            for secret in site.secrets.values(): assert secret not in generated.output
+                            generated.cleanup_verified()
+                            print(f"PASS generated browser login: {kind} {scenario}", flush=True)
+                        finally: generated.stop()
             finally: command.stop()
         finally: site.close()
 
