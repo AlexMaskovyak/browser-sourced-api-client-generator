@@ -1,5 +1,18 @@
 # Delivery plan
 
+## Poetry packaging
+
+- [ ] Replace setuptools metadata and the requirements lock with Poetry metadata,
+  a development dependency group, `poetry.lock` and an in-project environment.
+- [ ] Update installation, login, test and build instructions. Make Docker install
+  from the Poetry lock and test the wheel built by Poetry.
+- [ ] Run Poetry validation, unit tests, wheel inspection and Docker login scenarios.
+  Commit the change and open a separate PR against merged main.
+
+Poetry owns dependency resolution and package builds. This change does not alter
+the browser session or endpoint-generation milestones. Completion requires the
+installed Poetry-built command to pass the existing real-browser tests.
+
 1. [x] Browser login: install the Python command, open a temporary Chrome or Chromium
    window, let the human sign in and finish verification codes, then accept terminal
    confirmation. Test login, unfinished login, browser closure, cancellation and
