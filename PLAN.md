@@ -2,10 +2,10 @@
 
 ## Code readability
 
-- [ ] Separate generation by backend and move generated package text into templates.
+- [x] Separate generation by backend and move generated package text into templates.
   Give the CLI named steps for parsing, validation, model conversion, execution
   and output, with explicit limits for JSON files and runtime headers.
-- [ ] Verify the refactor with generated-client tests and the full container flow.
+- [x] Verify the refactor with generated-client tests and the full container flow.
 
 - [x] Name transport limits and time units, deriving the base64 limit from the
   decoded response limit. Separate request, response and cleanup responsibilities.
@@ -25,7 +25,7 @@
    codes, authenticated reads, confirmed writes, cancellation and cleanup in Docker.
    Document the complete install-to-endpoint procedure and open a separate PR.
 
-Verification covers 62 Python tests and 15 container scenarios. Generated clients
+Verification covers 65 Python tests and 15 container scenarios. Generated clients
 are installed in separate fresh environments with only their declared runtime
 dependencies. Both formats complete browser login, verification codes, authenticated
 reads and confirmed writes. Cancellation, browser closure and redirect rejection
