@@ -80,13 +80,14 @@ def service():
     server.server_close()
 
 
-def command(project, package, args):
+def command(project, package, args, stdin=None):
     environment = {**os.environ, "PYTHONPATH": str(project)}
     return subprocess.run(
         [sys.executable, "-m", package + "._cli", *args],
         env=environment,
         capture_output=True,
         text=True,
+        input=stdin,
         timeout=20,
     )
 
@@ -238,4 +239,43 @@ def test_generated_login_rejects_pipes_and_unconfirmed_writes_before_launch(
         generated[0], "sample_rest", ["get_item", "--url", url, "--browser", "chrome"]
     )
     assert result.returncode != 0 and "Browser options require --login" in result.stderr
+    assert counts == {"reads": 0, "writes": 0}
+
+
+def test_generated_cli_rejects_oversized_json_before_request(
+    generated, service, tmp_path
+):
+    url, counts = service
+    inputs = tmp_path / "oversized.json"
+    inputs.write_text(json.dumps({"item_id": 7, "extra": "x" * (1024 * 1024)}))
+    result = command(
+        generated[0],
+        "sample_rest",
+        ["get_item", "--url", url, "--input", str(inputs)],
+    )
+    assert result.returncode != 0
+    assert "Input exceeds 1 MiB" in result.stderr
+    assert counts == {"reads": 0, "writes": 0}
+
+
+@pytest.mark.parametrize("header_value", ["x" * 65536, "\u20ac" * 24000])
+def test_generated_cli_bounds_header_bytes_without_echoing_credentials(
+    generated, service, tmp_path, header_value
+):
+    url, counts = service
+    inputs = tmp_path / "input.json"
+    inputs.write_text('{"item_id": 7}')
+    credential_marker = "private-header-value"
+    headers = json.dumps(
+        {"Authorization": credential_marker + header_value}, ensure_ascii=False
+    )
+    result = command(
+        generated[0],
+        "sample_rest",
+        ["get_item", "--url", url, "--input", str(inputs), "--headers-stdin"],
+        stdin=headers,
+    )
+    assert result.returncode != 0
+    assert "Headers exceed 64 KiB" in result.stderr
+    assert credential_marker not in result.stdout + result.stderr
     assert counts == {"reads": 0, "writes": 0}
