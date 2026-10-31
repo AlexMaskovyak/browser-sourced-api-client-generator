@@ -1,0 +1,12 @@
+**
+!pyproject.toml
+!requirements-test.lock
+!README.md
+!LICENSE
+!src/
+!src/**
+!tests/
+!tests/**
+!docker/
+!docker/**
+**/__pycache__/**
