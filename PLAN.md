@@ -1,5 +1,14 @@
 # Delivery plan
 
+## Review readability
+
+- [ ] Name transport limits and time units, deriving the base64 limit from the
+  decoded response limit. Separate request, response and cleanup responsibilities.
+- [ ] Separate the HTTPS fixture, terminal driver and container scenarios. Expand
+  compact statements and explain lifecycle and isolation decisions in comments.
+- [ ] Run focused transport tests and the complete installed-client container flow,
+  then push the review changes to the existing PR.
+
 ## Generated client browser login
 
 1. [x] Include standalone Python browser-session support in generated packages.
