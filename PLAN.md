@@ -1,12 +1,12 @@
 # Delivery plan
 
-1. [ ] Capture browser traffic after login and import existing HAR files through
+1. [x] Capture browser traffic after login and import existing HAR files through
    the same bounded analysis. Export a sanitized HAR and endpoint evidence.
-2. [ ] Validate observed OpenAPI documents and GraphQL schemas. Keep inferred
+2. [x] Validate observed OpenAPI documents and GraphQL schemas. Keep inferred
    OpenAPI and captured GraphQL operations separate from complete service schemas.
-3. [ ] Generate standalone Python packages through openapi-python-client and
+3. [x] Generate standalone Python packages through openapi-python-client and
    Ariadne Codegen, with typed methods, endpoint commands and input help.
-4. [ ] Verify authenticated capture, offline import, real code generation and
+4. [x] Verify authenticated capture, offline import, real code generation and
    installed clients in a clean container.
 
 ## Boundaries and completion
