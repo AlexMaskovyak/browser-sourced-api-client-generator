@@ -1,5 +1,15 @@
 # Delivery plan
 
+## Command walkthrough
+
+1. Put installation, discovery, normalization, API selection, generation and
+   generated-client help at the start of the README. Explain the login prompt and
+   files produced at each step; move the login-only check out of the main path.
+2. Align the detailed guide, document how to inspect API status and obtain an API
+   ID, and include actual commands for continuing from an existing capture.
+3. Check documented flags, links and the offline commands against the installed
+   CLI. Commit and push the documentation to PR 8; keep browser actions manual.
+
 ## PR 8 adversarial review and developer guidance
 
 1. [x] Reproduce merge and chaining failures with focused tests. Verify schema
