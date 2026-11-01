@@ -1,0 +1,437 @@
+"""Build a complete operation client from portable inputs and public runtime settings.
+
+The command owns packaging, documentation, synthetic checks and source snapshots.
+It never logs in or executes a service operation. Credential values are runtime
+inputs and are deliberately absent from the project format.
+"""
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+from urllib.parse import urlsplit
+
+from .browser import BrowserError, origin
+from .discovery import new_output
+from .discovery_manifest import (
+    merge_manifests,
+    read_manifest,
+    read_text,
+    write_manifest,
+)
+from .discovery_manifest.records import (
+    Artifact,
+    Kind,
+    Manifest,
+    Protocol,
+    Service,
+    Source,
+)
+from .generation import package_name_for, publish_tree, write_json
+from .normalization import normalize_manifest, select_service
+from .operation_generation import generate_operation_client
+from .session_http import BrowserLoginTransport
+
+
+@dataclass(frozen=True, slots=True)
+class Project:
+    """Version 1 build inputs, with paths resolved relative to the project file.
+
+    Header names select values observed during a future login. They never contain
+    the values themselves. lockfile is an existing Poetry lock to verify and copy.
+    Without one, output can be installed but dependency resolution is not pinned.
+    """
+
+    name: str
+    manifests: tuple[Path, ...]
+    login_url: str
+    session_headers: tuple[str, ...] = ()
+    service: str | None = None
+    lockfile: Path | None = None
+
+    def __post_init__(self):
+        """Reject invalid names, unbounded input lists and unsafe header selections."""
+        package_name_for(self.name)
+        origin(self.login_url)
+        if not self.manifests or len(self.manifests) > 20:
+            raise BrowserError("Supply between one and twenty project manifests.")
+        for header in self.session_headers:
+            BrowserLoginTransport._validate_session_header_name(header)
+        if len(set(self.session_headers)) > 24:
+            raise BrowserError("Select at most 24 additional session headers.")
+
+    @classmethod
+    def read(cls, path):
+        """Read strict, versioned JSON without accepting arbitrary files to copy."""
+        path = Path(path).resolve()
+        value = json.loads(read_text(path, 65536))
+        allowed = {
+            "version",
+            "name",
+            "manifests",
+            "loginUrl",
+            "sessionHeaders",
+            "service",
+            "lockfile",
+        }
+        if (
+            not isinstance(value, dict)
+            or value.keys() - allowed
+            or type(value.get("version")) is not int
+            or value["version"] != 1
+        ):
+            raise BrowserError(
+                "Use a version 1 client project with supported fields only."
+            )
+        for key in ("name", "loginUrl"):
+            if not isinstance(value.get(key), str):
+                raise BrowserError("Project name and loginUrl must be strings.")
+        manifests, headers = value.get("manifests"), value.get("sessionHeaders", [])
+        if not isinstance(manifests, list) or any(
+            not isinstance(item, str) for item in manifests
+        ):
+            raise BrowserError("Project manifests must be a list of paths.")
+        if not isinstance(headers, list) or any(
+            not isinstance(item, str) for item in headers
+        ):
+            raise BrowserError("Project sessionHeaders must contain header names only.")
+        for key in ("service", "lockfile"):
+            if value.get(key) is not None and not isinstance(value[key], str):
+                raise BrowserError(
+                    "Project service and lockfile must be strings or null."
+                )
+        return cls(
+            value["name"],
+            tuple(path.parent / item for item in manifests),
+            value["loginUrl"],
+            tuple(headers),
+            value.get("service"),
+            path.parent / value["lockfile"] if value.get("lockfile") else None,
+        )
+
+
+def add_build_command(commands):
+    """Register complete project generation separately from lower-level SDK generation."""
+    command = commands.add_parser(
+        "build",
+        help="Generate a complete Poetry client project, README and tests; no service requests.",
+    )
+    source = command.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--project",
+        help="Version 1 client-project.json; relative paths resolve beside this file.",
+    )
+    source.add_argument(
+        "--manifest",
+        action="append",
+        help="Saved manifest; repeat to merge inputs automatically.",
+    )
+    command.add_argument(
+        "--output", required=True, help="New directory; existing output is refused."
+    )
+    command.add_argument("--name", help="Package and CLI name when using --manifest.")
+    command.add_argument(
+        "--service", help="Select one GraphQL API when inputs contain several."
+    )
+    command.add_argument(
+        "--login-url", help="Public website sign-in URL; requires --manifest."
+    )
+    command.add_argument(
+        "--session-header",
+        action="append",
+        default=[],
+        help="Additional header NAME to observe at login, never a value; repeat as needed.",
+    )
+    command.add_argument(
+        "--lockfile",
+        help="Existing Poetry lock to include and validate against generated packaging.",
+    )
+
+
+def project_from_options(options):
+    """Choose a complete saved project or explicit inputs, rejecting ambiguous overrides."""
+    if options.project:
+        if (
+            options.name
+            or options.service
+            or options.login_url
+            or options.session_header
+            or options.lockfile
+        ):
+            raise BrowserError(
+                "Do not override project settings; edit the project file and rebuild."
+            )
+        return Project.read(options.project)
+    if not options.name or not options.login_url:
+        raise BrowserError("Building from manifests requires --name and --login-url.")
+    return Project(
+        options.name,
+        tuple(Path(item).resolve() for item in options.manifest),
+        options.login_url,
+        tuple(options.session_header),
+        options.service,
+        Path(options.lockfile).resolve() if options.lockfile else None,
+    )
+
+
+def portable_manifest(target, metadata, created_at):
+    """Retain selected operation documents and request conventions, dropping capture context.
+
+    Original reports may include unrelated endpoints, private filenames and source
+    locations. Only the contracts already shipped in the SDK are needed to rebuild.
+    Each operation keeps its own document so fragments remain source-local.
+    """
+    documents = tuple(
+        Artifact.create(
+            name + ".graphql",
+            Kind.GRAPHQL_OPERATIONS,
+            item["document"],
+            Source.EXTERNAL,
+        )
+        for name, item in metadata.items()
+    )
+    endpoint = urlsplit(target.endpoint)
+    report = {
+        "endpoints": [
+            {
+                "origin": f"{endpoint.scheme}://{endpoint.netloc}",
+                "path": endpoint.path or "/",
+                "method": item["httpMethod"],
+                "queryParameters": ["operationName"]
+                if item["operationNameInUrl"]
+                else [],
+                "graphql": {"name": name},
+            }
+            for name, item in metadata.items()
+            if item["requestStyleObserved"]
+        ]
+    }
+    evidence = Artifact.create(
+        "discovery.json",
+        Kind.REPORT,
+        json.dumps(report, sort_keys=True),
+        Source.EXTERNAL,
+    )
+    return Manifest.create(
+        documents + (evidence,),
+        (
+            Service.create(
+                Protocol.GRAPHQL,
+                target.endpoint,
+                operations=tuple(item.id for item in documents),
+            ),
+        ),
+        created_at=created_at,
+    )
+
+
+def project_readme(project, endpoint, metadata):
+    """Generate runnable commands from the same defaults used by the packaged CLI."""
+    reads = [
+        name
+        for name, item in metadata.items()
+        if not item["write"]
+        and not any(variable["required"] for variable in item["variables"])
+    ]
+    example = reads[0] if reads else next(iter(metadata))
+    return f"""# {project.name}
+
+Python methods and CLI commands generated from {len(metadata)} captured GraphQL operations.
+The generator produced every file in this project. No service-specific source
+patches are needed. This operation set does not imply coverage of every service API.
+
+## Install and inspect
+
+Use Python 3.11 or newer, Poetry 2.2 or newer and installed Chrome for browser login.
+From this generated directory:
+
+```sh
+poetry install --with dev
+poetry run {project.name} --help
+poetry run {project.name} {example} --help
+poetry run pytest -q
+poetry build
+```
+
+Installation may download dependencies. Help, tests and package builds send no
+service requests. Tests use synthetic responses; they do not prove live compatibility.
+
+## Call an operation
+
+The configured endpoint is `{endpoint}`. With an interactive terminal:
+
+```sh
+poetry run {project.name} {example} --login
+```
+
+This opens `{project.login_url}`. Sign in, open the relevant application page and
+wait for it to load, then press Enter in the terminal. The command sends one read
+and prints JSON. Use `--output NEW_FILE` to save a private result. Existing files
+are refused. Each invocation opens a fresh login; the browser closes afterward.
+
+Configured additional session-header names: {", ".join(project.session_headers) or "none"}.
+Their values are observed in memory at the API origin. Never put tokens in source
+files or command arguments. Missing required headers can cause HTTP 403. Inspect
+the application request and update `client-project.json` if its contract changes.
+
+For operations with variables, create a JSON object using the names/types in that
+operation's help and pass `--input FILE`. Mutation commands require
+`--confirm-write OPERATION` with the exact operation name. Python mutations require
+`Client(..., allow_writes=True)`. No automatic retries occur. Check the service before
+retrying an uncertain write. Receipt uploads, pagination and other multi-step
+workflows require their own captured operations and orchestration.
+
+## Reproduce this project
+
+`inputs/manifest.json` contains the selected operation documents and request
+conventions. `client-project.json` supplies public endpoint/login configuration
+and header names. No saved login or account values are needed to build.
+Using an installed compatible generator, from this directory:
+
+```sh
+website-client build --project client-project.json --output ../{project.name}-rebuilt
+```
+
+The output directory must not exist and its parent must exist. The command reads
+local inputs, generates code, documentation and tests, and validates an included
+Poetry lock. It does not call the service. Compare outputs before replacing an
+existing project. Reuse the same generator revision and lock for reproducibility.
+
+## Validation and ownership
+
+Generated method docstrings describe declared inputs, omission versus null, write
+permission, results and failures. Standard scalar types are validated; custom
+input fields and response shapes remain JSON without a complete server schema.
+The service remains authoritative for its records. Generation and
+synthetic tests do not verify submissions or payment. HTTP failures report status
+without response bodies. Authentication stays in browser/process memory.
+"""
+
+
+def build_project(project, output):
+    """Generate, verify dependency inputs and publish one untouched installable tree.
+
+    All enrichment happens inside generator-owned staging. Failed lock validation
+    leaves the requested output absent, rather than publishing a partial project.
+    """
+    output = new_output(output)
+    # Use the manifest reader's byte limits and normalization for every producer.
+    inputs, remaining = [], 64 * 1024 * 1024
+    for path in project.manifests:
+        document = read_manifest(path, limit=remaining)
+        remaining -= len(json.dumps(document.to_dict()).encode())
+        if remaining < 0:
+            raise BrowserError("Project inputs exceed the 64 MiB aggregate limit.")
+        inputs.append(document)
+    normalized = normalize_manifest(merge_manifests(tuple(inputs)))
+    target = select_service(normalized, project.service)
+    if target.protocol is not Protocol.GRAPHQL or target.schema_artifact is not None:
+        raise BrowserError(
+            "Complete project builds currently support operation-document GraphQL clients."
+        )
+    package = package_name_for(project.name)
+    with tempfile.TemporaryDirectory(prefix="website-client-project-") as directory:
+        stage = Path(directory) / "project"
+        report = generate_operation_client(
+            normalized, target, stage, project.name, None
+        )
+        metadata = json.loads((stage / package / "_operations.json").read_text())
+        defaults = {
+            "url": target.endpoint,
+            "loginUrl": project.login_url,
+            "sessionHeaders": list(project.session_headers),
+        }
+        write_json(stage / package / "_defaults.json", defaults)
+        # A public build report needs source hashes, not private capture lineage.
+        report.pop("lineage", None)
+        write_json(stage / "generation.json", report)
+        with (stage / "pyproject.toml").open("a") as stream:
+            stream.write('\n[dependency-groups]\ndev = ["pytest>=8,<10"]\n')
+        (stage / ".gitignore").write_text(
+            ".venv/\n__pycache__/\n.pytest_cache/\ndist/\n.private/\n"
+        )
+        (stage / "README.md").write_text(
+            project_readme(project, target.endpoint, metadata)
+        )
+        (stage / "inputs").mkdir()
+        snapshot = portable_manifest(target, metadata, normalized.created_at)
+        write_manifest(snapshot, stage / "inputs" / "manifest.json")
+        recipe = {
+            "version": 1,
+            "name": project.name,
+            "manifests": ["inputs/manifest.json"],
+            "loginUrl": project.login_url,
+            "sessionHeaders": list(project.session_headers),
+            "service": None,
+            "lockfile": "poetry.lock" if project.lockfile else None,
+        }
+        write_json(stage / "client-project.json", recipe)
+        (stage / "tests").mkdir()
+        (stage / "tests" / "test_client.py").write_text(render_tests(package))
+        if project.lockfile:
+            # Reuse an explicit dependency input, then ask Poetry to verify its
+            # content hash. Never silently relock against current registry state.
+            if project.lockfile.stat().st_size > 8 * 1024 * 1024:
+                raise BrowserError("Poetry lock exceeds the 8 MiB limit.")
+            shutil.copyfile(project.lockfile, stage / "poetry.lock")
+            checked = subprocess.run(
+                ["poetry", "check", "--lock"],
+                cwd=stage,
+                capture_output=True,
+                timeout=120,
+            )
+            if checked.returncode:
+                raise BrowserError(
+                    "Poetry lock does not match generated packaging; create a compatible lock and rebuild."
+                )
+        publish_tree(stage, output)
+        return report
+
+
+def render_tests(package):
+    """Emit synthetic operation checks without embedding any source-account values."""
+    return f'''"""Generated checks use synthetic responses and never call the service."""
+import inspect
+import json
+from importlib.resources import files
+import httpx
+import pytest
+from {package} import Client
+
+OPERATIONS = json.loads(files('{package}').joinpath('_operations.json').read_text())
+
+@pytest.mark.parametrize('name', sorted(OPERATIONS))
+def test_documented_method(name):
+    """Every source operation has an inspectable, documented Python method."""
+    assert inspect.getdoc(getattr(Client, OPERATIONS[name]['method']))
+
+def test_all_operation_requests_and_write_guards():
+    """Exercise request construction without a server or schema-specific fixture values."""
+    calls = []
+    def response(request):
+        calls.append(request)
+        return httpx.Response(200, json={{'data': {{'synthetic': True}}}})
+    with httpx.Client(transport=httpx.MockTransport(response)) as http:
+        with Client('https://example.test/graphql', http_client=http, allow_writes=True) as client:
+            for name, bound in client._operations.items():
+                # Request mechanics are independent of server-specific input shapes.
+                # Variable validation has its own generator tests, so patch only that
+                # step to exercise every captured operation without invented inputs.
+                from unittest.mock import patch
+                with patch('{package}.operation_runtime.validate_variables', return_value={{}}):
+                    assert client._execute(name, {{}}) == {{'synthetic': True}}
+                    assert calls[-1].method == bound.method
+                    payload = json.loads(calls[-1].content) if bound.method == 'POST' else dict(calls[-1].url.params)
+                    assert payload['operationName'] == name
+        with Client('https://example.test/graphql', http_client=http) as client:
+            for name, bound in client._operations.items():
+                if bound.operation.write:
+                    from unittest.mock import patch
+                    before = len(calls)
+                    with patch('{package}.operation_runtime.validate_variables', return_value={{}}):
+                        with pytest.raises(ValueError, match='allow_writes'):
+                            client._execute(name, {{}})
+                    assert len(calls) == before
+'''
