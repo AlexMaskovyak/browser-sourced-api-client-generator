@@ -1,60 +1,85 @@
-"""Validate endpoint-specific contracts without inventing missing API evidence."""
+"""Normalize validated records, retaining the version 1 JSON command interface."""
 
-import copy
+from dataclasses import dataclass, replace
 
-from graphql import build_schema, parse, print_ast, validate
+from graphql import GraphQLError, build_schema, parse, print_ast, validate
 
 from .browser import BrowserError
-from .discovery_manifest import artifact, digest, encoded, validate_bundle
+from .discovery_manifest import artifact, digest, encoded
+from .discovery_manifest.records import (
+    Artifact, Confidence, Kind, Manifest, Normalization, Protocol,
+    Service, Source, SourceBundle, Stage, Status,
+)
 from .definitions import MAX_DOCUMENT, graphql_schema, openapi_document
 
 
-def resolve_artifact(artifacts, reference, kind=None):
-    matches = [
-        item for item in artifacts.values() if reference in {item["id"], item["name"]}
-    ]
-    if len(matches) != 1 or kind and matches[0]["kind"] != kind:
-        raise BrowserError(
-            "Artifact selection is missing, ambiguous or has the wrong kind."
+@dataclass(slots=True)
+class ArtifactIndex:
+    """Index immutable documents and validate every derived replacement."""
+
+    items: dict[str, Artifact]
+
+    def derive(self, name: str, kind: Kind, content: str, parents: tuple[str, ...]) -> str:
+        item = Artifact.from_dict(
+            artifact(name, kind.value, content, "normalized", derived_from=parents)
         )
+        prior = self.items.get(item.id)
+        if prior is not None:
+            if (prior.kind, prior.content) != (item.kind, item.content):
+                raise BrowserError("A producer artifact collides with a normalized artifact ID.")
+            if item.id in parents:
+                # Keep an already canonical source without a self dependency.
+                return item.id
+            provenance = replace(
+                prior.provenance,
+                derived_from=tuple(sorted(set(prior.provenance.derived_from + parents))),
+            )
+            item = replace(prior, provenance=provenance)
+        self.items[item.id] = item
+        return item.id
+
+
+def resolve_artifact(artifacts: ArtifactIndex, reference: str, kind: Kind) -> Artifact:
+    matches = [
+        item for item in artifacts.items.values() if reference in {item.id, item.name}
+    ]
+    if len(matches) != 1 or matches[0].kind is not kind:
+        raise BrowserError("Artifact selection is missing, ambiguous or has the wrong kind.")
     return matches[0]
 
 
-def apply_bindings(bundle, artifacts, bindings, *, schema):
-    targets = {item["id"]: item for item in bundle["services"]}
+def apply_bindings(
+    targets: dict[str, Service], artifacts: ArtifactIndex, bindings, *, schema: bool
+) -> None:
     for binding in bindings:
         identifier, separator, reference = binding.partition("=")
         if not separator or identifier not in targets:
-            raise BrowserError(
-                "Use an existing SERVICE_ID=ARTIFACT_ID_OR_NAME binding."
-            )
+            raise BrowserError("Use an existing SERVICE_ID=ARTIFACT_ID_OR_NAME binding.")
         target = targets[identifier]
         expected = (
-            ("openapi" if target["protocol"] == "openapi" else "graphql-schema")
-            if schema
-            else "graphql-operations"
+            (Kind.OPENAPI if target.protocol is Protocol.OPENAPI else Kind.GRAPHQL_SCHEMA)
+            if schema else Kind.GRAPHQL_OPERATIONS
         )
         item = resolve_artifact(artifacts, reference, expected)
         if schema:
-            target["schemaArtifact"] = item["id"]
-            target.pop("sourceSchemaArtifact", None)
-            target["confidence"] = (
-                "inferred" if item["provenance"]["source"] == "inferred" else "external"
+            target = replace(
+                target, schema_artifact=item.id, source_schema_artifact=None,
+                confidence=(Confidence.INFERRED if item.provenance.source is Source.INFERRED
+                            else Confidence.EXTERNAL),
             )
-        elif target["protocol"] != "graphql":
-            raise BrowserError(
-                "Operation documents can only be bound to GraphQL services."
-            )
-        elif item["id"] not in target["operationArtifacts"]:
-            target["operationArtifacts"].append(item["id"])
+        elif target.protocol is not Protocol.GRAPHQL:
+            raise BrowserError("Operation documents can only be bound to GraphQL services.")
+        elif item.id not in target.operation_artifacts:
+            target = replace(target, operation_artifacts=target.operation_artifacts + (item.id,))
+        targets[identifier] = target
 
 
-def combined_operations(items, schema_sdl):
+def combined_operations(items: tuple[Artifact, ...], schema_sdl: str):
     definitions = {}
     for item in items:
-        if len(item["content"].encode()) > MAX_DOCUMENT:
+        if len(item.content.encode()) > MAX_DOCUMENT:
             raise BrowserError("Operation document exceeds the 8 MiB limit.")
-        document = parse(item["content"], max_tokens=20000)
+        document = parse(item.content, max_tokens=20000)
         for definition in document.definitions:
             if (
                 definition.kind not in {"fragment_definition", "operation_definition"}
@@ -91,192 +116,146 @@ def combined_operations(items, schema_sdl):
     return text, names
 
 
-def normalize_bundle(value, *, bind_schema=(), bind_operations=()):
-    bundle = copy.deepcopy(validate_bundle(value))
-    if bundle["stage"] == "discovery":
-        sources = bundle.setdefault("sourceBundles", [])
-        source = {
-            "sha256": digest(value),
-            "producer": value["producer"],
-            "createdAt": value["createdAt"],
-        }
-        if source not in sources:
-            sources.append(source)
-    artifacts = {item["id"]: item for item in bundle["artifacts"]}
-    apply_bindings(bundle, artifacts, bind_schema, schema=True)
-    apply_bindings(bundle, artifacts, bind_operations, schema=False)
+def normalize_openapi(target: Service, source: Artifact, artifacts: ArtifactIndex) -> Service:
+    if target.operation_artifacts:
+        raise BrowserError("OpenAPI services must not contain GraphQL operation documents.")
+    spec = openapi_document(source.content)
+    methods = [
+        definition
+        for path in spec.get("paths", {}).values()
+        for method, definition in path.items()
+        if method.lower() in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+    ]
+    if not methods:
+        raise BrowserError("OpenAPI contains no endpoint operations.")
+    schema_id = artifacts.derive(
+        "normalized-openapi.json", Kind.OPENAPI, encoded(spec), (source.id,),
+    )
+    return replace(
+        target, schema_artifact=schema_id,
+        operation_names=tuple(sorted(item["operationId"] for item in methods if item.get("operationId"))),
+        status=(Status.REVIEW_REQUIRED
+                if spec.get("x-discovery-inferred") or target.confidence is Confidence.INFERRED
+                else Status.READY),
+    )
 
-    def derived(name, kind, content, parents):
-        item = artifact(name, kind, content, "normalized", derived_from=parents)
-        if item["id"] in parents:
-            # A producer may already supply this canonical document/name. Keep
-            # the source artifact intact instead of adding a self dependency.
-            if (artifacts[item["id"]]["kind"], artifacts[item["id"]]["content"]) != (
-                kind,
-                content,
-            ):
-                raise BrowserError(
-                    "A producer artifact collides with its normalized document ID."
-                )
-            return item["id"]
-        if item["id"] in artifacts:
-            prior = artifacts[item["id"]]
-            if (prior["kind"], prior["content"]) != (item["kind"], item["content"]):
-                raise BrowserError(
-                    "A producer artifact collides with a normalized artifact ID."
-                )
-            prior["provenance"]["derivedFrom"] = sorted(
-                set(prior["provenance"]["derivedFrom"] + list(parents))
-            )
-        else:
-            artifacts[item["id"]] = item
-        return item["id"]
 
-    for target in bundle["services"]:
-        source_id = target.get("sourceSchemaArtifact", target["schemaArtifact"])
-        target.pop("compiledOperationsArtifact", None)
-        target["status"], target["issues"], target["operationNames"] = "blocked", [], []
-        if not source_id:
-            target["issues"].append("Missing complete API schema.")
-            continue
-        target["sourceSchemaArtifact"] = source_id
-        source = artifacts[source_id]
-        expected = "openapi" if target["protocol"] == "openapi" else "graphql-schema"
-        try:
-            if (
-                source["kind"] != expected
-                or len(source["content"].encode()) > MAX_DOCUMENT
-            ):
-                raise BrowserError("Wrong schema kind or schema larger than 8 MiB.")
-            if expected == "openapi":
-                if target["operationArtifacts"]:
-                    raise BrowserError(
-                        "OpenAPI services must not contain GraphQL operation documents."
-                    )
-                spec = openapi_document(source["content"])
-                methods = [
-                    definition
-                    for path in spec.get("paths", {}).values()
-                    for method, definition in path.items()
-                    if method.lower()
-                    in {
-                        "get",
-                        "post",
-                        "put",
-                        "patch",
-                        "delete",
-                        "head",
-                        "options",
-                        "trace",
-                    }
-                ]
-                if not methods:
-                    raise BrowserError("OpenAPI contains no endpoint operations.")
-                target["schemaArtifact"] = derived(
-                    "normalized-openapi.json", "openapi", encoded(spec), [source_id]
-                )
-                target["operationNames"] = sorted(
-                    item["operationId"] for item in methods if item.get("operationId")
-                )
-                target["status"] = (
-                    "review_required"
-                    if spec.get("x-discovery-inferred")
-                    or target["confidence"] == "inferred"
-                    else "ready"
-                )
-            else:
-                schema_sdl = graphql_schema(source["content"])
-                target["schemaArtifact"] = derived(
-                    "normalized-schema.graphql",
-                    "graphql-schema",
-                    schema_sdl,
-                    [source_id],
-                )
-                documents = []
-                for reference in dict.fromkeys(target["operationArtifacts"]):
-                    item = artifacts[reference]
-                    if item["kind"] != "graphql-operations":
-                        raise BrowserError(
-                            "A GraphQL service references a non-operation artifact."
-                        )
-                    documents.append(item)
-                if not documents:
-                    raise BrowserError(
-                        "Missing operation documents for this GraphQL endpoint."
-                    )
-                text, names = combined_operations(documents, schema_sdl)
-                target["compiledOperationsArtifact"] = derived(
-                    "normalized-operations.graphql",
-                    "graphql-operations",
-                    text,
-                    [item["id"] for item in documents],
-                )
-                target["operationNames"], target["status"] = names, "ready"
-        except BrowserError as error:
-            target["issues"].append(str(error))
-        except Exception:
-            target["issues"].append(
-                "Contract validation failed; inspect the source definitions."
-            )
+def normalize_graphql(target: Service, source: Artifact, artifacts: ArtifactIndex) -> Service:
+    schema_sdl = graphql_schema(source.content)
+    schema_id = artifacts.derive(
+        "normalized-schema.graphql", Kind.GRAPHQL_SCHEMA, schema_sdl, (source.id,),
+    )
+    documents = tuple(artifacts.items[ref] for ref in dict.fromkeys(target.operation_artifacts))
+    if any(item.kind is not Kind.GRAPHQL_OPERATIONS for item in documents):
+        raise BrowserError("A GraphQL service references a non-operation artifact.")
+    if not documents:
+        raise BrowserError("Missing operation documents for this GraphQL endpoint.")
+    text, names = combined_operations(documents, schema_sdl)
+    compiled_id = artifacts.derive(
+        "normalized-operations.graphql", Kind.GRAPHQL_OPERATIONS, text,
+        tuple(item.id for item in documents),
+    )
+    return replace(
+        target, schema_artifact=schema_id, compiled_operations_artifact=compiled_id,
+        operation_names=tuple(names), status=Status.READY,
+    )
+
+
+def normalize_service(target: Service, artifacts: ArtifactIndex) -> Service:
+    source_id = target.source_schema_artifact or target.schema_artifact
+    target = replace(
+        target, compiled_operations_artifact=None, status=Status.BLOCKED,
+        issues=(), operation_names=(), source_schema_artifact=source_id,
+    )
+    if source_id is None:
+        return replace(target, issues=("Missing complete API schema.",))
+    source = artifacts.items[source_id]
+    expected = Kind.OPENAPI if target.protocol is Protocol.OPENAPI else Kind.GRAPHQL_SCHEMA
+    try:
+        if source.kind is not expected or len(source.content.encode()) > MAX_DOCUMENT:
+            raise BrowserError("Wrong schema kind or schema larger than 8 MiB.")
+        if target.protocol is Protocol.OPENAPI:
+            return normalize_openapi(target, source, artifacts)
+        return normalize_graphql(target, source, artifacts)
+    except BrowserError as error:
+        return replace(target, issues=(str(error),))
+    except GraphQLError:
+        return replace(target, issues=("GraphQL document parsing failed; inspect the source definitions.",))
+
+
+def unassigned_documents(artifacts: ArtifactIndex, services: tuple[Service, ...]) -> tuple[str, ...]:
     used = set()
-    for target in bundle["services"]:
-        used.update(target["operationArtifacts"])
+    for target in services:
+        used.update(target.operation_artifacts)
         used.update(
-            target[key]
-            for key in (
-                "schemaArtifact",
-                "sourceSchemaArtifact",
-                "compiledOperationsArtifact",
-            )
-            if target.get(key)
+            reference for reference in (
+                target.schema_artifact, target.source_schema_artifact,
+                target.compiled_operations_artifact,
+            ) if reference is not None
         )
-    unassigned = []
-    for item in artifacts.values():
-        parents = item["provenance"]["derivedFrom"]
-        if (
-            item["kind"] in {"openapi", "graphql-schema", "graphql-operations"}
-            and item["id"] not in used
-            and not (parents and all(parent in used for parent in parents))
-        ):
-            unassigned.append(item["id"])
-    bundle["artifacts"] = list(artifacts.values())
-    bundle["stage"] = "normalized"
-    bundle["normalization"] = {
-        "policyVersion": 1,
-        "unassignedArtifacts": sorted(unassigned),
-        "notes": [
-            "Form inventories and blocked request shapes remain evidence, not manufactured API contracts.",
-            "Readiness means a structurally valid generation input, not live compatibility.",
-        ],
-    }
-    return validate_bundle(bundle)
+    return tuple(sorted(
+        item.id for item in artifacts.items.values()
+        if item.kind in {Kind.OPENAPI, Kind.GRAPHQL_SCHEMA, Kind.GRAPHQL_OPERATIONS}
+        and item.id not in used
+        and not (item.provenance.derived_from
+                 and all(parent in used for parent in item.provenance.derived_from))
+    ))
+
+
+def normalize_manifest(manifest: Manifest, *, bind_schema=(), bind_operations=()) -> Manifest:
+    if type(manifest) is not Manifest:
+        raise BrowserError("Normalize requires a validated Manifest record.")
+    sources = manifest.source_bundles
+    if manifest.stage is Stage.DISCOVERY:
+        source = SourceBundle(digest(manifest.to_dict()), manifest.producer, manifest.created_at)
+        sources = sources or ()
+        if source not in sources:
+            sources += (source,)
+    artifacts = ArtifactIndex({item.id: item for item in manifest.artifacts})
+    targets = {item.id: item for item in manifest.services}
+    apply_bindings(targets, artifacts, bind_schema, schema=True)
+    apply_bindings(targets, artifacts, bind_operations, schema=False)
+    services = tuple(normalize_service(target, artifacts) for target in targets.values())
+    return replace(
+        manifest, stage=Stage.NORMALIZED, source_bundles=sources,
+        artifacts=tuple(artifacts.items.values()), services=services,
+        normalization=Normalization(
+            1, unassigned_documents(artifacts, services),
+            ("Form inventories and blocked request shapes remain evidence, not manufactured API contracts.",
+             "Readiness means a structurally valid generation input, not live compatibility."),
+        ),
+    )
+
+
+def normalize_bundle(value, *, bind_schema=(), bind_operations=()):
+    """JSON compatibility boundary for existing producers and command pipelines."""
+    return normalize_manifest(
+        Manifest.from_dict(value), bind_schema=bind_schema, bind_operations=bind_operations,
+    ).to_dict()
 
 
 def choose_service(bundle, identifier=None, *, allow_inferred=False):
-    targets = bundle["services"]
+    targets = Manifest.from_dict(bundle).services
     if identifier:
-        candidates = [item for item in targets if item["id"] == identifier]
+        candidates = [item for item in targets if item.id == identifier]
     else:
         candidates = [
-            item
-            for item in targets
-            if item["status"] == "ready"
-            or allow_inferred
-            and item["status"] == "review_required"
+            item for item in targets
+            if item.status is Status.READY
+            or allow_inferred and item.status is Status.REVIEW_REQUIRED
         ]
     if len(candidates) != 1:
-        choices = ", ".join(item["id"] + ":" + item["status"] for item in targets)
+        choices = ", ".join(item.id + ":" + (item.status.value if item.status else "not_normalized")
+                            for item in targets)
         raise BrowserError(
             "Select one service with --service. Available services: "
             + (choices or "none; import or bind an API contract first")
         )
     target = candidates[0]
-    if target["status"] == "blocked":
-        raise BrowserError(
-            "Selected service cannot generate: " + "; ".join(target["issues"])
-        )
-    if target["status"] == "review_required" and not allow_inferred:
-        raise BrowserError(
-            "Review inferred definitions, then use --allow-inferred to generate them."
-        )
-    return target
+    if target.status is None:
+        raise BrowserError("Normalize the manifest before selecting a service.")
+    if target.status is Status.BLOCKED:
+        raise BrowserError("Selected service cannot generate: " + "; ".join(target.issues or ()))
+    if target.status is Status.REVIEW_REQUIRED and not allow_inferred:
+        raise BrowserError("Review inferred definitions, then use --allow-inferred to generate them.")
+    return target.to_dict()

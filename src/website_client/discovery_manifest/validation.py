@@ -1,11 +1,37 @@
 """Validate the public versioned format, hashes and evidence references."""
 
 import json
+from functools import cache
 
 from jsonschema import Draft202012Validator, FormatChecker
 
 from ..browser import BrowserError
-from .model import MAX_ARTIFACT_BYTES, MAX_BUNDLE_BYTES, SCHEMA_PATH, VERSION, encoded, endpoint_url, sha256
+from .model import (
+    MAX_ARTIFACT_BYTES, MAX_BUNDLE_BYTES, SCHEMA_PATH, VERSION,
+    encoded, endpoint_url, sha256,
+)
+
+
+@cache
+def manifest_schema():
+    return json.loads(SCHEMA_PATH.read_text())
+
+
+@cache
+def record_validator(pointer):
+    schema = manifest_schema()
+    definition = schema
+    for part in pointer.removeprefix("#/").split("/"):
+        definition = definition[part]
+    return Draft202012Validator(
+        {"$ref": "#/$defs/record", "$defs": {**schema["$defs"], "record": definition}},
+        format_checker=FormatChecker(),
+    )
+
+
+def validate_record(pointer, value):
+    if next(record_validator(pointer).iter_errors(value), None):
+        raise BrowserError("Invalid manifest record; check the version 1 format.")
 
 
 def validate_bundle(value):
@@ -15,7 +41,7 @@ def validate_bundle(value):
         or value["version"] != VERSION
     ):
         raise BrowserError("Unsupported discovery bundle version; expected version 1.")
-    schema = json.loads(SCHEMA_PATH.read_text())
+    schema = manifest_schema()
     if next(
         Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value),
         None,
