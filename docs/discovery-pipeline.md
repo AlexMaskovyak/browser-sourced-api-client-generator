@@ -18,6 +18,18 @@ Browser discovery or another producer
                 -> generate: select one API and create its Python client
 ```
 
+The commands are the same for both supported API models:
+
+| Website API | Definitions needed for generation |
+| --- | --- |
+| REST/HTTP | OpenAPI describing its routes, methods and inputs. Discovery can download a published definition or infer one from samples; inference needs review. |
+| GraphQL | A complete GraphQL schema and operation documents identifying the queries or mutations to generate. |
+
+The manifest can hold both. Select the API you need at generation time. The
+tool does not currently generate from SOAP/WSDL, gRPC/protobuf or arbitrary custom
+RPC definitions. The browser may observe their HTTP traffic, but observation
+does not supply a supported contract. See [coverage and request policy](../ARCHITECTURE.md#http-discovery-and-supported-api-definitions).
+
 ## Prepare the environment
 
 Run from the repository root, where `pyproject.toml` is located. Use the existing

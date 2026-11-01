@@ -5,6 +5,12 @@ authenticated browser or an existing HAR, exports standard definitions, and uses
 OpenAPI and GraphQL generators to create standalone Python clients with endpoint
 commands and help. HAR is the HTTP Archive format used by browser network tools.
 
+For REST/HTTP APIs, it uses published OpenAPI definitions or exports inferred
+OpenAPI from captured routes for review. For GraphQL APIs, it uses a complete
+schema plus operation documents. These are two supported paths through the same
+discovery and generation commands. GraphQL is not required. Other API contract
+formats do not yet have dedicated client-generation support.
+
 ## Start here: website to client
 
 Run these steps from the repository root, where `pyproject.toml` is located.
@@ -196,6 +202,14 @@ exploration. Change them with `--max-pages`, `--max-actions`, `--max-depth` and
 The starting-page scan's `--observe-seconds` option cannot be combined with exploration.
 Exploration implies `--auto`; the simpler starting-page scan remains available
 below. Output directories must be new. Ctrl+C cancels and closes the browser.
+
+HTTP/REST traffic is collected as route and shape evidence for OpenAPI. GraphQL
+has additional operation parsing, which lets the explorer recognize queries
+carried by POST. Other POSTs are blocked when their read/write behavior is unknown,
+so a REST search implemented with POST may be missed. Discovery does not currently
+use an OpenAPI definition to authorize those requests. This limitation applies to
+the automatic walk; it does not prevent generation from an externally supplied
+OpenAPI definition. See [API coverage and architecture](ARCHITECTURE.md#http-discovery-and-supported-api-definitions).
 
 This is a bounded traversal, not proof of whole-site coverage. Custom widgets,
 popups, cross-site pages, persisted GraphQL operations and unknown read-via-POST

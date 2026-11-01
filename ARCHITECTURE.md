@@ -1,5 +1,29 @@
 # Architecture
 
+## HTTP discovery and supported API definitions
+
+The browser discovers HTTP requests: addresses, methods, parameters, request and
+response shapes, and definitions served by the website. The common pipeline
+collects evidence, associates definitions with endpoints, validates them, then
+generates a standalone client. It does not require the website to use GraphQL.
+
+| API model | Discovery and definition | Client generator |
+| --- | --- | --- |
+| HTTP APIs, including REST | Capture routes and sample shapes. Download published OpenAPI when available; otherwise export inferred OpenAPI for review. | `openapi-python-client` consumes validated OpenAPI. |
+| GraphQL | Capture named operations, extract supported frontend operation declarations, and obtain a complete schema through introspection or an external source. | Ariadne Codegen consumes the schema plus selected operation documents. |
+
+OpenAPI describes HTTP operations; GraphQL has its own schema and execution
+model. JSON or YAML is a definition's serialization, not another API model.
+Both supported paths use the same manifest, offline normalization, API selection,
+file/pipe interfaces and generated-client authentication support.
+
+Current definition readers and generation backends support OpenAPI 3.0/3.1 and
+GraphQL. Observing an HTTP request does not establish that its payload format is
+supported for generation. SOAP/WSDL, gRPC/protobuf and custom RPC contracts have
+no dedicated reader or generator here; supporting one would require that work.
+Form fields and blocked request shapes remain evidence until a usable API
+definition is available.
+
 ## Portable discovery pipeline
 
 The versioned discovery manifest is the exchange format between producers and
@@ -84,14 +108,23 @@ production compatibility nor endpoint completeness.
 Optional algorithmic exploration uses deterministic page and control traversal.
 Python owns the queue, action classification and network policy. Playwright owns
 DOM inspection and interactions. The site remains the source of observed API
-traffic. Form actions/fields and frontend GraphQL documents are declarations,
-not proof that a write was executed or that its backend contract is complete.
+traffic. HTTP route evidence feeds the OpenAPI path. Form actions and fields
+remain declarations until associated with a backend contract. GraphQL additionally
+has a parser for named query/mutation documents found in supported frontend source
+literals. Extracting a declaration does not prove its operation was executed or
+that its backend contract is complete.
 
 Exploration starts after human login in a fresh tab with service workers blocked.
 The login tab closes so its existing WebSockets cannot bypass exploration rules.
-Requests are intercepted before transmission: navigation stays on the website,
-GET/HEAD and parsed GraphQL queries are permitted, and unknown writes/mutations
-are blocked and reported. Routed WebSockets are never connected to their server. Only navigation controls are
+Requests are intercepted before transmission. Navigation stays on the website;
+ordinary GET/HEAD reads and OPTIONS are permitted subject to action-path and
+query checks. POST is permitted only when its payload parses as a selected
+GraphQL query. Unknown POSTs and write methods are blocked and reported. Thus a
+REST search endpoint using POST may be omitted even if it is a read. The current
+policy does not use OpenAPI or another definition to authorize such requests.
+GraphQL mutations are blocked too. These are exploration limits, not a claim that
+every POST writes or every GET is harmless.
+Routed WebSockets are never connected to their server. Only navigation controls are
 clicked; forms and submit controls are inventoried rather than executed. Page
 content is untrusted data and is never executed as Python or model instructions.
 
