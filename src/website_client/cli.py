@@ -76,6 +76,27 @@ def main(args=None):
         default=[],
         help="Explicit HTTPS endpoint to introspect with --auto; repeat for multiple endpoints.",
     )
+    discover.add_argument(
+        "--explore",
+        action="store_true",
+        help="Walk pages, menus, tabs and pagination algorithmically, inventory forms and loaded frontend operations, then discover schemas. Implies --auto; no model or API key.",
+    )
+    discover.add_argument(
+        "--max-pages", type=int, help="Exploration page limit, 1 to 100 (default 20)."
+    )
+    discover.add_argument(
+        "--max-actions",
+        type=int,
+        help="Exploration control-click limit, 1 to 500 (default 60).",
+    )
+    discover.add_argument(
+        "--max-depth", type=int, help="Exploration link depth, 0 to 10 (default 3)."
+    )
+    discover.add_argument(
+        "--explore-seconds",
+        type=int,
+        help="Exploration time limit, 1 to 1800 seconds (default 120).",
+    )
     generate_command = commands.add_parser(
         "generate",
         help="Generate a standalone Python client from a standard definition.",
@@ -121,6 +142,38 @@ def main(args=None):
             print(json.dumps(report))
             return 0
         if options.command == "discover":
+            exploration_options = None
+            if options.explore:
+                from .exploration import SiteExplorer, validate_exploration
+
+                options.auto = True
+                exploration_options = {
+                    "max_pages": options.max_pages
+                    if options.max_pages is not None
+                    else 20,
+                    "max_actions": options.max_actions
+                    if options.max_actions is not None
+                    else 60,
+                    "max_depth": options.max_depth
+                    if options.max_depth is not None
+                    else 3,
+                    "duration_seconds": options.explore_seconds
+                    if options.explore_seconds is not None
+                    else 120,
+                }
+                validate_exploration(**exploration_options)
+            elif any(
+                value is not None
+                for value in (
+                    options.max_pages,
+                    options.max_actions,
+                    options.max_depth,
+                    options.explore_seconds,
+                )
+            ):
+                raise BrowserError(
+                    "Page, action, depth and exploration time options require --explore."
+                )
             output = new_output(options.output)
             automatic_report = None
             if not 1 <= options.max_entries <= 10000:
@@ -169,6 +222,7 @@ def main(args=None):
                     options.browser or "chrome",
                     options.browser_path,
                     on_event=observer.event if options.auto else None,
+                    block_service_workers=options.explore,
                 ) as session:
                     session.confirm_login(
                         prompt="Log in and return to the requested website. Press Enter here to start "
@@ -181,6 +235,13 @@ def main(args=None):
                             file=sys.stderr,
                             flush=True,
                         )
+                        explorer = (
+                            SiteExplorer(session, **exploration_options)
+                            if options.explore
+                            else None
+                        )
+                        if explorer is not None:
+                            explorer.prepare()
                         result, automatic_report = SelfDiscovery(
                             session,
                             observer,
@@ -188,6 +249,7 @@ def main(args=None):
                             max_probes,
                             observe_seconds,
                             options.graphql_endpoint,
+                            explorer=explorer,
                         ).run()
                     else:
                         result = NetworkCapture(session, options.max_entries).run()
@@ -199,6 +261,10 @@ def main(args=None):
             if automatic_report is not None:
                 files["self-discovery.json"] = (
                     json.dumps(automatic_report, indent=2) + "\n"
+                )
+            if automatic_report is not None and "exploration" in automatic_report:
+                files["exploration.json"] = (
+                    json.dumps(automatic_report["exploration"], indent=2) + "\n"
                 )
             publish(output, files)
             print(

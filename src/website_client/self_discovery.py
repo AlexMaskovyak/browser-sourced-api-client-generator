@@ -167,6 +167,7 @@ class SelfDiscovery:
         max_probes=DEFAULT_MAX_PROBES,
         observe_seconds=DEFAULT_OBSERVE_SECONDS,
         graphql_endpoints=(),
+        explorer=None,
     ):
         validate_settings(max_probes, observe_seconds, graphql_endpoints)
         self.session = session
@@ -176,10 +177,13 @@ class SelfDiscovery:
         self.observe_seconds = observe_seconds
         self.explicit_endpoints = list(graphql_endpoints)
         self.attempts = []
+        self.explorer = explorer
 
     def _event(self, method, params):
         self.observer.event(method, params)
         self.capture.event(method, params)
+        if self.explorer is not None:
+            self.explorer.event(method, params)
 
     def _candidates(self):
         candidates = [
@@ -294,12 +298,18 @@ class SelfDiscovery:
                     "maxPostDataSize": MAX_BODY,
                 },
             )
-            self.session._page.reload(wait_until="domcontentloaded", timeout=30_000)
-            deadline_seconds = time.monotonic() + self.observe_seconds
-            while time.monotonic() < deadline_seconds:
-                self.session._check()
-                self.capture.drain()
+            exploration = None
+            if self.explorer is not None:
+                exploration = self.explorer.run(self.capture, self.observer)
+            else:
+                self.session._page.reload(wait_until="domcontentloaded", timeout=30_000)
+                deadline_seconds = time.monotonic() + self.observe_seconds
+                while time.monotonic() < deadline_seconds:
+                    self.session._check()
+                    self.capture.drain()
             candidates = self._candidates()
+            if self.explorer is not None:
+                self.explorer.freeze()
             for kind, endpoint in candidates[: self.max_probes]:
                 self.session._check()
                 self._probe(kind, endpoint)
@@ -323,8 +333,12 @@ class SelfDiscovery:
                 "completeServiceCoverage": False,
                 "businessOperationsReplayed": False,
             }
+            if exploration is not None:
+                report["exploration"] = exploration
             return result, report
         finally:
-            connection.on_event = previous
+            if self.explorer is not None:
+                self.explorer.close()
+            self.session._connection.on_event = previous
             self.observer.discovering = False
             self.observer.clear()
