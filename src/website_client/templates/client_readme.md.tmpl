@@ -20,6 +20,9 @@ API, supply its address with `--login-url`.
 Chrome must be installed and login needs an interactive terminal. Chromium uses
 `--browser chromium`; custom executable locations use `--browser-path`. Operation
 help explains `--session-header` for additional observed session-header names.
+Playwright's Python package includes its Node driver. No separate Node installation
+or Playwright browser download is needed because the command uses installed Chrome
+or Chromium.
 
 The temporary browser closes after the operation. Each command requires a fresh
 sign-in. Ctrl+C cancels. Browser session state is not saved or printed. As an

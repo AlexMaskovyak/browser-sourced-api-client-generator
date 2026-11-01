@@ -131,7 +131,7 @@ def configure_openapi_package(project, name, package):
     metadata += f'\n[tool.poetry.scripts]\n{name} = "{package}._cli:entrypoint"\n'
     metadata = metadata.replace(
         "[tool.poetry.dependencies]\n",
-        '[tool.poetry.dependencies]\nwebsocket-client = ">=1.9,<2"\n',
+        '[tool.poetry.dependencies]\nplaywright = ">=1.58,<2"\n',
         1,
     )
     metadata_path.write_text(metadata)
