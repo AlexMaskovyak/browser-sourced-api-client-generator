@@ -15,6 +15,7 @@ RUN --mount=type=cache,target=/root/.cache/pip python docker/cache_client_depend
 COPY src ./src
 COPY tests ./tests
 COPY docker ./docker
+COPY examples ./examples
 RUN poetry build --format wheel && python -m pip install --no-deps dist/*.whl
 RUN useradd --create-home --uid 1000 tester
 USER tester

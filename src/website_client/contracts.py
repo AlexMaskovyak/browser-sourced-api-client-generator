@@ -219,6 +219,8 @@ class FrontendContracts:
                                         item["document"].encode()
                                     ).hexdigest()
                                 ] = item["document"]
+                                digest = hashlib.sha256(item["document"].encode()).hexdigest()
+                                self.discovery.document_declarations.setdefault(digest, set()).add(url)
                 self.modules.append({"url": safe_address(url), "operations": names})
             except Exception:
                 self.omitted += 1

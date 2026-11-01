@@ -288,7 +288,7 @@ def write_project_readme(project, name):
     readme.write_text(introduction + upstream_readme)
 
 
-def write_generation_report(project, source):
+def write_generation_report(project, source, operations_source=None, lineage=None):
     report = {
         "generator": project.generator_name,
         "generatorVersion": importlib.metadata.version(project.generator_name),
@@ -296,6 +296,15 @@ def write_generation_report(project, source):
         "operations": list(project.operations),
         "liveVerified": False,
     }
+    if operations_source is not None:
+        report["operationsSha256"] = hashlib.sha256(
+            operations_source.encode()
+        ).hexdigest()
+        report["generatedOperationsSha256"] = hashlib.sha256(
+            (project.directory / "operations.graphql").read_bytes()
+        ).hexdigest()
+    if lineage is not None:
+        report["lineage"] = lineage
     write_json(project.directory / "generation.json", report)
     return report
 
@@ -324,21 +333,34 @@ def publish_tree(source, output):
         ) from None
 
 
-def generate(output, name="service-client", openapi=None, schema=None, operations=None):
+def generate(
+    output,
+    name="service-client",
+    openapi=None,
+    schema=None,
+    operations=None,
+    lineage=None,
+):
     output = new_output(output)
     package = package_name_for(name)
     source = read_document(openapi or schema)
+    operations_source = (
+        read_document(operations) if not openapi and operations else None
+    )
 
     # Each backend writes into private staging. Shared packaging and publication
     # occur only after upstream generation and metadata extraction succeed.
     with tempfile.TemporaryDirectory(prefix="website-client-generation-") as directory:
         stage = Path(directory)
+        if operations_source is not None:
+            operations = stage / "input-operations.graphql"
+            operations.write_text(operations_source, encoding="utf-8")
         if openapi:
             project = generate_openapi_project(stage, name, package, source)
         else:
             project = generate_graphql_project(stage, name, package, source, operations)
         write_runtime_files(project)
         write_project_readme(project, name)
-        report = write_generation_report(project, source)
+        report = write_generation_report(project, source, operations_source, lineage)
         publish_tree(project.directory, output)
         return report

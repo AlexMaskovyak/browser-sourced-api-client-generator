@@ -1,6 +1,5 @@
 """Find service definitions with bounded reads in an authenticated browser."""
 
-import hashlib
 import json
 import re
 import time
@@ -172,7 +171,9 @@ class SelfDiscovery:
         validate_settings(max_probes, observe_seconds, graphql_endpoints)
         self.session = session
         self.observer = observer
-        self.capture = NetworkCapture(session, max_entries, defer_bodies=explorer is not None)
+        self.capture = NetworkCapture(
+            session, max_entries, defer_bodies=explorer is not None
+        )
         self.max_probes = max_probes
         self.observe_seconds = observe_seconds
         self.explicit_endpoints = list(graphql_endpoints)
@@ -204,7 +205,7 @@ class SelfDiscovery:
         ]
         return list(dict.fromkeys(candidates))
 
-    def _save_definition(self, response, kind):
+    def _save_definition(self, response, kind, endpoint=None):
         text = response.text
         if kind == "graphql":
             value = graphql_schema(text)
@@ -216,8 +217,9 @@ class SelfDiscovery:
             except BrowserError:
                 value = graphql_schema(text)
                 definition_kind = "graphql-schema"
-        digest = hashlib.sha256(value.encode()).hexdigest()
-        self.capture.discovery.definitions[(definition_kind, digest)] = value
+        self.capture.discovery.record_definition(definition_kind, value, endpoint)
+        if kind == "graphql" and endpoint:
+            self.capture.discovery.graphql_endpoints.add(endpoint)
         return definition_kind
 
     def _probe(self, kind, endpoint):
@@ -271,7 +273,9 @@ class SelfDiscovery:
                 attempt["outcome"] = "http_error"
             else:
                 try:
-                    attempt["definitionKind"] = self._save_definition(response, kind)
+                    attempt["definitionKind"] = self._save_definition(
+                        response, kind, endpoint
+                    )
                     attempt["outcome"] = "found"
                 except BrowserError:
                     attempt["outcome"] = (
