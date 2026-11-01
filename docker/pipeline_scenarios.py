@@ -112,6 +112,7 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
         ]
     )
     site.exploration = True
+    site.introspection_disabled = True
     writes_before = site.api_writes
     command = Command(
         site, executable="/bin/bash", args=["-o", "pipefail", "-c", script]
@@ -125,6 +126,8 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
         command.cleanup_verified()
         assert_no_credentials(command.output, site)
         report = json.loads((output / "generation.json").read_text())
+        assert report["generationMode"] == "operation-documents"
+        assert report["schemaValidated"] is False
         assert report["lineage"]["service"]["id"] == identifier
         assert report["lineage"]["sourceBundles"]
         assert site.api_writes == writes_before
@@ -136,3 +139,4 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
     finally:
         command.stop()
         site.exploration = False
+        site.introspection_disabled = False

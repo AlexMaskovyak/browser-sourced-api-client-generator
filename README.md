@@ -1,15 +1,15 @@
 # Browser-Sourced API Client Generator
 
-Browser-Sourced API Client Generator discovers website endpoints from an
-authenticated browser or an existing HAR, exports standard definitions, and uses
-OpenAPI and GraphQL generators to create standalone Python clients with endpoint
-commands and help. HAR is the HTTP Archive format used by browser network tools.
+Browser-Sourced API Client Generator records requests and operations from an
+authenticated website or an existing HAR, then generates standalone Python clients
+with endpoint commands and help. HAR is the HTTP Archive format used by browser
+network tools. Published schemas are optional enrichment.
 
-For REST/HTTP APIs, it uses published OpenAPI definitions or exports inferred
-OpenAPI from captured routes for review. For GraphQL APIs, it uses a complete
-schema plus operation documents. These are two supported paths through the same
-discovery and generation commands. GraphQL is not required. Other API contract
-formats do not yet have dedicated client-generation support.
+For REST/HTTP APIs, captured routes and sample shapes produce inferred OpenAPI
+for review; a published OpenAPI definition can replace those samples. For GraphQL,
+named operation documents generate callable methods directly. If a complete schema
+is supplied or discovered, Ariadne Codegen adds schema-based models and validation.
+Other API contract formats do not yet have dedicated generation support.
 
 ## Start here: website to client
 
@@ -88,7 +88,10 @@ poetry run website-client generate --manifest ./captures/walk/normalized.json --
 
 This also runs offline. It creates a standalone Python project, API methods,
 endpoint commands and `generation.json`, which records which definitions were
-used. Generation does not call the service's business operations.
+used. Generation does not call the service's business operations. GraphQL operation
+clients validate declared variables and return JSON dictionaries. Unknown custom
+input fields and response shapes remain untyped without an optional schema;
+`generation.json` records whether schema validation was available.
 
 ### 5. Install the client and see its commands
 

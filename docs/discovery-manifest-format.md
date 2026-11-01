@@ -34,7 +34,8 @@ artifact IDs and `producers`. Preserve originals when adding derived documents.
 
 A service has `id`, `protocol` (`openapi` or `graphql`), `endpoint`,
 `schemaArtifact`, `operationArtifacts` and `confidence`. `schemaArtifact` may be
-null in incomplete discovery. GraphQL operation documents belong to a particular
+null for operation-document generation. A complete schema is optional.
+GraphQL operation documents belong to a particular
 endpoint, not a global pool. The default service ID is `service-` followed by the
 first 16 hexadecimal characters of SHA-256 of `protocol + "\0" + endpoint`.
 The endpoint is canonical HTTPS, with a lowercase authority and `/` for an empty
@@ -49,8 +50,10 @@ blocked request shapes without manufacturing a server schema from them.
 
 ## Normalization and selection
 
-Normalization validates schemas, combines equivalent operation definitions and
-validates GraphQL operations against their assigned schema. Conflicting operation
+Normalization parses operation documents, resolves their fragments and variables,
+and validates operations against a schema when one is assigned. Without a schema,
+valid bound operation documents remain generation-ready. Complete schemas enable
+stronger validation and generated input/response models. Conflicting operation
 definitions block that service. Similar schemas are not evidence that an unbound
 document belongs to an endpoint. Use explicit binding flags or have the upstream
 producer supply the association.
