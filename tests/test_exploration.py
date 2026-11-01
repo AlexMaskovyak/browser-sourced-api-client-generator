@@ -159,6 +159,7 @@ def test_frontend_declarations_are_separate_from_observed_endpoints():
         },
     )
     frontend.event("Network.loadingFinished", {"requestId": "1"})
+    connection.call.assert_not_called()
     frontend.drain()
     item = frontend.modules[0]["operations"][0]
     assert item["kind"] == "mutation" and item["executed"] is False
@@ -195,6 +196,16 @@ def test_exploration_refuses_a_session_with_active_service_workers():
         SiteExplorer(browser).prepare()
 
 
+def test_websocket_guard_never_connects_to_the_server_or_waits_for_close():
+    browser = SimpleNamespace(current_url=lambda: "https://example.test/app")
+    explorer = SiteExplorer(browser)
+    socket = Mock()
+    explorer._websocket(socket)
+    socket.connect_to_server.assert_not_called()
+    socket.close.assert_not_called()
+    assert explorer.blocked[0]["sent"] is False
+
+
 @pytest.mark.parametrize(
     "settings", [(0, 60, 3, 120), (20, 0, 3, 120), (20, 60, -1, 120), (20, 60, 3, 0)]
 )
@@ -209,6 +220,7 @@ def test_exploration_budgets_are_validated(settings):
         ["--har", "file.har", "--explore"],
         ["--url", "https://example.test", "--max-pages", "3"],
         ["--url", "https://example.test", "--explore", "--max-pages", "0"],
+        ["--url", "https://example.test", "--explore", "--observe-seconds", "3"],
     ],
 )
 def test_exploration_cli_validation_precedes_login(monkeypatch, tmp_path, arguments):

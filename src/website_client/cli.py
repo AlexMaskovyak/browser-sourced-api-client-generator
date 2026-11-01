@@ -146,6 +146,10 @@ def main(args=None):
             if options.explore:
                 from .exploration import SiteExplorer, validate_exploration
 
+                if options.observe_seconds is not None:
+                    raise BrowserError(
+                        "--observe-seconds is for the starting-page --auto scan. Use --explore-seconds for exploration."
+                    )
                 options.auto = True
                 exploration_options = {
                     "max_pages": options.max_pages

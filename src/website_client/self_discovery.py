@@ -172,7 +172,7 @@ class SelfDiscovery:
         validate_settings(max_probes, observe_seconds, graphql_endpoints)
         self.session = session
         self.observer = observer
-        self.capture = NetworkCapture(session, max_entries)
+        self.capture = NetworkCapture(session, max_entries, defer_bodies=explorer is not None)
         self.max_probes = max_probes
         self.observe_seconds = observe_seconds
         self.explicit_endpoints = list(graphql_endpoints)
