@@ -1,5 +1,77 @@
 # Delivery plan
 
+## Command walkthrough
+
+1. [x] Put installation, discovery, normalization, API selection, generation and
+   generated-client help at the start of the README. Explain the login prompt and
+   files produced at each step; move the login-only check out of the main path.
+2. [x] Align the detailed guide, document how to inspect API status and obtain an API
+   ID, and include actual commands for continuing from an existing capture.
+3. [x] Check documented flags, links and the offline commands against the installed
+   CLI. Commit and push the documentation to PR 8; keep browser actions manual.
+
+Verified the documented flags and local Markdown links, including section anchors.
+Executed the offline import, normalization, status inspection, explicit API
+selection and generation sequence on the sample OpenAPI definition. Installed
+the resulting standalone project with Poetry and ran its help successfully.
+No new live website discovery or service operation was performed for this
+documentation change; browser sign-in remains an explicit manual step.
+
+## PR 8 adversarial review and developer guidance
+
+1. [x] Reproduce merge and chaining failures with focused tests. Verify schema
+   replacement after normalization, producer ordering, timestamp interoperability,
+   malformed upstream input and upstream failure after complete JSON output.
+2. [x] Split manifest construction, validation, transport and merging into owned
+   modules. Keep the version 1 exchange format and existing CLI flags compatible.
+   Repair stale schema selection and any demonstrated interoperability failures.
+3. [x] Rewrite the pipeline documentation around developer tasks: run a saved capture,
+   chain commands, connect another producer, then consult the format reference.
+   Rename the independent producer example to describe its actual purpose.
+4. [x] Run focused regressions, the full suite, package checks and installed Docker
+   scenarios. Push coherent commits to PR 8 and report remaining pipeline limits.
+
+Complete when review comments have concrete changes, failure-path evidence joins
+the successful handoff tests, and instructions explain inputs, outputs, exit status,
+manual login and recovery without requiring this conversation.
+
+Verified: 163 tests pass locally and in Docker, alongside all 21 installed-command
+scenarios. Poetry lock checks, source/wheel builds and local documentation links
+pass. Regressions reproduced stale normalized-schema selection, order-dependent
+inferred-schema conflicts and lowercase RFC 3339 timestamp failures before fixing
+them. Process-level tests prove truncated input prevents generation and `pipefail`
+cannot undo generation after a producer emits valid JSON and subsequently fails.
+The guide documents staged `&&` execution for that boundary. Normalization may
+succeed while retaining blocked APIs; readiness is checked again by generation.
+
+## Portable discovery and normalization
+
+1. [x] Define a versioned, self-contained JSON bundle and public JSON Schema. Preserve
+   every discovery file with its hash, producer and provenance. Record endpoint
+   associations when evidence is collected, not from numbered filenames later.
+2. [x] Normalize and merge bundles into endpoint-specific contracts. Validate schema
+   and operation documents, preserve unresolved declarations and reject conflicts.
+   Let an external schema producer complete a capture with a missing schema.
+3. [x] Add file/directory/stdin inputs and stdout outputs: discovery export, standard
+   definition import, normalization and generation from bundles. Preserve legacy
+   file-based generation. Record bundle, schema and operation hashes in clients.
+4. [x] Test malformed versions, hashes, ambiguous APIs, conflicting operations,
+   inferred definitions and file/pipe equivalence. In Docker, copy only a walk's
+   manifest and generate/install clients from it. Exercise an independent producer
+   and a browser-to-normalize-to-generate pipe. Document the executable pipeline.
+
+Completion requires the focused tests, full suite, Poetry checks, builds and clean
+container scenarios to pass, followed by a separate PR based on exploration PR #7.
+Normalization must not invent a backend contract from an unverified form report.
+
+Verified: 154 Python tests pass locally and in Docker, with Poetry lock validation
+and source/wheel builds. All 21 installed-command container scenarios pass. Both
+client formats are generated, installed and exercised using only a copied manifest
+after deleting the original walk directory. A standard-library producer runs with
+`python -S` through normalize/generate pipes. A real temporary browser login and
+full exploration walk pipe through normalization into generation. These are local
+HTTPS fixture checks, not production compatibility or whole-service coverage.
+
 ## Algorithmic site exploration
 
 1. [x] Traverse same-origin pages, navigation menus, tabs and pagination in a stable
