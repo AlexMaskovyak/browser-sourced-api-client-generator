@@ -44,11 +44,12 @@ Paths below are relative to `src/website_client/`.
 Project code is Python. Poetry manages dependencies and builds. Generated packages
 have their own dependencies and can run independently of this repository.
 
-`discovery_manifest/records.py` converts manifest JSON to immutable dataclasses
-for normalization and back to the same public JSON format. Construction and
-replacement check field types and schema rules; document hashes and manifest
-references are also validated. Nested collections are tuples, so normalization
-creates replacements rather than mutating producer data.
+`discovery_manifest/records.py` supplies immutable dataclasses throughout capture,
+import, merging, normalization and generation. JSON is parsed or serialized at
+input/output; standard OpenAPI and HAR documents keep their native formats.
+Construction and replacement check field types and schema rules. Document hashes
+and manifest references are also validated. Nested collections are tuples;
+changes create new records rather than mutating producer data.
 
 ## HTTP discovery and supported API definitions
 

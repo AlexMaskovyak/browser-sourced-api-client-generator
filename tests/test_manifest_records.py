@@ -1,6 +1,7 @@
 """Domain records reject invalid construction and preserve the public JSON."""
 
 from dataclasses import FrozenInstanceError, replace
+import json
 from pathlib import Path
 
 import pytest
@@ -142,3 +143,65 @@ def test_typed_factories_reject_mutable_or_mislabelled_inputs():
         Service.create(Protocol.GRAPHQL, "https://example.test/graphql", operations="abc")
     with pytest.raises(BrowserError):
         Manifest.create(created_at="")
+
+
+def test_merge_rejects_colliding_document_ids_with_different_valid_hashes():
+    from website_client.discovery_manifest.merging import merge_manifests
+    from website_client.discovery_manifest import sha256
+
+    first = Manifest.from_dict(example_manifest())
+    different = "a different source document"
+    collision = replace(first.artifacts[0], content=different, sha256=sha256(different))
+    second = replace(first, artifacts=(collision,))
+    with pytest.raises(BrowserError, match="Conflicting artifact IDs"):
+        merge_manifests((first, second))
+
+
+def test_merge_uses_published_evidence_for_equal_bytes_without_mutating_inputs():
+    from website_client.discovery_manifest.merging import merge_manifests
+    from website_client.discovery_manifest.records import Confidence
+
+    published = Manifest.from_dict(example_manifest())
+    inferred = replace(
+        published, services=(replace(published.services[0], confidence=Confidence.INFERRED),),
+    )
+    for inputs in ((inferred, published), (published, inferred)):
+        merged = merge_manifests(inputs)
+        assert merged.services[0].confidence is Confidence.EXTERNAL
+    assert inferred.services[0].confidence is Confidence.INFERRED
+
+
+def test_merge_clears_computed_schema_selection_on_records():
+    from website_client.discovery_manifest.merging import merge_manifests
+
+    original = Manifest.from_dict(example_manifest())
+    normalized = normalize_manifest(original)
+    merged = merge_manifests((normalized, original))
+    target = merged.services[0]
+    assert target.schema_artifact == original.services[0].schema_artifact
+    assert target.source_schema_artifact is None
+    assert target.status is None
+    assert normalized.services[0].status is Status.READY
+    assert normalize_manifest(merged).services[0].status is Status.READY
+
+
+def test_capture_transport_and_api_selection_exchange_records(tmp_path):
+    from website_client.bundle_capture import capture_manifest
+    from website_client.discovery import Discovery
+    from website_client.discovery_manifest.transport import read_manifest, write_manifest
+    from website_client.normalization import select_service
+
+    spec = json.loads((Path(__file__).parent / "fixtures/openapi.json").read_text())
+    spec["servers"] = [{"url": "https://example.test/"}]
+    content = json.dumps(spec)
+    captured = capture_manifest(Discovery(), {"openapi-downloaded-0001.json": content})
+    assert isinstance(captured, Manifest)
+    assert isinstance(captured.artifacts[0], Artifact)
+    saved = tmp_path / "manifest.json"
+    write_manifest(captured, saved)
+    restored = read_manifest(saved)
+    assert restored == captured
+    target = select_service(normalize_manifest(restored))
+    assert isinstance(target, Service)
+    assert target.protocol is Protocol.OPENAPI
+    assert target.status is Status.READY
