@@ -65,6 +65,81 @@ network during execution. Playwright's bundled Node driver runs inside the
 container. No production credentials are used.
 These tests do not establish production service compatibility.
 
+## Chain discovery, normalization and client generation
+
+Every new discovery directory contains `manifest.json`, a version 1 portable
+bundle. It embeds all reports, sanitized traffic, schemas and operation documents
+with content hashes and API associations. Copying this file is sufficient; later
+commands do not need the original directory or browser session.
+
+From the repository root, install with `poetry sync --with dev`. Browser discovery
+also needs installed Chrome or Chromium and an interactive terminal. Replace the
+example website address and use new output names for each run:
+
+```sh
+mkdir -p captures clients
+poetry run website-client discover --url https://app.example.com --explore --output ./captures/walk
+poetry run website-client normalize --input ./captures/walk --output ./contracts.json
+poetry run website-client generate --bundle ./contracts.json --name site-client --output ./clients/site-client
+```
+
+Normalization reports service IDs and readiness on stderr. Generation selects the
+only ready API automatically. If several are ready, repeat generation with
+`--service` followed by one reported ID, using a separate client name and output
+directory for each. `generate --bundle ./captures/walk` also normalizes directly.
+Reports and unresolved declarations stay in the bundle; they are not copied into
+the standalone client. `generation.json` records their lineage and selected hashes.
+
+The same handoff works through stdout/stdin. This example assumes one ready API;
+otherwise add the selected `--service` ID to the final command:
+
+```sh
+set -o pipefail
+poetry run website-client discover --url https://app.example.com --explore --output ./captures/piped-walk --emit-bundle |
+  poetry run website-client normalize --input - |
+  poetry run website-client generate --bundle - --name piped-client --output ./clients/piped-client
+```
+
+Sign in and press Enter in the first command's terminal. Progress goes to stderr;
+stdout carries JSON. No saved login or credentials are exported. Generation is
+offline; executing the generated client's API commands requires fresh runtime
+authentication. `pipefail` makes the shell report a failed upstream command.
+
+Other producers can emit this bundle directly or use `import` to wrap OpenAPI or
+GraphQL definitions. Here is a runnable offline example using this repository's
+sample OpenAPI file; it opens no browser and sends no service requests:
+
+```sh
+set -o pipefail
+poetry run website-client import --openapi ./tests/fixtures/openapi.json --endpoint https://api.example.com |
+  poetry run website-client normalize --input - |
+  poetry run website-client generate --bundle - --name sample-client --output ./clients/sample-client
+```
+
+GraphQL import accepts `--graphql-schema` for SDL or introspection JSON,
+`--operations` for query/mutation documents and a required `--endpoint`.
+Schema-only import is supported: omit `--operations`, then merge it with a capture
+using repeated `normalize --input` arguments. Matching protocol/endpoint service
+IDs let the imported schema complete the capture's observed operations. Conflicting
+schemas for one service are rejected; use explicit versioned service IDs when the
+producer supplies distinct API versions.
+
+For unassociated evidence, `normalize --bind-schema SERVICE_ID=ARTIFACT_ID_OR_NAME`
+or `--bind-operations SERVICE_ID=ARTIFACT_ID_OR_NAME` makes an explicit association.
+These flags do not claim live verification. Inferred OpenAPI remains
+`review_required`; inspect it before generation with `--allow-inferred`. A form
+inventory does not become a verified backend contract merely by normalization.
+Multiple services, missing schemas and conflicting operations remain visible.
+
+All offline commands accept `-` for stdin. `normalize` and `import` default to
+stdout; `--output` creates a new private JSON file instead. Existing outputs are
+never replaced. Invalid versions, hashes or contracts stop the pipeline. Old walk
+directories without a manifest can still supply their individual definition files
+through `import` or the legacy generation flags below.
+
+See [the producer format](docs/discovery-bundles.md) and the independent
+[standard-library producer](examples/produce_bundle.py).
+
 ## Explore pages and discover read and write contracts
 
 Use exploration when the API calls you need appear on other pages, inside menus

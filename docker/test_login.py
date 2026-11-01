@@ -195,18 +195,28 @@ def generate_and_install_client(kind, capture_output, root):
         "--output",
         str(project),
     ]
-    if kind == "openapi":
-        definition = next(capture_output.glob("openapi-downloaded-*.json"))
-        arguments += ["--openapi", str(definition)]
-    else:
-        schema = next(capture_output.glob("graphql-schema-downloaded-*.graphql"))
-        arguments += [
-            "--graphql-schema",
-            str(schema),
-            "--operations",
-            str(capture_output / "operations.graphql"),
+    normalized = root / (kind + "-contracts.json")
+    run_program(
+        [
+            shutil.which("website-client"),
+            "normalize",
+            "--input",
+            str(capture_output),
+            "--output",
+            str(normalized),
         ]
+    )
+    bundle = json.loads(normalized.read_text())
+    target = next(
+        item
+        for item in bundle["services"]
+        if item["protocol"] == kind and item["status"] == "ready"
+    )
+    arguments += ["--bundle", str(normalized), "--service", target["id"]]
     run_program(arguments)
+    lineage = json.loads((project / "generation.json").read_text())["lineage"]
+    assert lineage["service"]["id"] == target["id"]
+    assert lineage["sourceBundles"]
     run_program(
         [
             "poetry",
@@ -532,10 +542,23 @@ def main():
             verify_self_discovery(site, root, disabled=True)
             capture_output = verify_exploration(site, root)
             verify_exploration(site, root, limited=True)
+            # The old directory is removed. Client generation can only use the
+            # copied manifest, with no accidental dependency on loose files.
+            portable = root / "portable-walk.json"
+            shutil.copyfile(capture_output / "manifest.json", portable)
+            shutil.rmtree(capture_output)
+            capture_output = portable
             for kind, scenarios in CLIENT_SCENARIOS.items():
                 client = generate_and_install_client(kind, capture_output, root)
                 for scenario in scenarios:
                     verify_generated_scenario(client, site, scenario, root)
+            from pipeline_scenarios import (
+                verify_external_pipeline,
+                verify_browser_pipeline,
+            )
+
+            verify_external_pipeline(root)
+            verify_browser_pipeline(site, root, complete_login, assert_no_credentials)
         finally:
             site.close()
 
