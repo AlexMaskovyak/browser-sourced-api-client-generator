@@ -22,7 +22,7 @@ Browser discovery or another producer
 
 Run from the repository root, where `pyproject.toml` is located. Use the existing
 Poetry installation and a supported Python version as described in the
-[installation instructions](../README.md#install-and-open-a-website).
+[installation instructions](../README.md#start-here-website-to-client).
 
 ```sh
 poetry sync --with dev
@@ -52,10 +52,10 @@ Replace example website addresses with the actual website before using discovery
 2. Validate the saved definitions and write their generation status:
 
    ```sh
-   poetry run website-client normalize --input ./captures/walk --output ./contracts.json
+   poetry run website-client normalize --input ./captures/walk --output ./captures/walk/normalized.json
    ```
 
-   The terminal lists API IDs and status. In `contracts.json`, `services` contains
+   The terminal lists API IDs and status. In `normalized.json`, `services` contains
    each API's `endpoint`, `status` and `issues`. `ready` means its definitions are
    structurally usable, `review_required` means inferred OpenAPI needs review,
    and `blocked` means definitions or operations are missing or invalid.
@@ -63,7 +63,7 @@ Replace example website addresses with the actual website before using discovery
 3. Create a standalone client from the only ready API:
 
    ```sh
-   poetry run website-client generate --manifest ./contracts.json --name site-client --output ./clients/site-client
+   poetry run website-client generate --manifest ./captures/walk/normalized.json --name site-client --output ./clients/site-client
    ```
 
    If several APIs are ready, add `--service` followed by the chosen ID from step
@@ -74,6 +74,58 @@ Replace example website addresses with the actual website before using discovery
 You can also pass the saved manifest directly to `generate`; it normalizes first.
 The original loose files and browser session are never required. Old captures
 without a manifest can still supply definition files to `import` below.
+
+## Inspect and select an API
+
+After normalization, run this command from the generator repository root. It
+prints just the API IDs, endpoint addresses, statuses and validation issues:
+
+```sh
+poetry run python - <<'PYTHON'
+import json
+from pathlib import Path
+
+manifest = json.loads(Path("captures/walk/normalized.json").read_text())
+for api in manifest["services"]:
+    print(f"{api['id']}  {api['protocol']}  {api['endpoint']}  {api['status']}")
+    for issue in api["issues"]:
+        print(f"  {issue}")
+PYTHON
+```
+
+An API ID identifies one endpoint and its assigned definitions. Use the ID from
+this output, not a document filename or operation name. If several APIs are
+ready, this command prompts for your choice and generates only that API's client:
+
+```sh
+printf 'Paste the API ID, then press Enter: '
+read -r api_id
+poetry run website-client generate --manifest ./captures/walk/normalized.json --service "$api_id" --name selected-client --output ./clients/selected-client
+```
+
+A blocked API cannot generate. Missing GraphQL schemas require a complete schema
+from the service or another tool; missing operations require operation documents.
+[Import or combine those inputs](#connect-a-different-producer), then normalize
+again using a new output filename. A form inventory alone cannot fill those gaps.
+
+## Install the generated client
+
+After generating `site-client` in the procedure above:
+
+```sh
+cd clients/site-client
+poetry install
+poetry run site-client --help
+```
+
+Help lists the actual endpoint commands and whether each reads or writes. Use
+one listed name with `--help` to see its required JSON fields and URL options.
+That operation name and its input fields depend on the API you discovered, so a
+universal executable service command cannot be supplied here. Follow
+[generated client login](../README.md#log-into-a-generated-client) when ready to
+send a real request. Each browser-authenticated operation opens a fresh login;
+the discovery session is not retained. Return to the generator root before
+running the pipeline commands below.
 
 ## Chain commands through stdin and stdout
 

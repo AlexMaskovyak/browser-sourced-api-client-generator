@@ -2,13 +2,20 @@
 
 ## Command walkthrough
 
-1. Put installation, discovery, normalization, API selection, generation and
+1. [x] Put installation, discovery, normalization, API selection, generation and
    generated-client help at the start of the README. Explain the login prompt and
    files produced at each step; move the login-only check out of the main path.
-2. Align the detailed guide, document how to inspect API status and obtain an API
+2. [x] Align the detailed guide, document how to inspect API status and obtain an API
    ID, and include actual commands for continuing from an existing capture.
-3. Check documented flags, links and the offline commands against the installed
+3. [x] Check documented flags, links and the offline commands against the installed
    CLI. Commit and push the documentation to PR 8; keep browser actions manual.
+
+Verified the documented flags and local Markdown links, including section anchors.
+Executed the offline import, normalization, status inspection, explicit API
+selection and generation sequence on the sample OpenAPI definition. Installed
+the resulting standalone project with Poetry and ran its help successfully.
+No new live website discovery or service operation was performed for this
+documentation change; browser sign-in remains an explicit manual step.
 
 ## PR 8 adversarial review and developer guidance
 
