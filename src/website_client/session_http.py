@@ -21,6 +21,7 @@ MAX_BASE64_RESPONSE_CHARACTERS = 4 * ((MAX_RESPONSE_BODY_BYTES + 2) // 3)
 # Cached session headers have a separate, smaller budget than endpoint bodies.
 MAX_SESSION_HEADER_VALUE_BYTES = 16 * 1024
 MAX_SESSION_HEADER_NAME_CHARACTERS = 128
+MAX_SESSION_HEADERS = 32
 # This bounds the endpoint request; manual sign-in itself has no time limit.
 REQUEST_TIMEOUT_SECONDS = 30
 BROWSER_EVENT_POLL_SECONDS = 0.1
@@ -81,6 +82,8 @@ class BrowserLoginTransport(httpx.BaseTransport):
         for name in session_headers:
             self._validate_session_header_name(name)
             self._allowed_headers.add(name.lower())
+        if len(self._allowed_headers) > MAX_SESSION_HEADERS:
+            raise BrowserError("Too many selected session headers.")
 
         self._headers = {}
         self._session = None
@@ -95,14 +98,26 @@ class BrowserLoginTransport(httpx.BaseTransport):
     @classmethod
     def for_session(cls, session, endpoint, method, headers=None):
         """Send one scoped request without taking ownership of an open session."""
-        transport = cls(endpoint, method, login_url=session._url)
+        selected = {}
+        for name, value in (headers or {}).items():
+            if not isinstance(name, str):
+                raise BrowserError("Choose a valid additional session-header name.")
+            if name.lower() in MANAGED_HEADERS or name.lower().startswith("sec-"):
+                continue
+            selected[name] = value
+        transport = cls(
+            endpoint,
+            method,
+            login_url=session._url,
+            session_headers=tuple(selected),
+        )
         transport._session = session
         transport._owns_session = False
         transport._observe(
             "Network.requestWillBeSent",
             {
                 "documentURL": session._url,
-                "request": {"url": endpoint, "headers": headers or {}},
+                "request": {"url": endpoint, "headers": selected},
             },
         )
         return transport
@@ -114,7 +129,11 @@ class BrowserLoginTransport(httpx.BaseTransport):
             and len(name) <= MAX_SESSION_HEADER_NAME_CHARACTERS
             and re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", name)
         )
-        if not valid_name or name.lower() in MANAGED_HEADERS:
+        if (
+            not valid_name
+            or name.lower() in MANAGED_HEADERS
+            or name.lower().startswith("sec-")
+        ):
             raise BrowserError("Choose a valid additional session-header name.")
 
     def _observe(self, method, params):
