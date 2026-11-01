@@ -349,6 +349,14 @@ def build_project(project, output):
         write_json(stage / "generation.json", report)
         with (stage / "pyproject.toml").open("a") as stream:
             stream.write('\n[dependency-groups]\ndev = ["pytest>=8,<10"]\n')
+        # The SDK includes shared MIT-licensed runtime source, so retain its
+        # distribution notice rather than dropping it when creating a clean repo.
+        (stage / "LICENSE").write_text(
+            Path(__file__)
+            .with_name("templates")
+            .joinpath("runtime_license.txt")
+            .read_text()
+        )
         (stage / ".gitignore").write_text(
             ".venv/\n__pycache__/\n.pytest_cache/\ndist/\n.private/\n"
         )
