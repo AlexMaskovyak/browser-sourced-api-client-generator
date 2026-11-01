@@ -49,6 +49,7 @@ class Variable:
     required: bool
 
     def __post_init__(self):
+        """Reject invalid contracts even when constructed directly instead of parsed."""
         if (
             type(self.name) is not str
             or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", self.name)
@@ -82,6 +83,7 @@ class Operation:
     variables: tuple[Variable, ...]
 
     def __post_init__(self):
+        """Require named, bounded query/mutation documents and immutable variable records."""
         if (
             type(self.name) is not str
             or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", self.name)
@@ -99,10 +101,15 @@ class Operation:
 
     @property
     def write(self):
+        """Whether execution requires explicit mutation permission."""
         return self.kind == "mutation"
 
 
 def nodes(value):
+    """Walk executable GraphQL syntax, excluding variable declarations and source locations.
+
+    Skipping declarations lets callers count actual variable uses independently of
+    the variables an operation merely declares."""
     if isinstance(value, Node):
         yield value
         for key in value.keys:
@@ -114,6 +121,10 @@ def nodes(value):
 
 
 def method_name(name):
+    """Convert an operation name to snake_case without hiding client lifecycle methods.
+
+    The compiler separately rejects two operation names that collapse to the same
+    Python name; this function does not silently add numeric suffixes."""
     value = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
     value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).lower()
     if (
@@ -168,9 +179,13 @@ def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
                     )
                 selected.append(definition)
         for definition in selected:
+            # Resolve fragments within their original request document. Combining
+            # fragment namespaces first could silently bind a different capture's
+            # same-name fragment and change the operation sent to the server.
             reached, active = set(), set()
 
             def visit(name):
+                """Resolve one fragment recursively, rejecting missing references and active cycles."""
                 if name in active:
                     raise ValueError("GraphQL fragment cycle.")
                 if name in reached:
@@ -195,12 +210,16 @@ def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
                 if item.kind == "variable"
             }
             variables, names, parameters = [], set(), set()
+            # graphql-core 3.2 uses an empty tuple for absent variables; 3.3 can
+            # return None. Both represent a valid zero-input operation.
             for variable in definition.variable_definitions or ():
                 name = variable.variable.name.value
                 if name in names:
                     raise ValueError("Duplicate GraphQL variable definition.")
                 names.add(name)
                 parameter = name
+                # Preserve the server name separately while avoiding Python
+                # keywords, reserved client names and collisions among aliases.
                 while (
                     keyword.iskeyword(parameter)
                     or parameter.startswith("__")
@@ -247,6 +266,10 @@ def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
 
 
 def validate_value(value: Any, type_node):
+    """Check nullability, lists and built-in GraphQL scalars recursively.
+
+    Custom scalars, enums and input objects have no local definition in an operation
+    document. Their contents remain JSON for the server to validate."""
     if type_node.kind == "non_null_type":
         if value is None:
             raise ValueError("Input must satisfy its non-null GraphQL type.")
@@ -273,6 +296,10 @@ def validate_value(value: Any, type_node):
 def validate_variables(
     operation: Operation, arguments: dict[str, Any]
 ) -> dict[str, Any]:
+    """Validate Python arguments and translate aliases back to GraphQL variable names.
+
+    Missing optional variables stay omitted so server defaults apply. Explicit None
+    remains null. Reject unknown names, invalid scalars and unbounded/non-JSON values."""
     allowed = {item.parameter for item in operation.variables}
     if arguments.keys() - allowed:
         raise ValueError("Input has unknown fields; check operation help.")

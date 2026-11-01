@@ -76,6 +76,8 @@ def generate_operation_client(
     if any(item.kind is not Kind.GRAPHQL_OPERATIONS for item in documents):
         raise BrowserError("Operation client requires operation documents.")
     try:
+        # Compile all inputs together so conflicting names or Python aliases fail
+        # before any project is published. The compiler keeps fragments source-local.
         operations = compile_operations(tuple(item.content for item in documents))
     except ValueError as error:
         raise BrowserError(str(error)) from None
@@ -83,6 +85,8 @@ def generate_operation_client(
     styles = request_styles(manifest, target.endpoint)
     metadata, methods = {}, []
     for operation in operations:
+        # An imported document has no observed HTTP verb. POST is the explicit
+        # default; a captured GET mutation is invalid rather than silently repaired.
         style = styles.get(operation.name, RequestStyle())
         if operation.write and style.method is RequestMethod.GET:
             raise BrowserError("A captured mutation cannot be generated as GET.")
@@ -99,6 +103,9 @@ def generate_operation_client(
             + operation.kind
             + "; complete schema not required.",
         }
+        # Keyword-only arguments allow required variables after optional ones.
+        # UNSET preserves omission, including non-null variables with server defaults;
+        # None would instead send an explicit GraphQL null and can change behavior.
         parameters = [
             item.parameter + ": Any" + ("" if item.required else " = UNSET")
             for item in operation.variables
@@ -119,6 +126,8 @@ def generate_operation_client(
             f"        return self._execute({operation.name!r}, {{key: value for key, value in values.items() if value is not UNSET}})\n"
         )
     with tempfile.TemporaryDirectory(prefix="website-client-operations-") as directory:
+        # Build a standalone package in staging. Runtime modules are copied as
+        # source, so the installed SDK never imports or depends on this generator.
         project = Path(directory) / "project"
         module = project / package
         module.mkdir(parents=True)
@@ -160,6 +169,8 @@ def generate_operation_client(
             "The CLI requires `--confirm-write OPERATION`. No automatic retries occur.\n"
         )
         write_project_readme(generated, name)
+        # Source hashes describe what was generated. They cannot establish server
+        # compatibility, and operation documents cannot validate unknown server types.
         report = {
             "generator": generated.generator_name,
             "generatorVersion": importlib.metadata.version(generated.generator_name),

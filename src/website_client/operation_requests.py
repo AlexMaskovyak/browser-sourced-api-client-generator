@@ -10,17 +10,23 @@ from .discovery_manifest.records import Kind, Manifest
 
 
 class RequestMethod(StrEnum):
+    """HTTP verbs supported by captured GraphQL queries; mutations must use POST."""
     GET = "GET"
     POST = "POST"
 
 
 @dataclass(frozen=True, slots=True)
 class RequestStyle:
+    """HTTP conventions observed for one named operation at an exact endpoint.
+
+    Without capture evidence, use POST with operationName in the JSON body only.
+    observed distinguishes that default from a convention seen on the wire."""
     method: RequestMethod = RequestMethod.POST
     operation_name_in_url: bool = False
     observed: bool = False
 
     def __post_init__(self):
+        """Keep raw JSON strings and truthy substitutes outside the typed contract."""
         if (
             type(self.method) is not RequestMethod
             or type(self.operation_name_in_url) is not bool
@@ -30,6 +36,11 @@ class RequestStyle:
 
 
 def request_styles(manifest: Manifest, endpoint: str) -> dict[str, RequestStyle]:
+    """Read sanitized discovery reports into operation-specific HTTP conventions.
+
+    Match the exact endpoint, retain query parameter names only and prefer observed
+    POST when both GET and POST exist. Ignore reports for other services. No header
+    values, query values or authentication state become generation inputs here."""
     styles = {}
     for document in manifest.artifacts:
         if document.kind is not Kind.REPORT or document.name != "discovery.json":
@@ -69,6 +80,8 @@ def request_styles(manifest: Manifest, endpoint: str) -> dict[str, RequestStyle]
                 True,
             )
             prior = styles.get(name)
+            # A query can be observed using both verbs. Prefer POST so generated
+            # variables are not placed in URLs when a working POST was captured.
             if prior is None or candidate.method is RequestMethod.POST:
                 styles[name] = candidate
     return styles

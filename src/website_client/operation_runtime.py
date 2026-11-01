@@ -37,6 +37,7 @@ class BoundOperation:
     operation_name_in_url: bool
 
     def __post_init__(self):
+        """Validate packaged metadata before any transport activity or mutation."""
         if (
             type(self.operation) is not Operation
             or type(self.method) is not str
