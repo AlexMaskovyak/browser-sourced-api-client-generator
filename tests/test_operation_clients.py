@@ -251,3 +251,32 @@ def test_cli_failure_reports_safe_http_status_and_browser_reason(capsys):
     assert "403" in output and "private-response" not in output
     show_failure(BrowserError("Browser request redirects are blocked."), state)
     assert "redirects are blocked" in capsys.readouterr().err
+
+
+def test_generation_documents_public_methods_and_repeats_exactly(tmp_path):
+    import ast
+
+    source = manifest(tmp_path)
+    first, second = tmp_path / "first", tmp_path / "second"
+    generate_bundle(source, first, "documented-client")
+    generate_bundle(source, second, "documented-client")
+    files = lambda root: {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    assert files(first) == files(second)
+    tree = ast.parse((first / "documented_client/client.py").read_text())
+    client = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    assert "context manager" in ast.get_docstring(client)
+    methods = {
+        node.name: ast.get_docstring(node)
+        for node in client.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert all(methods.values())
+    assert "GraphQL $id: ID!. Required." in methods["find"]
+    assert "Defaults to UNSET" in methods["find"]
+    assert "not validated without a server schema" in methods["find"]
+    assert "allow_writes=True" in methods["create"]
+    assert "No automatic retry" in methods["create"]

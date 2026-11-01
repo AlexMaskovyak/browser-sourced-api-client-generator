@@ -87,6 +87,12 @@ origin and holds them in memory. A caller sharing an existing browser session ca
 supply the same bounded header selection without transferring browser ownership.
 HTTP rejection diagnostics report status codes without response bodies or tokens.
 
+Generated operation methods document the captured operation name, declared variable
+types, omission behavior and mutation permission. The generator supplies these
+from compiled contracts; it does not invent business descriptions from names.
+Shared runtime docstrings explain HTTP client ownership and failure behavior.
+Identical saved manifests and generator versions must produce identical output.
+
 ## Failure and recovery
 
 A valid manifest can contain blocked APIs. Normalization records their issues;
