@@ -103,7 +103,7 @@ def test_real_upstream_generators_emit_standalone_packages(generated):
             "import website_client" not in path.read_text()
             for path in project.rglob("*.py")
         )
-        assert "websocket-client" in (project / "pyproject.toml").read_text()
+        assert "playwright" in (project / "pyproject.toml").read_text()
     assert (graphql / "sample_graphql/client.py").exists()
     assert (rest / "sample_rest/api/default/get_item.py").exists()
 

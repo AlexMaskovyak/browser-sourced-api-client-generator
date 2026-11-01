@@ -28,7 +28,7 @@ subprocess.run(
         str(constraints),
         *(
             f"{name}=={versions[name]}"
-            for name in ("httpx", "attrs", "pydantic", "websocket-client")
+            for name in ("httpx", "attrs", "pydantic", "playwright")
         ),
     ],
     check=True,
