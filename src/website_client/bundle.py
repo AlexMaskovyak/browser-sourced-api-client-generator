@@ -41,9 +41,12 @@ def endpoint_url(url):
     parsed = urlsplit(url)
     if parsed.query:
         raise BrowserError("Service endpoints cannot include query values.")
-    return urlunsplit(
-        (parsed.scheme, parsed.netloc.lower(), parsed.path or "/", "", "")
-    )
+    authority = parsed.hostname.lower()
+    if ":" in authority:
+        authority = "[" + authority + "]"
+    if parsed.port and parsed.port != 443:
+        authority += ":" + str(parsed.port)
+    return urlunsplit(("https", authority, parsed.path or "/", "", ""))
 
 
 def observed_endpoint(url):
@@ -51,7 +54,7 @@ def observed_endpoint(url):
 
     parsed = urlsplit(url)
     base, path, _parameters = route(urlunsplit(parsed._replace(query="", fragment="")))
-    return base + path
+    return endpoint_url(base + path)
 
 
 def artifact(
@@ -132,7 +135,10 @@ def validate_bundle(value):
         artifacts[item["id"]] = item
     ids = set()
     for target in value["services"]:
-        endpoint_url(target["endpoint"])
+        if endpoint_url(target["endpoint"]) != target["endpoint"]:
+            raise BrowserError(
+                "Service endpoints must be canonical HTTPS URLs with '/' for an empty path and no default :443 port."
+            )
         if target["id"] in ids:
             raise BrowserError("Duplicate service ID.")
         ids.add(target["id"])
@@ -153,6 +159,21 @@ def validate_bundle(value):
             for reference in item["provenance"]["derivedFrom"]
         ):
             raise BrowserError("An artifact references missing source evidence.")
+    complete, active = set(), set()
+
+    def visit(identifier):
+        if identifier in active:
+            raise BrowserError("Artifact provenance contains a cycle.")
+        if identifier in complete:
+            return
+        active.add(identifier)
+        for parent in artifacts[identifier]["provenance"]["derivedFrom"]:
+            visit(parent)
+        active.remove(identifier)
+        complete.add(identifier)
+
+    for identifier in artifacts:
+        visit(identifier)
     return value
 
 
@@ -233,14 +254,18 @@ def merge_bundles(bundles):
         raise BrowserError("Merge at most 20 bundles totaling at most 64 MiB.")
     if len(bundles) == 1:
         return copy.deepcopy(validate_bundle(bundles[0]))
+    for bundle in bundles:
+        validate_bundle(bundle)
     merged = new_bundle(
         producer={"name": "website-client-merge", "version": PRODUCER["version"]}
     )
-    merged["createdAt"] = max(item["createdAt"] for item in bundles)
+    merged["createdAt"] = max(
+        datetime.fromisoformat(item["createdAt"]).astimezone(timezone.utc)
+        for item in bundles
+    ).isoformat()
     merged["sourceBundles"] = []
     artifacts, services = {}, {}
     for bundle in bundles:
-        validate_bundle(bundle)
         for source in bundle.get("sourceBundles", []):
             if source not in merged["sourceBundles"]:
                 merged["sourceBundles"].append(copy.deepcopy(source))

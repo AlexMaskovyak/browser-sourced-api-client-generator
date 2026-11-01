@@ -180,6 +180,8 @@ def run_offline(options):
         value = import_definition(options)
     else:
         sources = options.input or ["-"]
+        if len(sources) > 20:
+            raise BrowserError("Merge at most 20 bundles totaling at most 64 MiB.")
         if sources.count("-") > 1:
             raise BrowserError("Only one bundle input can use stdin.")
         value = normalize_bundle(
@@ -187,8 +189,15 @@ def run_offline(options):
             bind_schema=options.bind_schema,
             bind_operations=options.bind_operations,
         )
-        summary = ", ".join(
-            item["id"] + ":" + item["status"] for item in value["services"]
+        summary = "; ".join(
+            item["id"]
+            + " ["
+            + item["protocol"]
+            + " "
+            + item["endpoint"]
+            + "]:"
+            + item["status"]
+            for item in value["services"]
         )
         print("Normalized services: " + (summary or "none"), file=sys.stderr)
     write_bundle(value, options.output)

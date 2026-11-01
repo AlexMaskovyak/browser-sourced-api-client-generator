@@ -96,6 +96,46 @@ def command(arguments, stdin=None):
     )
 
 
+def test_endpoint_identity_normalizes_default_port_and_hostname():
+    first = service("graphql", "https://EXAMPLE.test:443/graphql")
+    second = service("graphql", "https://example.test/graphql")
+    assert first == second
+    assert service("openapi", "https://example.test")["endpoint"].endswith("/")
+
+
+def test_provenance_cycles_are_rejected():
+    value = graphql_bundle()
+    first, second = value["artifacts"]
+    first["provenance"]["derivedFrom"] = [second["id"]]
+    second["provenance"]["derivedFrom"] = [first["id"]]
+    with pytest.raises(BrowserError, match="cycle"):
+        validate_bundle(value)
+
+
+def test_merge_validates_timestamp_before_using_it():
+    first, second = graphql_bundle(), graphql_bundle()
+    second["createdAt"] = "not a timestamp"
+    with pytest.raises(BrowserError):
+        merge_bundles([first, second])
+
+
+def test_merge_uses_timestamp_instant_instead_of_timezone_text_order():
+    first, second = graphql_bundle(), graphql_bundle()
+    first["createdAt"] = "2026-11-01T01:00:00+02:00"
+    second["createdAt"] = "2026-11-01T00:00:00Z"
+    assert merge_bundles([first, second])["createdAt"] == "2026-11-01T00:00:00+00:00"
+
+
+def test_producer_readiness_is_recomputed():
+    value = graphql_bundle(schema=False)
+    value["stage"] = "normalized"
+    value["services"][0]["status"] = "ready"
+    normalized = normalize_bundle(value)
+    assert normalized["services"][0]["status"] == "blocked"
+    with pytest.raises(BrowserError):
+        choose_service(normalized)
+
+
 @pytest.mark.parametrize("version", [True, 2, "1", 1.0])
 def test_unsupported_versions_are_rejected(version):
     bundle = openapi_bundle()
