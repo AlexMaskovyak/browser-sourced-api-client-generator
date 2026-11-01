@@ -111,6 +111,13 @@ def normalize_bundle(value, *, bind_schema=(), bind_operations=()):
         if item["id"] in parents:
             # A producer may already supply this canonical document/name. Keep
             # the source artifact intact instead of adding a self dependency.
+            if (artifacts[item["id"]]["kind"], artifacts[item["id"]]["content"]) != (
+                kind,
+                content,
+            ):
+                raise BrowserError(
+                    "A producer artifact collides with its normalized document ID."
+                )
             return item["id"]
         if item["id"] in artifacts:
             prior = artifacts[item["id"]]
