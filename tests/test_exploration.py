@@ -1,4 +1,5 @@
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -204,6 +205,30 @@ def test_websocket_guard_never_connects_to_the_server_or_waits_for_close():
     socket.connect_to_server.assert_not_called()
     socket.close.assert_not_called()
     assert explorer.blocked[0]["sent"] is False
+
+
+@pytest.mark.parametrize("status,expected_clicks", [(0, 1), (200, 3)])
+def test_pagination_uses_request_progress_without_reading_page_contents(
+    monkeypatch, status, expected_clicks
+):
+    page = Mock()
+    page.url = "https://example.test/app"
+    browser = SimpleNamespace(current_url=lambda: page.url, _page=page)
+    explorer = SiteExplorer(browser, max_actions=3)
+    explorer.deadline_seconds = time.monotonic() + 10
+    capture = SimpleNamespace(discovery=SimpleNamespace(entries=[]))
+    button = Mock()
+    button.click.side_effect = lambda **_kwargs: capture.discovery.entries.append(
+        {"response": {"status": status}}
+    )
+    monkeypatch.setattr(
+        explorer, "_controls", lambda: iter([(button, "Next", "pagination", 0)])
+    )
+    monkeypatch.setattr(explorer, "_inspect", Mock())
+    monkeypatch.setattr(explorer, "_settle", Mock())
+    explorer._walk_controls(capture, Mock(), 0)
+    assert button.click.call_count == expected_clicks
+    page.content.assert_not_called()
 
 
 @pytest.mark.parametrize(
