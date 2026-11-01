@@ -87,6 +87,7 @@ class Command:
         return (
             "press Enter here to finish" in self.output
             or "Press Enter here to start capture" in self.output
+            or "Press Enter here to start discovery" in self.output
             or "press Enter here to run the endpoint" in self.output
         )
 
