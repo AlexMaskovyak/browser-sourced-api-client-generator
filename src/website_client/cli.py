@@ -299,11 +299,11 @@ def main(args=None):
                 files["exploration.json"] = (
                     json.dumps(automatic_report["exploration"], indent=2) + "\n"
                 )
-            from .bundle_capture import capture_bundle
+            from .bundle_capture import capture_manifest
             from .discovery_manifest import encoded
 
-            manifest = capture_bundle(result, files)
-            files["manifest.json"] = encoded(manifest)
+            manifest = capture_manifest(result, files)
+            files["manifest.json"] = encoded(manifest.to_dict())
             publish(output, files)
             if options.emit_bundle:
                 sys.stdout.write(files["manifest.json"])
@@ -318,7 +318,7 @@ def main(args=None):
                         "liveVerified": False,
                         "clientGenerated": False,
                         "manifest": str(output / "manifest.json"),
-                        "bundleVersion": manifest["version"],
+                        "bundleVersion": manifest.version,
                     }
                 )
             )

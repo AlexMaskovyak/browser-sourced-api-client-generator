@@ -7,7 +7,7 @@ import sys
 
 from ..browser import BrowserError
 from .model import MAX_BUNDLE_BYTES, encoded
-from .validation import validate_bundle
+from .records import Manifest
 
 
 def read_text(source, limit=MAX_BUNDLE_BYTES):
@@ -33,7 +33,7 @@ def read_text(source, limit=MAX_BUNDLE_BYTES):
         ) from None
 
 
-def read_bundle(source, limit=MAX_BUNDLE_BYTES):
+def read_manifest(source, limit=MAX_BUNDLE_BYTES) -> Manifest:
     try:
         value = json.loads(
             read_text(source, limit),
@@ -44,7 +44,11 @@ def read_bundle(source, limit=MAX_BUNDLE_BYTES):
         raise
     except Exception:
         raise BrowserError("Supply a valid JSON discovery bundle.") from None
-    return validate_bundle(value)
+    return Manifest.from_dict(value)
+
+
+def read_bundle(source, limit=MAX_BUNDLE_BYTES):
+    return read_manifest(source, limit).to_dict()
 
 
 def reject_constant(_value):
@@ -61,8 +65,13 @@ def unique_object(pairs):
 
 
 def write_bundle(value, output="-"):
-    validate_bundle(value)
-    text = encoded(value)
+    write_manifest(Manifest.from_dict(value), output)
+
+
+def write_manifest(manifest: Manifest, output="-"):
+    if type(manifest) is not Manifest:
+        raise BrowserError("Output requires a validated Manifest record.")
+    text = encoded(manifest.to_dict())
     if str(output) == "-":
         sys.stdout.write(text)
         return

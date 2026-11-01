@@ -1,6 +1,5 @@
 """Construct manifest entries and canonical content identities."""
 
-from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -55,48 +54,41 @@ def observed_endpoint(url):
 def artifact(
     name, kind, content, source, *, locations=(), derived_from=(), producer=None
 ):
-    return {
-        "id": "artifact-" + sha256(kind + "\0" + name + "\0" + content),
-        "name": name,
-        "kind": kind,
-        "content": content,
-        "sha256": sha256(content),
-        "provenance": {
-            "source": source,
-            "locations": sorted(set(locations)),
-            "derivedFrom": sorted(set(derived_from)),
-            "producers": [producer or PRODUCER],
-        },
-    }
+    """Legacy JSON factory; internal code constructs typed records directly."""
+    from .records import Artifact, Kind, Producer, Source
+
+    try:
+        kind, source = Kind(kind), Source(source)
+    except (ValueError, TypeError):
+        raise BrowserError("Unknown artifact kind or source.") from None
+    return Artifact.create(
+        name, kind, content, source, locations=tuple(locations),
+        derived_from=tuple(derived_from),
+        producer=Producer.from_dict(producer) if producer is not None else None,
+    ).to_dict()
 
 
 def service(
-    protocol,
-    endpoint,
-    schema=None,
-    operations=(),
-    confidence="external",
-    identifier=None,
+    protocol, endpoint, schema=None, operations=(), confidence="external", identifier=None
 ):
-    endpoint = endpoint_url(endpoint)
-    return {
-        "id": identifier or "service-" + sha256(protocol + "\0" + endpoint)[:16],
-        "protocol": protocol,
-        "endpoint": endpoint,
-        "schemaArtifact": schema,
-        "operationArtifacts": list(dict.fromkeys(operations)),
-        "confidence": confidence,
-    }
+    """Legacy JSON factory for a validated service record."""
+    from .records import Confidence, Protocol, Service
+
+    try:
+        protocol, confidence = Protocol(protocol), Confidence(confidence)
+    except (ValueError, TypeError):
+        raise BrowserError("Unknown service protocol or confidence.") from None
+    return Service.create(
+        protocol, endpoint, schema, tuple(operations), confidence, identifier,
+    ).to_dict()
 
 
 def new_bundle(artifacts=(), services=(), producer=None):
-    return {
-        "format": FORMAT,
-        "version": VERSION,
-        "stage": "discovery",
-        "producer": producer or PRODUCER,
-        "createdAt": datetime.now(timezone.utc).isoformat(),
-        "artifacts": list(artifacts),
-        "services": list(services),
-    }
+    """Legacy JSON factory for a complete validated manifest."""
+    from .records import Artifact, Manifest, Producer, Service
 
+    return Manifest.create(
+        tuple(Artifact.from_dict(item) for item in artifacts),
+        tuple(Service.from_dict(item) for item in services),
+        Producer.from_dict(producer) if producer is not None else None,
+    ).to_dict()

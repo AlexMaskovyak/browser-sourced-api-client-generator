@@ -148,6 +148,9 @@ class Producer(Record):
     version: str
 
 
+DEFAULT_PRODUCER = Producer(**PRODUCER)
+
+
 @dataclass(frozen=True, slots=True)
 class Provenance(Record):
     SCHEMA = "#/$defs/artifact/properties/provenance"
@@ -179,7 +182,7 @@ class Artifact(Record):
             raise BrowserError("Artifact name and content must be strings.")
         provenance = Provenance(
             source, locations, derived_from,
-            (producer if producer is not None else Producer(**PRODUCER),),
+            (producer if producer is not None else DEFAULT_PRODUCER,),
         )
         provenance = replace(
             provenance, locations=tuple(sorted(set(provenance.locations))),
@@ -288,7 +291,7 @@ class Manifest(Record):
     ):
         return cls(
             FORMAT, VERSION, Stage.DISCOVERY,
-            producer if producer is not None else Producer(**PRODUCER),
+            producer if producer is not None else DEFAULT_PRODUCER,
             created_at if created_at is not None else datetime.now(timezone.utc).isoformat(),
             artifacts, services,
             source_bundles=source_bundles,

@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from graphql import GraphQLError, build_schema, parse, print_ast, validate
 
 from .browser import BrowserError
-from .discovery_manifest import artifact, digest, encoded
+from .discovery_manifest import digest, encoded
 from .discovery_manifest.records import (
     Artifact, Confidence, Kind, Manifest, Normalization, Protocol,
     Service, Source, SourceBundle, Stage, Status,
@@ -20,8 +20,8 @@ class ArtifactIndex:
     items: dict[str, Artifact]
 
     def derive(self, name: str, kind: Kind, content: str, parents: tuple[str, ...]) -> str:
-        item = Artifact.from_dict(
-            artifact(name, kind.value, content, "normalized", derived_from=parents)
+        item = Artifact.create(
+            name, kind, content, Source.NORMALIZED, derived_from=parents
         )
         prior = self.items.get(item.id)
         if prior is not None:
@@ -234,8 +234,10 @@ def normalize_bundle(value, *, bind_schema=(), bind_operations=()):
     ).to_dict()
 
 
-def choose_service(bundle, identifier=None, *, allow_inferred=False):
-    targets = Manifest.from_dict(bundle).services
+def select_service(manifest: Manifest, identifier=None, *, allow_inferred=False) -> Service:
+    if type(manifest) is not Manifest:
+        raise BrowserError("Selection requires a validated Manifest record.")
+    targets = manifest.services
     if identifier:
         candidates = [item for item in targets if item.id == identifier]
     else:
@@ -258,4 +260,11 @@ def choose_service(bundle, identifier=None, *, allow_inferred=False):
         raise BrowserError("Selected service cannot generate: " + "; ".join(target.issues or ()))
     if target.status is Status.REVIEW_REQUIRED and not allow_inferred:
         raise BrowserError("Review inferred definitions, then use --allow-inferred to generate them.")
-    return target.to_dict()
+    return target
+
+
+def choose_service(bundle, identifier=None, *, allow_inferred=False):
+    """Compatibility adapter for callers supplying manifest JSON."""
+    return select_service(
+        Manifest.from_dict(bundle), identifier, allow_inferred=allow_inferred,
+    ).to_dict()

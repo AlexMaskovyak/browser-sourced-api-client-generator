@@ -4,8 +4,10 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from ..browser import BrowserError
-from .model import MAX_BUNDLE_BYTES, PRODUCER, digest, encoded
-from .records import Artifact, Confidence, Manifest, Producer, Service, SourceBundle
+from .model import MAX_BUNDLE_BYTES, digest, encoded
+from .records import (
+    DEFAULT_PRODUCER, Artifact, Confidence, Manifest, Producer, Service, SourceBundle,
+)
 
 
 def unique(values):
@@ -27,12 +29,21 @@ def merge_artifact(prior: Artifact, incoming: Artifact) -> Artifact:
     )
 
 
+def schema_document(target: Service, artifacts: dict[str, Artifact]) -> Artifact | None:
+    if target.schema_artifact is None:
+        return None
+    try:
+        return artifacts[target.schema_artifact]
+    except KeyError:
+        raise BrowserError("A service references a missing artifact.") from None
+
+
 def select_schema(
     prior: Service, incoming: Service, artifacts: dict[str, Artifact],
 ) -> Service:
     """Prefer a complete source over inference; reject unresolved conflicts."""
-    existing = artifacts.get(prior.schema_artifact)
-    candidate = artifacts.get(incoming.schema_artifact)
+    existing = schema_document(prior, artifacts)
+    candidate = schema_document(incoming, artifacts)
     if existing is None:
         return incoming if candidate is not None else prior
     if candidate is None:
@@ -90,7 +101,7 @@ def merge_manifests(manifests: tuple[Manifest, ...]) -> Manifest:
     ).isoformat()
     return Manifest.create(
         tuple(artifacts.values()), tuple(services.values()),
-        Producer("website-client-merge", PRODUCER["version"]),
+        Producer("website-client-merge", DEFAULT_PRODUCER.version),
         created_at=latest, source_bundles=sources,
     )
 
