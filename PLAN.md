@@ -1,5 +1,24 @@
 # Delivery plan
 
+## Algorithmic site exploration
+
+1. Traverse same-origin pages, navigation menus, tabs and pagination in a stable
+   order with page, depth, action and time limits. Use Playwright only, no model.
+2. Inventory forms and their declared fields/methods. Extract GraphQL documents,
+   including mutations, from loaded frontend modules. Distinguish declarations,
+   observed requests and blocked writes. Do not submit forms to learn contracts.
+3. Capture traffic throughout exploration, then run existing schema discovery.
+   Block API mutations, unknown POSTs, WebSockets and off-site document navigation
+   during exploration. Disable service workers and replace the login tab first.
+4. Verify navigation, menus, pagination, contracts, bounds and blocked writes in
+   unit tests and the installed CLI in Docker. Generate clients from results,
+   update usage/limitations and open a separate PR.
+
+Complete when an installed command discovers endpoints and write declarations
+that are absent from the starting page, reports its coverage and omissions, and
+passes the full regression suite. The algorithm does not prove all UI is covered
+or that declared forms map directly to the application's actual API calls.
+
 ## Automatic schema discovery (second PR)
 
 1. [x] Observe authenticated page reload traffic, inspect schema links and check a

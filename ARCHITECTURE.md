@@ -40,6 +40,27 @@ production compatibility nor endpoint completeness.
 
 ## Discovery sources and definitions
 
+Optional algorithmic exploration uses deterministic page and control traversal.
+Python owns the queue, action classification and network policy. Playwright owns
+DOM inspection and interactions. The site remains the source of observed API
+traffic. Form actions/fields and frontend GraphQL documents are declarations,
+not proof that a write was executed or that its backend contract is complete.
+
+Exploration starts after human login in a fresh tab with service workers blocked.
+The login tab closes so its existing WebSockets cannot bypass exploration rules.
+Requests are intercepted before transmission: navigation stays on the website,
+GET/HEAD and parsed GraphQL queries are permitted, and unknown writes/mutations
+are blocked and reported. WebSockets are closed. Only navigation controls are
+clicked; forms and submit controls are inventoried rather than executed. Page
+content is untrusted data and is never executed as Python or model instructions.
+
+Exploration records bounded, sanitized page/action coverage, declared forms and
+blocked requests. Loaded same-origin scripts are read as text to extract GraphQL
+documents without executing additional source. Limits and parse omissions remain
+explicit. Before schema probes the exploration page is navigated to a blank page
+and its HTTP interception is removed. Failures restore interception and close the
+temporary context through the existing session owner; reruns use a new output.
+
 Automatic discovery adds bounded schema reads after human login. The website is
 the source of complete definitions; captured shapes remain inferred evidence.
 Python owns candidate selection, credential scoping and probe reporting. A page
