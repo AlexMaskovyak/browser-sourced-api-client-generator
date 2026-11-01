@@ -1,5 +1,23 @@
 # Delivery plan
 
+## PR 8 adversarial review and developer guidance
+
+1. Reproduce merge and chaining failures with focused tests. Verify schema
+   replacement after normalization, producer ordering, timestamp interoperability,
+   malformed upstream input and upstream failure after complete JSON output.
+2. Split manifest construction, validation, transport and merging into owned
+   modules. Keep the version 1 exchange format and existing CLI flags compatible.
+   Repair stale schema selection and any demonstrated interoperability failures.
+3. Rewrite the pipeline documentation around developer tasks: run a saved capture,
+   chain commands, connect another producer, then consult the format reference.
+   Rename the independent producer example to describe its actual purpose.
+4. Run focused regressions, the full suite, package checks and installed Docker
+   scenarios. Push coherent commits to PR 8 and report remaining pipeline limits.
+
+Complete when review comments have concrete changes, failure-path evidence joins
+the successful handoff tests, and instructions explain inputs, outputs, exit status,
+manual login and recovery without requiring this conversation.
+
 ## Portable discovery and normalization
 
 1. [x] Define a versioned, self-contained JSON bundle and public JSON Schema. Preserve
