@@ -256,6 +256,69 @@ def generate_and_install_client(kind, capture_output, root):
     return GeneratedClient(kind=kind, executable=executable)
 
 
+def verify_self_discovery(site, root, *, disabled=False):
+    output = root / ("automatic-disabled" if disabled else "automatic")
+    site.self_discovery = True
+    site.introspection_disabled = disabled
+    writes_before = site.api_writes
+    introspection_before = site.introspection_reads
+    command = Command(
+        site,
+        args=[
+            "discover",
+            "--url",
+            site.url,
+            "--auto",
+            "--observe-seconds",
+            "1",
+            "--max-probes",
+            "8",
+            "--output",
+            str(output),
+            "--browser",
+            "chromium",
+            "--browser-path",
+            "/work/docker/test-chromium.sh",
+        ],
+    )
+    try:
+        eventually(command.ready)
+        command.connect()
+        complete_login(command, site)
+        os.write(command.terminal, b"\n")
+        # Automatic discovery needs only the login confirmation, unlike capture.
+        assert command.wait() == 0, command.output
+        command.cleanup_verified()
+        report = json.loads((output / "self-discovery.json").read_text())
+        assert len(report["probes"]) <= 8
+        graphql_probe = next(
+            item for item in report["probes"] if item["kind"] == "graphql"
+        )
+        assert graphql_probe["outcome"] == (
+            "schema_unavailable" if disabled else "found"
+        )
+        assert (
+            bool(list(output.glob("graphql-schema-downloaded-*.graphql")))
+            is not disabled
+        )
+        assert list(output.glob("openapi-downloaded-*.json"))
+        assert site.introspection_reads == introspection_before + 1
+        assert site.api_writes == writes_before
+        assert site.redirect_hits == 0
+        for output_file in output.iterdir():
+            assert_no_credentials(output_file.read_text(), site)
+        print(
+            "PASS automatic schema discovery: "
+            + ("introspection disabled" if disabled else "OpenAPI and GraphQL"),
+            flush=True,
+        )
+        return output
+    finally:
+        command.stop()
+        site.self_discovery = False
+        site.introspection_disabled = False
+
+
 def operation_inputs(kind, scenario):
     if scenario == "write":
         if kind == "openapi":
@@ -364,7 +427,9 @@ def main():
             for scenario in LOGIN_SCENARIOS:
                 verify_login_scenario(site, scenario)
 
-            capture_output = verify_capture(site, root)
+            verify_capture(site, root)
+            capture_output = verify_self_discovery(site, root)
+            verify_self_discovery(site, root, disabled=True)
             for kind, scenarios in CLIENT_SCENARIOS.items():
                 client = generate_and_install_client(kind, capture_output, root)
                 for scenario in scenarios:
