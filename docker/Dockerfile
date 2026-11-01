@@ -10,11 +10,12 @@ ENV POETRY_REQUESTS_TIMEOUT=120
 ENV POETRY_INSTALLER_MAX_WORKERS=4
 COPY pyproject.toml poetry.lock poetry.toml README.md LICENSE ./
 RUN --mount=type=cache,target=/root/.cache/pypoetry poetry sync --with dev --no-root
+COPY docker/cache_client_dependencies.py ./docker/cache_client_dependencies.py
+RUN --mount=type=cache,target=/root/.cache/pip python docker/cache_client_dependencies.py
 COPY src ./src
 COPY tests ./tests
 COPY docker ./docker
 RUN poetry build --format wheel && python -m pip install --no-deps dist/*.whl
-RUN python docker/cache_client_dependencies.py
 RUN useradd --create-home --uid 1000 tester
 USER tester
 ENV HOME=/home/tester
