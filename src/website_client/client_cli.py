@@ -173,11 +173,13 @@ def describe_operation_inputs(operation, function):
     )
 
 
-def add_operation_arguments(command):
+def add_operation_arguments(command, defaults=None):
     """Add runtime input, authentication, output and write-confirmation flags."""
+    defaults = defaults or {}
     command.add_argument(
         "--url",
-        required=True,
+        required=not defaults.get("url"),
+        default=defaults.get("url"),
         help="Service base URL for OpenAPI; exact endpoint URL for GraphQL.",
     )
     command.add_argument(
@@ -229,7 +231,7 @@ def add_operation_arguments(command):
     )
 
 
-def build_parser(operations):
+def build_parser(operations, defaults=None):
     """Build one endpoint subcommand per packaged operation without sending requests."""
     parser = argparse.ArgumentParser(
         description="Call generated endpoint methods. Help is local and sends no requests."
@@ -251,7 +253,7 @@ def build_parser(operations):
                 "the generated Python API."
             ),
         )
-        add_operation_arguments(command)
+        add_operation_arguments(command, defaults)
     return parser, functions
 
 
@@ -480,8 +482,17 @@ def show_failure(error, state):
 def main(args=None):
     """Validate CLI inputs, execute one generated operation and return a process exit code."""
     operations = json.loads(files(__package__).joinpath("_operations.json").read_text())
-    parser, functions = build_parser(operations)
+    try:
+        defaults = json.loads(files(__package__).joinpath("_defaults.json").read_text())
+    except FileNotFoundError:
+        defaults = {}
+    parser, functions = build_parser(operations, defaults)
     options = parser.parse_args(args)
+    # A saved project's header/login defaults belong to its configured endpoint.
+    # An explicit different endpoint must supply its own authentication choices.
+    if options.login and options.url == defaults.get("url"):
+        options.login_url = options.login_url or defaults.get("loginUrl")
+        options.session_header = list(dict.fromkeys(defaults.get("sessionHeaders", []) + options.session_header))
     operation = operations[options.operation]
     function = functions[options.operation]
     state = RequestState()
