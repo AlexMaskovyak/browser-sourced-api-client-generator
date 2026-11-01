@@ -205,7 +205,9 @@ class BrowserSession:
 
     def current_url(self):
         self._check()
-        return self._page.url
+        # Enter can arrive between event dispatches. Read Chrome's current frame
+        # rather than treating Playwright's cached URL as the login result.
+        return self._connection.call("Page.getFrameTree")["frameTree"]["frame"]["url"]
 
     def _password_visible(self):
         return self._page.locator('input[type="password"]:visible').count() > 0
@@ -224,9 +226,10 @@ class BrowserSession:
 
                 while True:
                     self.current_url()
-                    self._connection.pump()
                     if poll:
                         poll()
+                    else:
+                        self._connection.pump()
                     if msvcrt.kbhit():
                         key = msvcrt.getwch()
                         if key == "\x03":
@@ -238,9 +241,10 @@ class BrowserSession:
                     terminal.register(incoming, selectors.EVENT_READ)
                     while True:
                         self.current_url()
-                        self._connection.pump()
                         if poll:
                             poll()
+                        else:
+                            self._connection.pump()
                         if terminal.select(timeout=0.1):
                             if not incoming.readline():
                                 raise BrowserError(

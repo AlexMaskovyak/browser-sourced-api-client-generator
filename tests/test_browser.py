@@ -115,6 +115,12 @@ def test_confirmation_reports_uncertainty(session):
     assert "example.test" not in repr(session)
 
 
+def test_confirmation_reads_current_frame_when_cached_url_is_stale(session):
+    session._page.url = "https://example.test/mfa"
+    assert session.confirm_login(Terminal("\n"), io.StringIO())["sessionReady"] is True
+    session._connection.call.assert_called_with("Page.getFrameTree")
+
+
 @pytest.mark.parametrize(
     "state", ["password", "login", "sso", "closed", "cancelled", "eof", "pipe"]
 )
@@ -125,7 +131,7 @@ def test_incomplete_or_cancelled_login_fails(session, monkeypatch, state):
         url = (
             "https://example.test/login" if state == "login" else "https://sso.test/app"
         )
-        session._page.url = url
+        session._connection.call.return_value = {"frameTree": {"frame": {"url": url}}}
     if state == "closed":
         session._page.is_closed.return_value = True
     if state == "cancelled":

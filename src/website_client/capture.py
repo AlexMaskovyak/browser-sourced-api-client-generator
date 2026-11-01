@@ -51,9 +51,15 @@ class NetworkCapture:
                 "content": {"mimeType": response.get("mimeType"), "size": response.get("encodedDataLength", 0)}}
         elif method in {"Network.loadingFinished", "Network.loadingFailed"} and identifier in self.pending:
             self.finished.append((identifier, params.get("timestamp", 0), method == "Network.loadingFailed"))
+            # Read completed bodies before another navigation can evict them.
+            # Playwright delivers this callback while servicing the browser.
+            self._consume_finished()
 
     def drain(self):
         self.connection.pump()
+        self._consume_finished()
+
+    def _consume_finished(self):
         completed, self.finished = self.finished, []
         for identifier, ended, failed in completed:
             entry = self.pending.pop(identifier, None)
