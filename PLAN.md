@@ -15,3 +15,11 @@ Produce a complete installable Python client from one repeatable project command
 The project file is the reproducible source of configuration. The generator owns
 all output files; no post-generation copying, source edits or metadata cleanup.
 Coverage is the captured operation set, not an assertion of every service endpoint.
+
+## Result
+
+The complete builder now owns every output file. Gusto was generated from two
+saved manifests through the build command, then rebuilt from its shipped project
+file. All 34 files match byte for byte. Its untouched Poetry installation,
+17 generated checks, wheel/source builds and endpoint help passed. Shared checks:
+210 tests and 26 Docker scenarios. No live operation was sent by this build.
