@@ -97,6 +97,11 @@ def main(args=None):
         type=int,
         help="Exploration time limit, 1 to 1800 seconds (default 120).",
     )
+    discover.add_argument(
+        "--emit-bundle",
+        action="store_true",
+        help="Write the complete self-contained discovery bundle to stdout for command chaining. A manifest is always saved in --output.",
+    )
     generate_command = commands.add_parser(
         "generate",
         help="Generate a standalone Python client from a standard definition.",
@@ -125,9 +130,31 @@ def main(args=None):
         default="service-client",
         help="Generated package and CLI name, lowercase with hyphens (default service-client).",
     )
+    from .pipeline import add_commands, run_offline, generate_bundle
+
+    add_commands(commands, generate_command, definition)
     options = parser.parse_args(args)
     try:
+        if options.command in {"normalize", "import"}:
+            run_offline(options)
+            return 0
         if options.command == "generate":
+            if options.bundle:
+                if options.operations:
+                    raise BrowserError(
+                        "--operations is not used with --bundle; bind operations during normalization."
+                    )
+                report = generate_bundle(
+                    options.bundle,
+                    options.output,
+                    options.name,
+                    options.service,
+                    options.allow_inferred,
+                )
+                print(json.dumps(report))
+                return 0
+            if options.service or options.allow_inferred:
+                raise BrowserError("--service and --allow-inferred require --bundle.")
             from .generation import generate
 
             if options.openapi and options.operations:
@@ -270,7 +297,15 @@ def main(args=None):
                 files["exploration.json"] = (
                     json.dumps(automatic_report["exploration"], indent=2) + "\n"
                 )
+            from .bundle_capture import capture_bundle
+            from .bundle import encoded
+
+            manifest = capture_bundle(result, files)
+            files["manifest.json"] = encoded(manifest)
             publish(output, files)
+            if options.emit_bundle:
+                sys.stdout.write(files["manifest.json"])
+                return 0
             print(
                 json.dumps(
                     {
@@ -280,6 +315,8 @@ def main(args=None):
                         "files": sorted(files),
                         "liveVerified": False,
                         "clientGenerated": False,
+                        "manifest": str(output / "manifest.json"),
+                        "bundleVersion": manifest["version"],
                     }
                 )
             )
