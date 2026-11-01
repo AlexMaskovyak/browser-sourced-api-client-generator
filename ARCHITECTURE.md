@@ -6,11 +6,12 @@ development dependency groups and builds. The project environment lives in
 separate application environment and tests the wheel built by Poetry. Poetry's
 own bootstrap environment is separate from application dependencies.
 
-Python owns the command, browser lifetime, discovery and generation. Chrome or
-Chromium is a separate native browser process. Python communicates with its
-loopback Chrome DevTools Protocol connection using the Python websocket-client
-library. No Node, Playwright or project JavaScript is needed. Websites still run
-their own scripts normally in the browser.
+Python owns the command, discovery and generation. Playwright's Python API owns
+Chrome or Chromium startup, tabs, event delivery and shutdown. Its bundled Node
+driver is a runtime dependency; project code remains Python. Browser-native
+network capture and request interception use Playwright CDP sessions, its interface
+to Chrome DevTools Protocol. There is no project WebSocket implementation.
+Websites still run their own scripts normally in the browser.
 
 The human owns sign-in and verification codes. The website owns account records
 and authentication. A temporary browser profile holds the live session. The
@@ -61,7 +62,7 @@ and validated before generation; no credentials are embedded in generated client
 
 ## Generated client authentication
 
-Generated packages include their own Python browser support and websocket-client
+Generated packages include their own Python browser support and Playwright
 dependency. An operation's --login option opens a fresh browser, waits for manual
 sign-in and verification codes, and then calls the upstream typed method. A custom
 login URL handles services whose application and API use different origins.
