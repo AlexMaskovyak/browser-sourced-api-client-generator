@@ -65,7 +65,56 @@ network during execution. Playwright's bundled Node driver runs inside the
 container. No production credentials are used.
 These tests do not establish production service compatibility.
 
-## Discover endpoints after login
+## Find service definitions automatically
+
+From the repository root, create `captures/` and choose a new output directory.
+The following example opens the website, waits for you to sign in, then discovers
+definitions. Replace the example address with the actual website:
+
+```sh
+mkdir -p captures
+poetry run website-client discover --url https://app.example.com --auto --output ./captures/example-auto
+```
+
+1. Sign in in the temporary browser, including verification codes, and return to
+   the application page you normally use.
+2. Press Enter once in the terminal. The command reloads that page, observes its
+   traffic for five seconds, inspects up to 200 schema links and checks common
+   definition paths. It tries GraphQL introspection, a read-only request for type
+   and field definitions, on observed GraphQL endpoints.
+3. The command saves the results and closes the browser automatically. Open
+   `self-discovery.json` to see which probes found definitions, were rejected,
+   redirected, failed or returned no usable schema. Use the validated downloaded
+   files with the generation commands below.
+
+This mode actively sends schema GET requests and its own introspection queries.
+It does not replay captured business operations or click application controls.
+Reloading still runs the website's normal scripts. Schema links and common paths
+are restricted to the website's origin. Observed GraphQL API origins can differ;
+selected authentication headers stay in memory and are scoped to that API origin.
+Redirects are not followed. HAR import remains offline and cannot use `--auto`.
+
+By default there are at most 12 probes, each with a 30-second request timeout.
+Use `--max-probes 8` or `--observe-seconds 10` to change the limits, each from 1 to
+30. If the page does not issue a GraphQL request during observation, supply the
+known HTTPS endpoint with `--graphql-endpoint https://api.example.com/graphql`.
+That is an example endpoint; obtain the real address from the website's API docs
+or a prior capture. Query values and authentication paths are rejected.
+
+Common paths include `/openapi.json`, `/openapi.yaml`, `/api/openapi.json`,
+`/v3/api-docs`, `/.well-known/openapi.json` and `/swagger.json`. Only OpenAPI 3.0/3.1
+and complete GraphQL schemas pass validation. A server can hide its definitions or
+disable introspection. The report records that gap without inventing a schema or
+claiming full API coverage. Use manual capture below for workflows that were not
+loaded during observation. GraphQL generation still requires operation documents
+in addition to the schema. Service-specific authentication headers or schema
+formats may require an extension.
+
+Existing output is never replaced. If login or discovery fails, check the website
+address and browser state, then retry with a new output path. If an export leaves
+a partial directory, inspect it before retrying. Cancel with Ctrl+C.
+
+## Capture endpoints manually after login
 
 Run from this repository's root, where `pyproject.toml` is located. Choose a new
 output directory whose parent already exists. Replace the example URL below with
@@ -103,21 +152,24 @@ sources use the same analysis and write the following files, when available:
 | --- | --- |
 | `capture.har` | Sanitized HAR with headers, cookies, payload values and URL query values removed or redacted. |
 | `discovery.json` | Observed routes, methods, named GraphQL operations, omitted data, conflicts and coverage limits. |
+| `self-discovery.json` | Automatic mode only: schema probe outcomes, request limits, unprobed candidates and observation limits. |
 | `openapi-inferred-*.json` | Valid OpenAPI 3.1 descriptions inferred from observed HTTP routes and sample shapes. These require review and are not complete service specifications. |
 | `operations.graphql` | Combined GraphQL operation documents when their definitions do not conflict. |
 | `operations-*.graphql` | Individual captured GraphQL documents, kept separately for review. |
 | `openapi-downloaded-*.json` | Actual OpenAPI 3.0/3.1 documents encountered in JSON or YAML responses, validated separately from inference. |
 | `graphql-schema-downloaded-*.graphql` | Actual complete introspection responses converted into GraphQL schema definition language, or validated SDL responses. |
 
-To capture an actual definition, open the website's known schema or specification
-endpoint while recording, or import a HAR containing that response. The tool does
-not guess schema URLs or manufacture a GraphQL schema from examples. Operations
+Automatic discovery checks the definition locations described above. For manual
+capture, open the website's known schema or specification endpoint while recording,
+or import a HAR containing that response. Manual capture does not probe additional
+URLs. Neither mode manufactures a GraphQL schema from examples. Operations
 with inline literal values are omitted from exported GraphQL documents; comments
 and runtime variables are excluded. Authentication-related routes are omitted.
 
 The default maximum is 1,000 entries; use `--max-entries N` up to 10,000. HAR input
-is limited to 32 MiB, individual request/response bodies to 1 MiB, and browser
-buffers are bounded. In-flight, unavailable or oversized data is reported as a
+is limited to 32 MiB, captured request/response bodies to 1 MiB, and browser
+buffers are bounded. Automatic schema probes can validate definitions up to 8 MiB;
+their HAR body remains subject to the capture limit. In-flight, unavailable or oversized data is reported as a
 coverage gap. A successful capture never claims whole-service completeness.
 Outputs use private permissions. Downloaded formal specifications are kept as
 definitions; the sanitized HAR is not a lossless backup of the original traffic.
