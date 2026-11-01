@@ -1,7 +1,9 @@
-"""An independent producer using only Python's standard library.
+"""Create a portable discovery manifest from existing API definitions.
 
-Run with `python -S` to demonstrate that no generator package is imported.
-The consumer validates the definitions and this public bundle contract.
+This independent example shows how another tool can supply definitions to
+website-client normalize/generate without importing the generator. It reads
+local definition files, writes JSON to stdout and makes no network requests.
+Run with --help for inputs; use python -S to disable third-party site packages.
 """
 
 import argparse
