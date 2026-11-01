@@ -84,12 +84,28 @@ class BrowserLoginTransport(httpx.BaseTransport):
 
         self._headers = {}
         self._session = None
+        self._owns_session = True
         self._request_connection = None
         self._target = None
         self._used = False
 
     def __repr__(self):
         return "<BrowserLoginTransport temporary; credentials not exported>"
+
+    @classmethod
+    def for_session(cls, session, endpoint, method, headers=None):
+        """Send one scoped request without taking ownership of an open session."""
+        transport = cls(endpoint, method, login_url=session._url)
+        transport._session = session
+        transport._owns_session = False
+        transport._observe(
+            "Network.requestWillBeSent",
+            {
+                "documentURL": session._url,
+                "request": {"url": endpoint, "headers": headers or {}},
+            },
+        )
+        return transport
 
     @staticmethod
     def _validate_session_header_name(name):
@@ -388,7 +404,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
     def close(self):
         try:
             self._close_request_target()
-            if self._session:
+            if self._session and self._owns_session:
                 if self._session._connection:
                     self._session._connection.on_event = None
                 self._session.close()
