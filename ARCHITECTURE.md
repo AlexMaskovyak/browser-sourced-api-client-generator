@@ -1,5 +1,32 @@
 # Architecture
 
+## Portable discovery pipeline
+
+The versioned discovery bundle is the exchange format between producers and
+generation. It embeds UTF-8 artifacts and SHA-256 hashes; it does not depend on
+external file paths, browser state or a saved login. The bundled JSON Schema owns
+the input contract. Producers own their evidence and explicit service bindings.
+
+Discovery records schema and operation endpoint associations while collecting
+evidence. Normalization owns validation, deterministic merging, endpoint grouping
+and generation readiness. It preserves reports and unresolved declarations.
+Conflicting schemas or operation names are errors or blocked contracts, never
+silently selected versions. Inferred OpenAPI requires explicit acceptance at
+generation; a form inventory alone is not a callable API definition.
+
+Generation consumes the same bundle from a file, manifest directory or stdin.
+It revalidates hashes and contracts, selects one API, and delegates typed source
+to the existing generators. Generated packages retain selected input hashes and
+producer lineage, not the private walk reports. Multiple ready APIs require an
+explicit service selection. Missing GraphQL schemas can be supplied by a separate
+producer and merged with observed operations for the same endpoint.
+
+Offline commands use stdin/stdout JSON and send progress to stderr. Browser login
+continues to use the terminal; piping its stdout does not export authentication.
+Output files and directories are created exclusively with private permissions.
+Failures do not replace prior output or invoke service operations. Bounded reads,
+schema validation and content hashes run before code generation or publication.
+
 Poetry owns package metadata, dependency resolution, the committed `poetry.lock`,
 development dependency groups and builds. The project environment lives in
 `.venv/` and is ignored by Git. Docker installs the locked dependencies into a

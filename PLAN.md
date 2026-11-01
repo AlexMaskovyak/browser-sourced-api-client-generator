@@ -1,5 +1,25 @@
 # Delivery plan
 
+## Portable discovery and normalization
+
+1. Define a versioned, self-contained JSON bundle and public JSON Schema. Preserve
+   every discovery file with its hash, producer and provenance. Record endpoint
+   associations when evidence is collected, not from numbered filenames later.
+2. Normalize and merge bundles into endpoint-specific contracts. Validate schema
+   and operation documents, preserve unresolved declarations and reject conflicts.
+   Let an external schema producer complete a capture with a missing schema.
+3. Add file/directory/stdin inputs and stdout outputs: discovery export, standard
+   definition import, normalization and generation from bundles. Preserve legacy
+   file-based generation. Record bundle, schema and operation hashes in clients.
+4. Test malformed versions, hashes, ambiguous APIs, conflicting operations,
+   inferred definitions and file/pipe equivalence. In Docker, copy only a walk's
+   manifest and generate/install clients from it. Exercise an independent producer
+   and a browser-to-normalize-to-generate pipe. Document the executable pipeline.
+
+Completion requires the focused tests, full suite, Poetry checks, builds and clean
+container scenarios to pass, followed by a separate PR based on exploration PR #7.
+Normalization must not invent a backend contract from an unverified form report.
+
 ## Algorithmic site exploration
 
 1. [x] Traverse same-origin pages, navigation menus, tabs and pagination in a stable
