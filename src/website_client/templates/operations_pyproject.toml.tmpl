@@ -1,0 +1,16 @@
+[build-system]
+requires = ["poetry-core>=2.2,<3"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "$name"
+version = "0.1.0"
+description = "Python client for captured GraphQL operations"
+requires-python = ">=3.11,<4"
+dependencies = ["httpx>=0.28,<0.29", "graphql-core>=3.2,<3.4", "playwright>=1.58,<2"]
+
+[project.scripts]
+$name = "$package._cli:entrypoint"
+
+[tool.poetry]
+packages = [{ include = "$package" }]

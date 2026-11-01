@@ -58,10 +58,10 @@ def add_commands(commands, generate_command, definition):
     )
     imported = commands.add_parser(
         "import",
-        help="Create a discovery manifest from another tool's API definition.",
-        description="Read a local OpenAPI definition or GraphQL schema and write manifest JSON for normalization and client generation. Sends no API requests. Use --endpoint for GraphQL or OpenAPI without absolute server URLs.",
+        help="Create a manifest from operations or an API definition.",
+        description="Read OpenAPI, GraphQL operations, or an optional GraphQL schema and write manifest JSON. Sends no API requests. Use --endpoint for GraphQL or OpenAPI without absolute server URLs.",
     )
-    source = imported.add_mutually_exclusive_group(required=True)
+    source = imported.add_mutually_exclusive_group()
     source.add_argument(
         "--openapi", help="Local OpenAPI JSON/YAML file, or '-' for stdin."
     )
@@ -71,7 +71,7 @@ def add_commands(commands, generate_command, definition):
     )
     imported.add_argument(
         "--operations",
-        help="Optional GraphQL operation file, or '-' for stdin. Required for generation, not schema-only import.",
+        help="GraphQL operation file, or '-' for stdin. Can be supplied alone with --endpoint; a schema is optional.",
     )
     imported.add_argument(
         "--endpoint",
@@ -97,6 +97,28 @@ def add_commands(commands, generate_command, definition):
 
 
 def import_definition(options) -> Manifest:
+    if not (options.openapi or options.graphql_schema or options.operations):
+        raise BrowserError("Supply --operations, --openapi or --graphql-schema.")
+    if options.operations and not options.openapi and not options.graphql_schema:
+        from .operation_contracts import compile_operations
+
+        if not options.endpoint:
+            raise BrowserError("Operation import requires --endpoint.")
+        text = read_text(options.operations, MAX_DOCUMENT)
+        try:
+            compile_operations((text,))
+        except ValueError as error:
+            raise BrowserError(str(error)) from None
+        producer = Producer(options.producer, options.producer_version)
+        endpoint = endpoint_url(options.endpoint)
+        document = Artifact.create(
+            "imported-operations.graphql", Kind.GRAPHQL_OPERATIONS, text,
+            Source.EXTERNAL, locations=(endpoint,), producer=producer,
+        )
+        return Manifest.create(
+            (document,), (Service.create(Protocol.GRAPHQL, endpoint, operations=(document.id,)),),
+            producer,
+        )
     source_path = options.openapi or options.graphql_schema
     if options.operations and options.openapi:
         raise BrowserError("--operations is only used with GraphQL.")
@@ -207,9 +229,7 @@ def generate_bundle(source, output, name, identifier=None, allow_inferred=False)
     normalized = normalize_manifest(original)
     target = select_service(normalized, identifier, allow_inferred=allow_inferred)
     artifacts = {item.id: item for item in normalized.artifacts}
-    if target.schema_artifact is None or target.source_schema_artifact is None:
-        raise BrowserError("Selected API has no validated source schema.")
-    schema = artifacts[target.schema_artifact]
+    schema = artifacts.get(target.schema_artifact)
     operations = artifacts.get(target.compiled_operations_artifact)
     if normalized.normalization is None:
         raise BrowserError("Selected manifest has no normalization result.")
@@ -224,8 +244,11 @@ def generate_bundle(source, output, name, identifier=None, allow_inferred=False)
             "endpoint": target.endpoint, "confidence": target.confidence.value,
             "status": target.status.value,
         },
-        "schemaArtifact": artifact_reference(schema),
-        "sourceSchemaArtifact": artifact_reference(artifacts[target.source_schema_artifact]),
+        "schemaArtifact": artifact_reference(schema) if schema else None,
+        "sourceSchemaArtifact": (
+            artifact_reference(artifacts[target.source_schema_artifact])
+            if target.source_schema_artifact else None
+        ),
         "operationArtifacts": [artifact_reference(artifacts[ref]) for ref in target.operation_artifacts],
         "unassignedArtifacts": list(normalized.normalization.unassigned_artifacts),
         "otherServices": [
@@ -238,6 +261,12 @@ def generate_bundle(source, output, name, identifier=None, allow_inferred=False)
         + str(len(normalized.normalization.unassigned_artifacts)),
         file=sys.stderr,
     )
+    if target.protocol is Protocol.GRAPHQL and schema is None:
+        from .operation_generation import generate_operation_client
+
+        return generate_operation_client(original, target, output, name, lineage)
+    if schema is None:
+        raise BrowserError("Selected API has no usable HTTP definition.")
     with tempfile.TemporaryDirectory(prefix="website-client-contract-") as directory:
         root = Path(directory)
         schema_path = root / "schema"

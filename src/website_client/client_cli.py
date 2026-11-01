@@ -146,6 +146,16 @@ def describe_inputs(function):
     return "; ".join(descriptions) or "none"
 
 
+def describe_operation_inputs(operation, function):
+    if operation["kind"] != "graphql-operation":
+        return describe_inputs(function)
+    return "; ".join(
+        item["parameter"] + ": " + item["type"]
+        + (" (required)" if item["required"] else " (optional; omitted unless supplied)")
+        for item in operation["variables"]
+    ) or "none"
+
+
 def add_operation_arguments(command):
     command.add_argument(
         "--url",
@@ -217,7 +227,7 @@ def build_parser(operations):
             description=label + ". " + operation.get("description", ""),
             epilog=(
                 "JSON input fields: "
-                + describe_inputs(function)
+                + describe_operation_inputs(operation, function)
                 + ". Models use JSON objects; complex types may require "
                 "the generated Python API."
             ),
@@ -363,9 +373,11 @@ def enter_generated_client(stack, options, operation, headers, transport):
         if transport is not None:
             import httpx
 
-            client_options["http_client"] = httpx.Client(
+            client_options["http_client"] = stack.enter_context(httpx.Client(
                 transport=transport, follow_redirects=False
-            )
+            ))
+        if operation["kind"] == "graphql-operation":
+            client_options["allow_writes"] = operation["write"]
         client = module.Client(**client_options)
     return stack.enter_context(client)
 
@@ -432,6 +444,10 @@ def main(args=None):
         data = read_input_json(options.input)
         headers = read_runtime_headers(options.headers_stdin)
         arguments = bind_input_arguments(function, data)
+        if operation["kind"] == "graphql-operation":
+            from .operation_runtime import validate_arguments
+
+            validate_arguments(__package__, options.operation, arguments)
         result = execute_operation(
             options, operation, function, arguments, headers, state
         )
