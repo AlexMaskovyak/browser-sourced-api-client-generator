@@ -40,6 +40,16 @@ production compatibility nor endpoint completeness.
 
 ## Discovery sources and definitions
 
+Automatic discovery adds bounded schema reads after human login. The website is
+the source of complete definitions; captured shapes remain inferred evidence.
+Python owns candidate selection, credential scoping and probe reporting. A page
+reload observes the application's own traffic. Only same-origin schema links and
+common definition paths are fetched automatically. GraphQL introspection uses
+observed endpoints or the explicitly selected endpoint, never captured business
+operations. Redirects are blocked. Failure to obtain a schema remains unknown
+coverage, not evidence that the API has no other operations. Retry starts a fresh
+command and output directory; the existing output is never replaced.
+
 Browser capture starts after login confirmation. Python receives native network
 events from the owned tab, including requests initiated by that page to API origins.
 An existing HAR is a second, offline source feeding the same analysis. Neither
