@@ -1,5 +1,13 @@
 # Delivery plan
 
+## PR 7 API coverage clarification
+
+1. Explain general HTTP discovery before format-specific handling. Document the
+   REST/OpenAPI and GraphQL paths, current adapters and unknown-POST limitations.
+2. Align the architecture, README and pipeline guide with the implemented capture,
+   request policy and generation backends. Check documentation links and the diff,
+   then commit and push the clarification to PR 7 without changing runtime policy.
+
 ## Command walkthrough
 
 1. [x] Put installation, discovery, normalization, API selection, generation and
