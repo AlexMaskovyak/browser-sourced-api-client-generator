@@ -2,7 +2,7 @@
 
 ## Portable discovery pipeline
 
-The versioned discovery bundle is the exchange format between producers and
+The versioned discovery manifest is the exchange format between producers and
 generation. It embeds UTF-8 artifacts and SHA-256 hashes; it does not depend on
 external file paths, browser state or a saved login. The bundled JSON Schema owns
 the input contract. Producers own their evidence and explicit service bindings.
@@ -14,7 +14,7 @@ Conflicting schemas or operation names are errors or blocked contracts, never
 silently selected versions. Inferred OpenAPI requires explicit acceptance at
 generation; a form inventory alone is not a callable API definition.
 
-Generation consumes the same bundle from a file, manifest directory or stdin.
+Generation consumes the same manifest from a file, manifest directory or stdin.
 It revalidates hashes and contracts, selects one API, and delegates typed source
 to the existing generators. Generated packages retain selected input hashes and
 producer lineage, not the private walk reports. Multiple ready APIs require an
@@ -26,6 +26,20 @@ continues to use the terminal; piping its stdout does not export authentication.
 Output files and directories are created exclusively with private permissions.
 Failures do not replace prior output or invoke service operations. Bounded reads,
 schema validation and content hashes run before code generation or publication.
+
+The `discovery_manifest` package separates construction and stable identities
+(`model.py`), public-format and reference checks (`validation.py`), bounded files
+and streams (`transport.py`), and producer reconciliation (`merging.py`). Merge
+resets computed selections before normalization, so an older normalized schema
+cannot override a newly selected source. Its memory budget is enforced while
+loading inputs, before every producer document has accumulated.
+
+The shell owns process sequencing. Pipes carry complete JSON documents, not
+incremental events or upstream exit status. `pipefail` reports failures but cannot
+undo a downstream client after a producer emits valid JSON and later fails. Build
+systems requiring producer success must stage files and sequence commands with
+`&&`. Normalization success means a valid transformation; individual APIs may
+remain blocked. Generation requires one explicitly selected or uniquely ready API.
 
 Poetry owns package metadata, dependency resolution, the committed `poetry.lock`,
 development dependency groups and builds. The project environment lives in

@@ -24,7 +24,7 @@ def verify_external_pipeline(root):
             [
                 sys.executable,
                 "-S",
-                "/work/examples/produce_bundle.py",
+                "/work/examples/create_discovery_manifest.py",
                 "--protocol",
                 "graphql",
                 "--schema",
@@ -38,7 +38,7 @@ def verify_external_pipeline(root):
             [
                 executable,
                 "generate",
-                "--bundle",
+                "--manifest",
                 "-",
                 "--name",
                 "external-client",
@@ -88,7 +88,7 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
                 "20",
                 "--max-probes",
                 "8",
-                "--emit-bundle",
+                "--emit-manifest",
                 "--output",
                 str(capture),
                 "--browser",
@@ -100,7 +100,7 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
             [
                 executable,
                 "generate",
-                "--bundle",
+                "--manifest",
                 "-",
                 "--service",
                 identifier,
