@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from .browser import BrowserError, BrowserSession, Connection, origin
+from .browser import BrowserError, BrowserSession, origin
 
 BYTES_PER_MEBIBYTE = 1024 * 1024
 # Bound the memory used by one endpoint call, independently in each direction.
@@ -18,9 +18,6 @@ MAX_RESPONSE_BODY_BYTES = 8 * BYTES_PER_MEBIBYTE
 # Check its exact maximum before decoding, then enforce the decoded byte limit.
 MAX_BASE64_RESPONSE_CHARACTERS = 4 * ((MAX_RESPONSE_BODY_BYTES + 2) // 3)
 
-# Browser control messages contain the encoded body plus JSON and headers.
-# Twice the body limit leaves room for that overhead while bounding each message.
-MAX_CONTROL_MESSAGE_BYTES = 2 * MAX_RESPONSE_BODY_BYTES
 # Cached session headers have a separate, smaller budget than endpoint bodies.
 MAX_SESSION_HEADER_VALUE_BYTES = 16 * 1024
 MAX_SESSION_HEADER_NAME_CHARACTERS = 128
@@ -89,7 +86,6 @@ class BrowserLoginTransport(httpx.BaseTransport):
         self._session = None
         self._request_connection = None
         self._target = None
-        self._paused_requests = []
         self._used = False
 
     def __repr__(self):
@@ -178,22 +174,49 @@ class BrowserLoginTransport(httpx.BaseTransport):
             raise BrowserError("The request exceeds the 8 MiB browser transport limit.")
         return request_body_bytes
 
-    def _collect_paused_request(self, method, params):
-        if method == "Fetch.requestPaused":
-            self._paused_requests.append(params)
+    def _collect_paused_request(self, method, event):
+        if method != "Fetch.requestPaused":
+            return
+        try:
+            if canonical(event["request"]["url"]) != canonical(
+                self._active_request.url
+            ):
+                self._request_connection.call(
+                    "Fetch.failRequest",
+                    {
+                        "requestId": event["requestId"],
+                        "errorReason": "BlockedByClient",
+                    },
+                )
+                raise BrowserError("Browser request redirects are blocked.")
+            if "responseStatusCode" in event:
+                self._response = self._finish_response(self._active_request, event)
+            else:
+                if self._sent:
+                    raise BrowserError(
+                        "A second browser request was blocked; no automatic retry is allowed."
+                    )
+                self._sent = True
+                self._continue_request(self._active_request, event, self._active_body)
+        except BaseException as error:
+            # Keep exceptions out of Playwright's event dispatcher. The calling
+            # command receives them after navigation unwinds.
+            self._failure = error
+            try:
+                self._request_connection.call(
+                    "Fetch.failRequest",
+                    {
+                        "requestId": event["requestId"],
+                        "errorReason": "Aborted",
+                    },
+                )
+            except Exception:
+                pass
 
     def _open_request_target(self):
-        """Use a background tab so the signed-in application stays untouched."""
-        parent = self._session._connection
-        self._target = parent.call(
-            "Target.createTarget",
-            {"url": "about:blank", "background": True},
-        )["targetId"]
-        self._request_connection = Connection(
-            f"ws://127.0.0.1:{self._session._port}/devtools/page/{self._target}",
-            self._session._port,
-            max_message_bytes=MAX_CONTROL_MESSAGE_BYTES,
-        )
+        """Playwright owns the separate tab and its CDP connection."""
+        self._target = self._session._context.new_page()
+        self._request_connection = self._session.connection_for(self._target)
         self._request_connection.on_event = self._collect_paused_request
         self._request_connection.call(
             "Fetch.enable",
@@ -299,39 +322,15 @@ class BrowserLoginTransport(httpx.BaseTransport):
             request=request,
         )
 
-    def _wait_for_response(self, request, request_body_bytes):
-        expected_url = canonical(request.url)
-        request_was_sent = False
-        request_deadline_seconds = time.monotonic() + REQUEST_TIMEOUT_SECONDS
-
-        while time.monotonic() < request_deadline_seconds:
+    def _wait_for_response(self):
+        deadline_seconds = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+        while time.monotonic() < deadline_seconds:
             self._session._check()
+            if self._failure is not None:
+                raise self._failure
+            if self._response is not None:
+                return self._response
             self._request_connection.pump(timeout=BROWSER_EVENT_POLL_SECONDS)
-            ready_requests = self._paused_requests[:]
-            self._paused_requests.clear()
-
-            for event in ready_requests:
-                if canonical(event["request"]["url"]) != expected_url:
-                    self._request_connection.call(
-                        "Fetch.failRequest",
-                        {
-                            "requestId": event["requestId"],
-                            "errorReason": "BlockedByClient",
-                        },
-                    )
-                    raise BrowserError("Browser request redirects are blocked.")
-
-                if "responseStatusCode" in event:
-                    return self._finish_response(request, event)
-
-                if request_was_sent:
-                    raise BrowserError(
-                        "A second browser request was blocked; "
-                        "no automatic retry is allowed."
-                    )
-                request_was_sent = True
-                self._continue_request(request, event, request_body_bytes)
-
         raise BrowserError(
             "Browser endpoint request timed out. Check the service before retrying."
         )
@@ -341,13 +340,24 @@ class BrowserLoginTransport(httpx.BaseTransport):
         self._used = True
         self._session._check()
 
+        self._active_request = request
+        self._active_body = request_body_bytes
+        self._response = self._failure = None
+        self._sent = False
         try:
             self._open_request_target()
-            self._request_connection.send(
-                "Page.navigate",
-                {"url": canonical(request.url)},
-            )
-            return self._wait_for_response(request, request_body_bytes)
+            try:
+                self._target.goto(
+                    canonical(request.url),
+                    wait_until="commit",
+                    timeout=REQUEST_TIMEOUT_SECONDS * 1000,
+                )
+            except Exception:
+                # Aborting the intercepted response intentionally cancels page
+                # navigation. A captured result or failure remains authoritative.
+                if self._response is None and self._failure is None:
+                    raise
+            return self._wait_for_response()
         except (BrowserError, KeyboardInterrupt):
             raise
         except Exception:
@@ -369,14 +379,11 @@ class BrowserLoginTransport(httpx.BaseTransport):
 
         if self._target:
             try:
-                self._session._connection.call(
-                    "Target.closeTarget",
-                    {"targetId": self._target},
-                )
+                self._target.close()
             except Exception:
                 pass
             self._target = None
-        self._paused_requests.clear()
+        self._active_request = self._active_body = self._response = self._failure = None
 
     def close(self):
         try:

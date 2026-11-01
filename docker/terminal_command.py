@@ -1,6 +1,5 @@
 """Drive an installed command through its real terminal and owned browser."""
 
-import json
 import os
 from pathlib import Path
 import pty
@@ -12,6 +11,7 @@ import time
 from urllib.request import ProxyHandler, build_opener
 
 from website_client.browser import Connection
+from playwright.sync_api import sync_playwright
 
 # Local fixture operations should finish promptly; a hang must fail the test.
 DEFAULT_WAIT_TIMEOUT_SECONDS = 15
@@ -100,15 +100,13 @@ class Command:
         self.port = int(
             (self.profile / "DevToolsActivePort").read_text().splitlines()[0]
         )
-        opener = build_opener(ProxyHandler({}))
-        with opener.open(f"http://127.0.0.1:{self.port}/json/list") as response:
-            pages = json.load(response)
-        self.connection = Connection(
-            next(
-                page["webSocketDebuggerUrl"] for page in pages if page["type"] == "page"
-            ),
-            self.port,
+        self.driver = sync_playwright().start()
+        self.browser = self.driver.chromium.connect_over_cdp(
+            f"http://127.0.0.1:{self.port}"
         )
+        context = self.browser.contexts[0]
+        page = context.pages[0]
+        self.connection = Connection(page, context.new_cdp_session(page))
 
     def node(self, selector):
         root = self.connection.call("DOM.getDocument")["root"]["nodeId"]
@@ -164,4 +162,6 @@ class Command:
                 self.connection.close()
             except Exception:
                 pass
+        if getattr(self, "driver", None):
+            self.driver.stop()
         os.close(self.terminal)
