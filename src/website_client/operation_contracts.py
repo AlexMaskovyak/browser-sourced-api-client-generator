@@ -37,6 +37,12 @@ _SCALARS = {
 
 @dataclass(frozen=True, slots=True)
 class Variable:
+    """A GraphQL variable's server name, Python parameter and declared type.
+
+    required is false for nullable variables and variables with server defaults.
+    parameter may differ from name when the server name is a Python keyword.
+    """
+
     name: str
     parameter: str
     type: str
@@ -63,6 +69,12 @@ class Variable:
 
 @dataclass(frozen=True, slots=True)
 class Operation:
+    """One named query or mutation with all referenced fragments included.
+
+    The immutable contract records captured syntax, not a complete server schema.
+    method is the generated Python method name, not an HTTP verb.
+    """
+
     name: str
     method: str
     kind: str

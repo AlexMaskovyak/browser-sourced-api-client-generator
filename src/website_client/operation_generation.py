@@ -22,9 +22,55 @@ from .operation_contracts import compile_operations
 from .operation_requests import RequestMethod, RequestStyle, request_styles
 
 
+def operation_docstring(operation):
+    """Describe only behavior known from the captured operation contract.
+
+    A captured document provides names and declared types, not authoritative
+    business descriptions. Do not invent meanings for custom input fields.
+    """
+    action = "Send the GraphQL mutation" if operation.write else "Run the GraphQL query"
+    lines = [f"{action} {operation.name}.", ""]
+    if operation.write:
+        lines.extend(["Requires a client constructed with allow_writes=True.", ""])
+    if operation.variables:
+        lines.append("Args:")
+        for variable in operation.variables:
+            requirement = (
+                "Required."
+                if variable.required
+                else "Defaults to UNSET, leaving the variable for the server to resolve."
+            )
+            lines.append(
+                f"    {variable.parameter}: GraphQL ${variable.name}: {variable.type}. {requirement}"
+            )
+        lines.append("")
+    lines.extend(
+        [
+            "Returns:",
+            "    The response's data object as a JSON dictionary. Response fields and",
+            "    custom input fields are not validated without a server schema.",
+            "",
+            "Raises:",
+            "    ValueError: Declared variables are invalid or mutation permission is missing.",
+            "    OperationError: The server returns a non-success HTTP status.",
+            "    RuntimeError: The response is oversized, invalid JSON or contains GraphQL errors.",
+            "    httpx.HTTPError: The HTTP transport fails. Browser login can raise BrowserError.",
+            "",
+            "No automatic retry occurs. Check the service before retrying an uncertain write.",
+        ]
+    )
+    return '        """' + "\n        ".join(lines) + '\n        """\n'
+
+
 def generate_operation_client(
     manifest: Manifest, target: Service, output, name, lineage
 ):
+    """Publish a standalone SDK from one service's captured operation documents.
+
+    Compile and validate every document before writing a temporary project.
+    Publication refuses an existing output; authentication is never copied from
+    the manifest into the SDK. Request conventions come from captured evidence.
+    """
     artifacts = {item.id: item for item in manifest.artifacts}
     documents = tuple(artifacts[ref] for ref in target.operation_artifacts)
     if any(item.kind is not Kind.GRAPHQL_OPERATIONS for item in documents):
@@ -68,7 +114,8 @@ def generate_operation_client(
         )
         methods.append(
             f"    def {operation.method}({signature}) -> dict[str, Any]:\n"
-            f"        values = {arguments}\n"
+            + operation_docstring(operation)
+            + f"        values = {arguments}\n"
             f"        return self._execute({operation.name!r}, {{key: value for key, value in values.items() if value is not UNSET}})\n"
         )
     with tempfile.TemporaryDirectory(prefix="website-client-operations-") as directory:
@@ -79,7 +126,12 @@ def generate_operation_client(
         (module / "client.py").write_text(
             '"""Methods generated from captured operation documents."""\n\n'
             "from typing import Any\nfrom .operation_runtime import OperationClient, UNSET\n\n\n"
-            "class Client(OperationClient):\n" + "\n".join(methods)
+            "class Client(OperationClient):\n"
+            '    """Call captured operations using the shared authenticated HTTP client.\n\n'
+            "    Use as a context manager. See OperationClient for connection ownership,\n"
+            "    authentication inputs and write permission. Operation methods document\n"
+            "    declared variables; they do not assert complete server API coverage.\n"
+            '    """\n\n' + "\n".join(methods)
         )
         for filename in ("operation_contracts.py", "operation_runtime.py"):
             (module / filename).write_text(

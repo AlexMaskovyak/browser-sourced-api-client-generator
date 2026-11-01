@@ -30,6 +30,8 @@ class OperationError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class BoundOperation:
+    """Pair a compiled GraphQL document with its observed HTTP conventions."""
+
     operation: Operation
     method: str
     operation_name_in_url: bool
@@ -48,6 +50,7 @@ class BoundOperation:
 
 @cache
 def contracts(package):
+    """Load and compile packaged documents once, exposing a read-only mapping."""
     metadata = json.loads(files(package).joinpath("_operations.json").read_text())
     result = {}
     for name, item in metadata.items():
@@ -61,10 +64,26 @@ def contracts(package):
 
 
 def validate_arguments(package, name, arguments):
+    """Check declared variables without contacting the service or opening a browser."""
     return validate_variables(contracts(package)[name].operation, arguments)
 
 
 class OperationClient:
+    """Send captured operations with HTTPX, optionally using an injected transport.
+
+    Args:
+        url: Exact GraphQL endpoint. HTTPS is required except on localhost.
+        headers: Temporary request headers. Callers supply authentication at runtime.
+        http_client: An existing HTTPX client, optionally backed by browser login.
+            The caller owns and closes this client. If omitted, this class creates
+            and owns an HTTPX client with redirects disabled and a 30-second timeout.
+        allow_writes: Explicit permission to execute mutation methods. Defaults false.
+
+    Use as a context manager or call close(). This class owns no accounting state
+    and never retries automatically. An injected HTTP client must also disable
+    retries in its transport when uncertain writes must not be repeated.
+    """
+
     def __init__(self, url: str, headers=None, http_client=None, *, allow_writes=False):
         if type(allow_writes) is not bool:
             raise ValueError("Input must use a boolean write permission.")
@@ -98,13 +117,17 @@ class OperationClient:
         self.close()
 
     def close(self):
+        """Close an internally created connection; leave injected clients open."""
         if self._owns_client:
             self.http_client.close()
 
     def _execute(self, name: str, arguments: dict[str, Any]):
+        """Validate one operation, send it once and reject partial GraphQL results."""
         bound = self._operations[name]
         operation = bound.operation
         variables = validate_variables(operation, arguments)
+        # Validate before any transport or browser activity. Missing values have
+        # already been omitted by generated methods; explicit None stays null.
         if operation.write and not self.allow_writes:
             raise ValueError(
                 "This write requires allow_writes=True on the Python client."
