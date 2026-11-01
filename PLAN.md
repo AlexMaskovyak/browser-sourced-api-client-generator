@@ -1,16 +1,16 @@
 # Current work
 
-Verify generated-client authentication against the real browser session.
+Make generated Python clients understandable and verify repeatable generation.
 
-1. Preserve bounded custom API session headers at their exact origin, and expose
-   safe HTTP status/browser failure diagnostics without response bodies or secrets.
-2. Test header scope, limits and failure diagnostics, then run the full suite and
-   installed container scenarios. Refresh the generated service client.
-3. Use one private read-verification session to identify any remaining failure.
-   Completed: the service's own requests succeeded while calls without its client
-   identification headers received 403. The generated read returned 200 after
-   explicitly selecting those headers. No browser transport replacement is needed.
-   Custom header selection remains an explicit command input, not inferred metadata.
+1. Generate class and method docstrings from operation contracts: read/write
+   behavior, declared variable types, omission, return values and failure behavior.
+   Explain shared runtime ownership and validation limits in its public API.
+2. Test documentation on a freshly generated client, including required inputs,
+   defaults and mutation permission. Generate twice from identical saved inputs
+   and compare output bytes. Run the full suite and container checks.
+3. Regenerate the Gusto package from its saved normalized manifest, compare it
+   with the repository, and update both PRs. Keep private inputs out of Git.
 
-Complete when the read succeeds or the actual external rejection is identified.
-No automatic retries or production mutations are part of this work.
+The generator owns executable SDK files. Repository packaging, tests and prose
+remain separate unless the comparison proves they are generated. Do not perform
+live writes or claim whole-repository reproducibility from a package comparison.
