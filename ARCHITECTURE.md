@@ -37,12 +37,18 @@ Paths below are relative to `src/website_client/`.
 | `exploration.py`, `exploration_policy.py`, `contracts.py` | Walk pages and controls within explicit limits; classify requests and record declared forms and supported frontend operations. |
 | `self_discovery.py` | Look for published API definitions and request GraphQL schema introspection where applicable. |
 | `bundle_capture.py`, `discovery_manifest/` | Build the manifest; validate its version, hashes and references; read/write files and streams; combine producer inputs. |
-| `normalization.py`, `definitions.py` | Validate API definitions and assigned operations, preserve unresolved evidence, and calculate which APIs can generate. |
+| `normalization.py`, `definitions.py` | Normalize validated, immutable dataclasses; check API definitions and assigned operations, preserve unresolved evidence, and calculate which APIs can generate. |
 | `generation.py`, `templates/` | Run the upstream code generators and package their output with endpoint commands and authentication support. |
 | `client_cli.py`, `session_http.py` | Supply the generated client's command interface and browser-authenticated HTTP transport. |
 
 Project code is Python. Poetry manages dependencies and builds. Generated packages
 have their own dependencies and can run independently of this repository.
+
+`discovery_manifest/records.py` converts manifest JSON to immutable dataclasses
+for normalization and back to the same public JSON format. Construction and
+replacement check field types and schema rules; document hashes and manifest
+references are also validated. Nested collections are tuples, so normalization
+creates replacements rather than mutating producer data.
 
 ## HTTP discovery and supported API definitions
 
