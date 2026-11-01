@@ -65,7 +65,64 @@ network during execution. Playwright's bundled Node driver runs inside the
 container. No production credentials are used.
 These tests do not establish production service compatibility.
 
-## Find service definitions automatically
+## Explore pages and discover read and write contracts
+
+Use exploration when the API calls you need appear on other pages, inside menus
+or in forms. It runs a deterministic browser traversal, with no agent, model
+account or API key. From the repository root, replace the example website address:
+
+```sh
+mkdir -p captures
+poetry run website-client discover --url https://app.example.com --explore --output ./captures/example-walk
+```
+
+1. Sign in in the temporary browser and open the application page where exploration
+   should start. Complete verification codes normally.
+2. Press Enter once. The command walks same-origin links in breadth-first order,
+   expands navigation menus, opens tabs and form dialogs, and follows pagination.
+   It records API traffic during the walk, then runs schema discovery.
+3. Read `exploration.json` for visited pages, attempted controls, queued pages,
+   blocked requests and limits. Use `discovery.json` for observed endpoints and
+   `self-discovery.json` for schema probe results. Generate clients from validated
+   definitions and captured or declared GraphQL documents as described below.
+
+The command inventories form actions, methods, upload types, named fields,
+constraints and submitter overrides. It also extracts GraphQL query and mutation
+documents from supported source literals in loaded same-origin frontend modules.
+Forms and frontend documents are **declarations**, not verified backend contracts.
+They are marked as unexecuted. Mutations can be included in the generated operation
+documents without being called. Each declaration records whether its document
+could be exported; inline literals are excluded from exported documents.
+
+During exploration, parsed GraphQL queries and GET/HEAD requests are permitted.
+API mutations, unknown POSTs and other write methods are blocked before sending;
+their inferred input shapes are recorded without payload values. Forms are never
+submitted. The tool may open an Add, New, Edit, Create or Upload dialog, but it
+does not activate its submit controls. Input contents, selected values and hidden
+tokens are not collected. Off-site document navigation is blocked and routed
+WebSockets are not connected to their servers,
+service workers are disabled, and the login tab is replaced before exploration.
+
+Defaults are 20 pages, 60 control actions, link depth 3 and 120 seconds of
+exploration. Change them with `--max-pages`, `--max-actions`, `--max-depth` and
+`--explore-seconds`. Schema probes have their separate `--max-probes` limit.
+The starting-page scan's `--observe-seconds` option cannot be combined with exploration.
+Exploration implies `--auto`; the simpler starting-page scan remains available
+below. Output directories must be new. Ctrl+C cancels and closes the browser.
+
+This is a bounded traversal, not proof of whole-site coverage. Custom widgets,
+popups, cross-site pages, persisted GraphQL operations and unknown read-via-POST
+APIs may be skipped or blocked. Only loaded same-origin scripts and literal
+GraphQL tags or `body` strings are inspected; minified/computed operation formats
+may not be understood. GET endpoints can have server-side effects despite their
+method. A page visit or form declaration does not establish payment, submission
+or approval. Review declared contracts before using them for writes.
+
+Inspection also has fixed limits: 200 links or controls per state, 100 retained
+forms with up to 100 fields each, and 30 loaded frontend modules of up to 1 MiB
+each with an 8 MiB combined source budget. Truncation and pending work are reported.
+
+## Find service definitions on the current page
 
 From the repository root, create `captures/` and choose a new output directory.
 The following example opens the website, waits for you to sign in, then discovers

@@ -50,15 +50,18 @@ Exploration starts after human login in a fresh tab with service workers blocked
 The login tab closes so its existing WebSockets cannot bypass exploration rules.
 Requests are intercepted before transmission: navigation stays on the website,
 GET/HEAD and parsed GraphQL queries are permitted, and unknown writes/mutations
-are blocked and reported. WebSockets are closed. Only navigation controls are
+are blocked and reported. Routed WebSockets are never connected to their server. Only navigation controls are
 clicked; forms and submit controls are inventoried rather than executed. Page
 content is untrusted data and is never executed as Python or model instructions.
 
 Exploration records bounded, sanitized page/action coverage, declared forms and
 blocked requests. Loaded same-origin scripts are read as text to extract GraphQL
 documents without executing additional source. Limits and parse omissions remain
-explicit. Before schema probes the exploration page is navigated to a blank page
-and its HTTP interception is removed. Failures restore interception and close the
+explicit. Before schema probes the exploration page is closed and replaced by a
+blank tab, then HTTP interception is removed. Failed navigation targets are also
+replaced, retaining session cookies and recording incomplete requests as omissions.
+Controlled traversal drains response bodies between actions rather than inside
+network callbacks, avoiding waits on other intercepted requests. Failures remove interception and close the
 temporary context through the existing session owner; reruns use a new output.
 
 Automatic discovery adds bounded schema reads after human login. The website is
