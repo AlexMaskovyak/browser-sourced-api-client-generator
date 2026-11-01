@@ -131,7 +131,14 @@ def find_browser(name, explicit=None):
 class BrowserSession:
     """Keep an owned browser alive until the caller exits its context manager."""
 
-    def __init__(self, url, browser="chrome", browser_path=None, on_event=None):
+    def __init__(
+        self,
+        url,
+        browser="chrome",
+        browser_path=None,
+        on_event=None,
+        block_service_workers=False,
+    ):
         self._origin = origin(url)
         self._url = url
         self._executable = find_browser(browser, browser_path)
@@ -140,6 +147,7 @@ class BrowserSession:
         self._signals = {}
         self._cancelled = False
         self._on_event = on_event
+        self._block_service_workers = block_service_workers
 
     def __repr__(self):
         return "<BrowserSession temporary; credentials not exported>"
@@ -170,6 +178,7 @@ class BrowserSession:
                 headless=False,
                 chromium_sandbox=True,
                 accept_downloads=False,
+                service_workers="block" if self._block_service_workers else "allow",
                 timeout=BROWSER_START_TIMEOUT_MILLISECONDS,
                 handle_sigint=False,
                 handle_sigterm=False,
