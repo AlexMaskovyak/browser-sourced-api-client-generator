@@ -1,6 +1,6 @@
 # How the generator is built
 
-The tool collects a website's API definitions and turns them into a standalone
+The tool collects a website's requests and operation documents and turns them into a standalone
 Python client. For commands, start with the [README](README.md). This document
 explains where the work happens in the code.
 
@@ -20,7 +20,8 @@ External API definitions ─┘             |
 ```
 
 The manifest is the saved handoff between discovery and generation. It contains
-complete definitions, supporting reports, endpoint associations and content hashes.
+operation documents, optional definitions, supporting reports, endpoint associations
+and content hashes.
 Later steps can run from that file alone, without the browser or original capture
 directory. Its [format reference](docs/discovery-manifest-format.md) defines the
 versioned JSON contract.
@@ -38,6 +39,8 @@ Paths below are relative to `src/website_client/`.
 | `self_discovery.py` | Look for published API definitions and request GraphQL schema introspection where applicable. |
 | `bundle_capture.py`, `discovery_manifest/` | Build the manifest; validate its version, hashes and references; read/write files and streams; combine producer inputs. |
 | `normalization.py`, `definitions.py` | Normalize validated, immutable dataclasses; check API definitions and assigned operations, preserve unresolved evidence, and calculate which APIs can generate. |
+| `operation_contracts.py`, `operation_requests.py` | Parse operation/variable contracts and preserve captured request methods and URL parameter conventions. |
+| `operation_generation.py`, `operation_runtime.py` | Generate callable methods without a schema; send bounded requests and enforce variable constraints and write permission. |
 | `generation.py`, `templates/` | Run the upstream code generators and package their output with endpoint commands and authentication support. |
 | `client_cli.py`, `session_http.py` | Supply the generated client's command interface and browser-authenticated HTTP transport. |
 
@@ -56,7 +59,7 @@ changes create new records rather than mutating producer data.
 | API | Generation input | Upstream generator |
 | --- | --- | --- |
 | REST/HTTP | Published OpenAPI 3.0/3.1, or inferred OpenAPI accepted after review. | `openapi-python-client` |
-| GraphQL | Complete schema plus the query/mutation documents to generate. | Ariadne Codegen |
+| GraphQL | Named query/mutation documents; complete schema optional. | Operation-document client, or Ariadne Codegen when a schema is available. |
 
 Both use the same manifest and commands. Other contract formats need additional
 readers and generators. Observed routes and form fields alone may be insufficient
