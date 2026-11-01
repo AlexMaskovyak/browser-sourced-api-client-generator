@@ -106,8 +106,8 @@ def main(args=None):
     )
     generate_command = commands.add_parser(
         "generate",
-        help="Generate a standalone Python client from a standard definition.",
-        description="Use openapi-python-client for OpenAPI, or Ariadne Codegen for GraphQL schemas plus operation documents. Sends no API requests.",
+        help="Generate a Python client from captured operations or definitions.",
+        description="Generate from captured requests and operations. GraphQL documents work without a schema; an optional schema enables Ariadne Codegen models. HTTP definitions use openapi-python-client. Sends no API requests.",
     )
     definition = generate_command.add_mutually_exclusive_group(required=True)
     definition.add_argument(

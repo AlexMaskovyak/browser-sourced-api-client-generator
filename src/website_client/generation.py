@@ -296,6 +296,10 @@ def write_generation_report(project, source, operations_source=None, lineage=Non
         "operations": list(project.operations),
         "liveVerified": False,
     }
+    if project.generator_name == "ariadne-codegen":
+        report.update(generationMode="graphql-schema", schemaValidated=True)
+    else:
+        report.update(generationMode="openapi", definitionValidated=True)
     if operations_source is not None:
         report["operationsSha256"] = hashlib.sha256(
             operations_source.encode()

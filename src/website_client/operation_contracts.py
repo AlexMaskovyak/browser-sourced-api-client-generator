@@ -11,8 +11,15 @@ import re
 from typing import Any
 
 from graphql import (
-    GraphQLBoolean, GraphQLFloat, GraphQLID, GraphQLInt, GraphQLString,
-    parse, parse_type, print_ast, value_from_ast_untyped,
+    GraphQLBoolean,
+    GraphQLFloat,
+    GraphQLID,
+    GraphQLInt,
+    GraphQLString,
+    parse,
+    parse_type,
+    print_ast,
+    value_from_ast_untyped,
 )
 from graphql.language.ast import Node
 
@@ -20,8 +27,11 @@ MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 MAX_DOCUMENT_TOKENS = 20_000
 _RESERVED = {"self", "client", "UNSET"}
 _SCALARS = {
-    "Boolean": GraphQLBoolean, "Float": GraphQLFloat, "ID": GraphQLID,
-    "Int": GraphQLInt, "String": GraphQLString,
+    "Boolean": GraphQLBoolean,
+    "Float": GraphQLFloat,
+    "ID": GraphQLID,
+    "Int": GraphQLInt,
+    "String": GraphQLString,
 }
 
 
@@ -32,6 +42,24 @@ class Variable:
     type: str
     required: bool
 
+    def __post_init__(self):
+        if (
+            type(self.name) is not str
+            or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", self.name)
+            or type(self.parameter) is not str
+            or not self.parameter.isidentifier()
+            or keyword.iskeyword(self.parameter)
+            or self.parameter.startswith("__")
+            or self.parameter in _RESERVED
+            or type(self.type) is not str
+            or type(self.required) is not bool
+        ):
+            raise ValueError("Invalid GraphQL variable contract.")
+        try:
+            parse_type(self.type)
+        except Exception:
+            raise ValueError("Invalid GraphQL variable type.") from None
+
 
 @dataclass(frozen=True, slots=True)
 class Operation:
@@ -40,6 +68,22 @@ class Operation:
     kind: str
     document: str
     variables: tuple[Variable, ...]
+
+    def __post_init__(self):
+        if (
+            type(self.name) is not str
+            or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", self.name)
+            or type(self.method) is not str
+            or not self.method.isidentifier()
+            or keyword.iskeyword(self.method)
+            or type(self.kind) is not str
+            or self.kind not in {"query", "mutation"}
+            or type(self.document) is not str
+            or len(self.document.encode()) > MAX_DOCUMENT_BYTES
+            or type(self.variables) is not tuple
+            or any(type(item) is not Variable for item in self.variables)
+        ):
+            raise ValueError("Invalid GraphQL operation contract.")
 
     @property
     def write(self):
@@ -60,9 +104,21 @@ def nodes(value):
 def method_name(name):
     value = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
     value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).lower()
-    if keyword.iskeyword(value) or value.startswith("_") or value in {
-        "close", "execute", "validate", "http_client", "headers", "url", "operations", "allow_writes",
-    }:
+    if (
+        keyword.iskeyword(value)
+        or value.startswith("_")
+        or value
+        in {
+            "close",
+            "execute",
+            "validate",
+            "http_client",
+            "headers",
+            "url",
+            "operations",
+            "allow_writes",
+        }
+    ):
         value = "operation_" + value.lstrip("_")
     return value
 
@@ -79,16 +135,25 @@ def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
             raise ValueError("Invalid GraphQL operation document.") from None
         fragments, selected = {}, []
         for definition in document.definitions:
-            if definition.kind not in {"operation_definition", "fragment_definition"} or definition.name is None:
-                raise ValueError("Only named GraphQL operations and fragments are supported.")
+            if (
+                definition.kind not in {"operation_definition", "fragment_definition"}
+                or definition.name is None
+            ):
+                raise ValueError(
+                    "Only named GraphQL operations and fragments are supported."
+                )
             name = definition.name.value
             if definition.kind == "fragment_definition":
-                if name in fragments and print_ast(fragments[name]) != print_ast(definition):
+                if name in fragments and print_ast(fragments[name]) != print_ast(
+                    definition
+                ):
                     raise ValueError("Conflicting GraphQL fragment definitions.")
                 fragments[name] = definition
             else:
                 if definition.operation.value not in {"query", "mutation"}:
-                    raise ValueError("Subscriptions are not supported by this client backend.")
+                    raise ValueError(
+                        "Subscriptions are not supported by this client backend."
+                    )
                 selected.append(definition)
         for definition in selected:
             reached, active = set(), set()
@@ -111,7 +176,12 @@ def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
                 if item.kind == "fragment_spread":
                     visit(item.name.value)
             parts = [definition] + [fragments[name] for name in sorted(reached)]
-            used = {item.name.value for part in parts for item in nodes(part) if item.kind == "variable"}
+            used = {
+                item.name.value
+                for part in parts
+                for item in nodes(part)
+                if item.kind == "variable"
+            }
             variables, names, parameters = [], set(), set()
             for variable in definition.variable_definitions:
                 name = variable.variable.name.value
@@ -119,23 +189,38 @@ def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
                     raise ValueError("Duplicate GraphQL variable definition.")
                 names.add(name)
                 parameter = name
-                while keyword.iskeyword(parameter) or parameter.startswith("__") or parameter in _RESERVED or parameter in parameters:
+                while (
+                    keyword.iskeyword(parameter)
+                    or parameter.startswith("__")
+                    or parameter in _RESERVED
+                    or parameter in parameters
+                ):
                     parameter = "argument_" + parameter
                 parameters.add(parameter)
                 if variable.default_value is not None:
-                    validate_value(value_from_ast_untyped(variable.default_value), variable.type)
-                variables.append(Variable(
-                    name, parameter, print_ast(variable.type),
-                    variable.type.kind == "non_null_type" and variable.default_value is None,
-                ))
+                    validate_value(
+                        value_from_ast_untyped(variable.default_value), variable.type
+                    )
+                variables.append(
+                    Variable(
+                        name,
+                        parameter,
+                        print_ast(variable.type),
+                        variable.type.kind == "non_null_type"
+                        and variable.default_value is None,
+                    )
+                )
             if used - names:
                 raise ValueError("Undefined GraphQL variable.")
             if names - used:
                 raise ValueError("Unused GraphQL variable.")
             text = "\n\n".join(print_ast(part) for part in parts) + "\n"
             operation = Operation(
-                definition.name.value, method_name(definition.name.value),
-                definition.operation.value, text, tuple(variables),
+                definition.name.value,
+                method_name(definition.name.value),
+                definition.operation.value,
+                text,
+                tuple(variables),
             )
             prior = operations.get(operation.name)
             if prior is not None and prior != operation:
@@ -168,10 +253,14 @@ def validate_value(value: Any, type_node):
                 raise ValueError()
             scalar.parse_value(value)
         except Exception:
-            raise ValueError("Input must match its declared GraphQL scalar type.") from None
+            raise ValueError(
+                "Input must match its declared GraphQL scalar type."
+            ) from None
 
 
-def validate_variables(operation: Operation, arguments: dict[str, Any]) -> dict[str, Any]:
+def validate_variables(
+    operation: Operation, arguments: dict[str, Any]
+) -> dict[str, Any]:
     allowed = {item.parameter for item in operation.variables}
     if arguments.keys() - allowed:
         raise ValueError("Input has unknown fields; check operation help.")

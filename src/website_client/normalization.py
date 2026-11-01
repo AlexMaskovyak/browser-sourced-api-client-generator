@@ -11,6 +11,7 @@ from .discovery_manifest.records import (
     Service, Source, SourceBundle, Stage, Status,
 )
 from .definitions import MAX_DOCUMENT, graphql_schema, openapi_document
+from .operation_contracts import compile_operations
 
 
 @dataclass(slots=True)
@@ -168,6 +169,18 @@ def normalize_service(target: Service, artifacts: ArtifactIndex) -> Service:
         issues=(), operation_names=(), source_schema_artifact=source_id,
     )
     if source_id is None:
+        if target.protocol is Protocol.GRAPHQL and target.operation_artifacts:
+            try:
+                documents = tuple(artifacts.items[ref] for ref in target.operation_artifacts)
+                if any(item.kind is not Kind.GRAPHQL_OPERATIONS for item in documents):
+                    raise ValueError("A GraphQL service references a non-operation artifact.")
+                operations = compile_operations(tuple(item.content for item in documents))
+                return replace(
+                    target, status=Status.READY,
+                    operation_names=tuple(item.name for item in operations),
+                )
+            except ValueError as error:
+                return replace(target, issues=(str(error),))
         return replace(target, issues=("Missing complete API schema.",))
     source = artifacts.items[source_id]
     expected = Kind.OPENAPI if target.protocol is Protocol.OPENAPI else Kind.GRAPHQL_SCHEMA
