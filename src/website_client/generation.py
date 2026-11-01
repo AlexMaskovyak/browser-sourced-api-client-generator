@@ -34,6 +34,10 @@ RUNTIME_SOURCES = {
 
 @dataclass(frozen=True)
 class GeneratedProject:
+    """A staged SDK and its command metadata before exclusive publication.
+
+    Backends own generated request code; shared packaging adds browser transport,
+    CLI entry points and reports after backend generation succeeds."""
     directory: Path
     package_name: str
     operations: dict
@@ -41,15 +45,18 @@ class GeneratedProject:
 
 
 def write_json(path, value):
+    """Write stable, indented JSON with a final newline for reviewable output."""
     path.write_text(json.dumps(value, indent=JSON_INDENT_SPACES) + "\n")
 
 
 def render_template(filename, *, name, package):
+    """Render a packaged project template with validated distribution and module names."""
     template = Template((TEMPLATE_DIRECTORY / filename).read_text())
     return template.substitute(name=name, package=package)
 
 
 def package_name_for(name):
+    """Validate a distribution name and derive its importable Python package name."""
     if not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", name):
         raise BrowserError(
             "--name must use lowercase letters, numbers and single hyphens, "
@@ -93,6 +100,10 @@ def generated_http_method(tree):
 
 
 def operation_metadata(project, package):
+    """Inspect generated OpenAPI endpoint modules to build the CLI operation inventory.
+
+    Read the actual request verb from syntax instead of guessing read/write behavior
+    from a filename. Endpoint modules remain the sole request builders."""
     operations = {}
     for path in sorted((project / package / "api").rglob("*.py")):
         tree = ast.parse(path.read_text())
@@ -138,6 +149,10 @@ def configure_openapi_package(project, name, package):
 
 
 def generate_openapi_project(stage, name, package, source):
+    """Run openapi-python-client in staging, then add shared CLI packaging.
+
+    Reject backend warnings and disable post-generation shell hooks. Publication
+    is the caller's responsibility after metadata extraction succeeds."""
     spec = openapi_document(source)
     definition_path = stage / "openapi.json"
     configuration_path = stage / "config.json"
@@ -175,6 +190,10 @@ def generate_openapi_project(stage, name, package, source):
 
 
 def validated_graphql_operations(schema_sdl, operations_path):
+    """Parse named queries/mutations and validate them against the supplied full schema.
+
+    This is the schema-backed path. It rejects anonymous operations, subscriptions
+    and invalid selections before invoking the external SDK generator."""
     if not operations_path:
         raise BrowserError(
             "GraphQL generation requires --operations as well as --graphql-schema."
@@ -203,6 +222,7 @@ def validated_graphql_operations(schema_sdl, operations_path):
 
 
 def graphql_operation_metadata(selected):
+    """Map validated operations to Ariadne method names and explicit write flags."""
     from ariadne_codegen.utils import str_to_snake_case
 
     operations = {
@@ -221,6 +241,7 @@ def graphql_operation_metadata(selected):
 
 
 def write_graphql_configuration(stage, project, package, schema_sdl, document):
+    """Write local schema, operation and Ariadne configuration files into staging."""
     schema_path = stage / "schema.graphql"
     operations_path = stage / "operations.graphql"
     configuration_path = stage / "config.toml"
@@ -243,6 +264,10 @@ def write_graphql_configuration(stage, project, package, schema_sdl, document):
 def generate_graphql_project(stage, name, package, source, operations_path):
     # Validate before invoking the backend. Captured operations alone cannot
     # supply a full schema, and unsupported subscriptions are not CLI methods.
+    """Build a schema-backed synchronous GraphQL SDK through Ariadne in private staging.
+
+    Unlike the operation-only backend, this path has a complete schema and can emit
+    typed response models. No endpoint is called during generation."""
     if not operations_path:
         raise BrowserError(
             "GraphQL generation requires --operations as well as --graphql-schema."
@@ -280,6 +305,7 @@ def write_runtime_files(project):
 
 
 def write_project_readme(project, name):
+    """Prepend shared install and command instructions to the backend README."""
     readme = project.directory / "README.md"
     upstream_readme = readme.read_text() if readme.exists() else ""
     introduction = render_template(
@@ -289,6 +315,7 @@ def write_project_readme(project, name):
 
 
 def write_generation_report(project, source, operations_source=None, lineage=None):
+    """Record source hashes, backend version and validation scope without claiming live use."""
     report = {
         "generator": project.generator_name,
         "generatorVersion": importlib.metadata.version(project.generator_name),
@@ -345,6 +372,11 @@ def generate(
     operations=None,
     lineage=None,
 ):
+    """Generate a schema-backed client, then publish it into a new directory.
+
+    Read local OpenAPI or GraphQL definitions, invoke the selected backend in private
+    staging and add shared runtime files. Existing output is never overwritten.
+    Operation-only generation is dispatched separately by pipeline.generate_bundle."""
     output = new_output(output)
     package = package_name_for(name)
     source = read_document(openapi or schema)

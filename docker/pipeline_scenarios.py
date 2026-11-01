@@ -13,10 +13,12 @@ from terminal_command import Command, eventually
 
 
 def pipeline(commands):
+    """Quote argv arrays for a real shell pipe rather than joining unsafe arguments."""
     return " | ".join(shlex.join(command) for command in commands)
 
 
 def verify_external_pipeline(root):
+    """Prove an independent stdlib producer feeds normalization and installed generation."""
     executable = shutil.which("website-client")
     output = root / "external-client"
     script = pipeline(
@@ -66,6 +68,7 @@ def verify_external_pipeline(root):
 
 
 def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
+    """Exercise login-to-generation across actual stdin/stdout command boundaries."""
     executable = shutil.which("website-client")
     output, capture = root / "browser-pipe-client", root / "browser-pipe-capture"
     endpoint = site.url.rsplit("/", 1)[0] + "/graphql"

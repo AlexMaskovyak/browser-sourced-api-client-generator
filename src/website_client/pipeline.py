@@ -17,6 +17,7 @@ from .normalization import normalize_manifest, select_service
 
 
 def add_commands(commands, generate_command, definition):
+    """Register import/normalize commands and manifest-based generation options."""
     definition.add_argument(
         "--manifest",
         "--bundle",
@@ -97,6 +98,10 @@ def add_commands(commands, generate_command, definition):
 
 
 def import_definition(options) -> Manifest:
+    """Convert local definitions into a portable manifest with explicit endpoint ownership.
+
+    GraphQL operations alone are supported. A full schema is optional enrichment.
+    Validate documents before emitting them, and allow only one stdin source."""
     if not (options.openapi or options.graphql_schema or options.operations):
         raise BrowserError("Supply --operations, --openapi or --graphql-schema.")
     if options.operations and not options.openapi and not options.graphql_schema:
@@ -188,6 +193,10 @@ def import_definition(options) -> Manifest:
 
 
 def run_offline(options):
+    """Import or merge bounded manifest inputs and write one JSON document.
+
+    Write progress to stderr so stdout can feed the next command unchanged. This
+    path never opens a browser or sends service requests."""
     if options.command == "import":
         value = import_definition(options)
     else:
@@ -223,6 +232,11 @@ def artifact_reference(document: Artifact):
 
 
 def generate_bundle(source, output, name, identifier=None, allow_inferred=False):
+    """Normalize saved inputs, select one service and dispatch its SDK backend.
+
+    Without a GraphQL schema, compile captured operation documents directly. With
+    a full schema, use the schema-backed generator. Preserve source hashes in the
+    generation report; refuse unusable or ambiguous services before publication."""
     from .generation import generate
 
     original = read_manifest(source)

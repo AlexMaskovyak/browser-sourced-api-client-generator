@@ -60,7 +60,13 @@ def canonical(url):
 
 
 class BrowserLoginTransport(httpx.BaseTransport):
-    """Own login and one endpoint request, including failure cleanup."""
+    """Authenticate one HTTPX request through a temporary native browser session.
+
+    Observe only selected session headers at the exact API origin. Cookies and
+    browser-managed headers remain under browser control. Normal construction
+    owns login and browser cleanup; for_session borrows an existing browser.
+    Both forms permit one request and never retry or follow redirects.
+    """
 
     def __init__(
         self,
@@ -124,6 +130,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
 
     @staticmethod
     def _validate_session_header_name(name):
+        """Reject malformed or browser-managed header names before observing credentials."""
         valid_name = (
             isinstance(name, str)
             and len(name) <= MAX_SESSION_HEADER_NAME_CHARACTERS
@@ -166,6 +173,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
             return
 
     def __enter__(self):
+        """Open login once, allowing both ExitStack and HTTPX to enter the adapter."""
         # The CLI and HTTPX both enter this transport. They share one login.
         if self._session is not None:
             return self
@@ -192,6 +200,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
             raise
 
     def _validate_request(self, request):
+        """Enforce the one-request origin/method contract and bound outgoing body bytes."""
         allowed = (
             not self._used
             and self._session is not None
@@ -210,6 +219,10 @@ class BrowserLoginTransport(httpx.BaseTransport):
         return request_body_bytes
 
     def _collect_paused_request(self, method, event):
+        """Handle intercepted request/response events without throwing inside Playwright callbacks.
+
+        Reject redirects and repeated sends. Save callback failures for the synchronous
+        caller after navigation unwinds, then abort the intercepted request."""
         if method != "Fetch.requestPaused":
             return
         try:
@@ -266,6 +279,10 @@ class BrowserLoginTransport(httpx.BaseTransport):
     def _request_headers(self, request, event):
         # Preserve native cookies and browser identity. Typed methods supply
         # content headers, but cannot replace browser-managed session headers.
+        """Combine native browser headers with scoped session and typed request headers.
+
+        Keep browser identity/cookies under browser control. Supply application origin
+        and referrer for writes; ignore caller overrides of managed and sec-* headers."""
         headers = {
             name.lower(): value
             for name, value in event["request"].get("headers", {}).items()
@@ -298,6 +315,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
         return [{"name": name, "value": value} for name, value in headers.items()]
 
     def _continue_request(self, request, event, request_body_bytes):
+        """Replace the intercepted navigation with the typed method, headers and exact body bytes."""
         parameters = {
             "requestId": event["requestId"],
             "method": request.method,
@@ -309,6 +327,10 @@ class BrowserLoginTransport(httpx.BaseTransport):
         self._request_connection.call("Fetch.continueRequest", parameters)
 
     def _read_response_body(self, request, event):
+        """Read decoded response bytes with separate encoded and decoded size limits.
+
+        HEAD, redirects and bodyless status codes need no body retrieval. Reject oversized
+        base64 text before allocating its decoded form."""
         status_code = int(event["responseStatusCode"])
         no_body = (
             request.method == "HEAD"
@@ -335,6 +357,10 @@ class BrowserLoginTransport(httpx.BaseTransport):
         return response_body_bytes
 
     def _finish_response(self, request, event):
+        """Read the API response, abort document rendering and construct an HTTPX response.
+
+        Chrome has already decompressed its body, so strip wire encoding/length headers
+        to prevent HTTPX from decoding it twice."""
         response_body_bytes = self._read_response_body(request, event)
 
         # Read the API bytes without rendering the response as a webpage.
@@ -358,6 +384,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
         )
 
     def _wait_for_response(self):
+        """Pump browser events until a response, cancellation, callback failure or timeout."""
         deadline_seconds = time.monotonic() + REQUEST_TIMEOUT_SECONDS
         while time.monotonic() < deadline_seconds:
             self._session._check()
@@ -371,6 +398,11 @@ class BrowserLoginTransport(httpx.BaseTransport):
         )
 
     def handle_request(self, request):
+        """Send exactly one typed request through browser interception without retries.
+
+        Use a separate tab so the signed-in application remains available. Aborted
+        navigation can be expected after response capture; the intercepted result or
+        recorded failure is authoritative. Always close the request tab afterward."""
         request_body_bytes = self._validate_request(request)
         self._used = True
         self._session._check()
@@ -404,6 +436,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
             self._close_request_target()
 
     def _close_request_target(self):
+        """Release the per-request CDP connection and tab, clearing body and result references."""
         if self._request_connection:
             try:
                 self._request_connection.close()
@@ -421,6 +454,7 @@ class BrowserLoginTransport(httpx.BaseTransport):
         self._active_request = self._active_body = self._response = self._failure = None
 
     def close(self):
+        """Clear observed credentials and close only browser sessions owned by this transport."""
         try:
             self._close_request_target()
             if self._session and self._owns_session:

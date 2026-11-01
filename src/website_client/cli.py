@@ -10,6 +10,7 @@ from .discovery import import_har, new_output, publish
 
 
 def main(args=None):
+    """Parse website discovery and offline pipeline commands and dispatch the selected workflow."""
     parser = argparse.ArgumentParser(
         prog="website-client",
         description="Discover website endpoints from a logged-in browser or existing HAR; generate Python clients from standard definitions.",
@@ -354,6 +355,7 @@ def main(args=None):
 
 
 def entrypoint():
+    """Run the installed website-client command and propagate its exit status."""
     sys.exit(main())
 
 
