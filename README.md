@@ -5,18 +5,127 @@ authenticated browser or an existing HAR, exports standard definitions, and uses
 OpenAPI and GraphQL generators to create standalone Python clients with endpoint
 commands and help. HAR is the HTTP Archive format used by browser network tools.
 
-## Install and open a website
+For REST/HTTP APIs, it uses published OpenAPI definitions or exports inferred
+OpenAPI from captured routes for review. For GraphQL APIs, it uses a complete
+schema plus operation documents. These are two supported paths through the same
+discovery and generation commands. GraphQL is not required. Other API contract
+formats do not yet have dedicated client-generation support.
 
-You need Python 3.11 or newer, Poetry 2.2 or newer, and installed Google Chrome or
-Chromium. If Poetry is missing, install it using the [official instructions](https://python-poetry.org/docs/#installation).
-From this repository, install the locked dependencies and Python command:
+## Start here: website to client
+
+Run these steps from the repository root, where `pyproject.toml` is located.
+You need Python 3.11 or newer, an existing Poetry 2.2 or newer installation, and
+Google Chrome or Chromium. Use new output paths each time; existing files and
+client directories are not replaced.
+
+```text
+discover: sign in and explore the website
+   -> captures/walk/manifest.json
+normalize: validate definitions and report each API's status
+   -> captures/walk/normalized.json
+generate: select a ready API and create its Python package and CLI
+   -> clients/site-client/
+```
+
+### 1. Install the generator
 
 ```sh
 poetry sync --with dev
 poetry run website-client --help
+mkdir -p captures clients
 ```
 
-Replace `https://app.example.com` below with the website you want to use:
+Installation reads the committed dependency lock and installs the generator into
+this repository's environment. It does not open a browser. If Poetry is missing,
+use its [installation instructions](https://python-poetry.org/docs/#installation).
+
+### 2. Sign in and discover the website
+
+Replace the example URL with the application you want to inspect:
+
+```sh
+poetry run website-client discover --url https://app.example.com --explore --output ./captures/walk
+```
+
+A temporary Chrome window opens. Sign in there, complete any verification code,
+and open the application page where exploration should start. Return to the
+terminal and press Enter once. The command explores pages and looks for API
+definitions, saves its results, and closes the browser. Chromium users add
+`--browser chromium`.
+
+This step reads the website and records declared forms and blocked write requests.
+It does not submit those forms. The complete handoff is
+`./captures/walk/manifest.json`, a JSON file containing the definitions and reports.
+**Start with `discover`; a separate `login` command is not needed.** Login sessions
+are not saved between commands.
+
+### 3. Validate the results and choose an API
+
+```sh
+poetry run website-client normalize --input ./captures/walk --output ./captures/walk/normalized.json
+```
+
+This runs offline. The terminal prints API IDs, endpoint addresses and status:
+
+| Status | What to do |
+| --- | --- |
+| `ready` | Generate this API's client. |
+| `review_required` | Review the inferred OpenAPI definition before using `--allow-inferred`. |
+| `blocked` | Read this API's `issues` in `normalized.json`; obtain missing definitions or resolve conflicts before generating. |
+
+If there is exactly one ready API, the next command selects it automatically.
+If several are ready, choose one of the IDs printed by normalization and add
+`--service` followed by that ID. The [pipeline guide](docs/discovery-pipeline.md#inspect-and-select-an-api)
+includes a command to print the status and issues without opening the full JSON.
+Normalization can succeed even when no API is ready; it preserves incomplete
+results so they can be completed later.
+
+### 4. Generate the standalone client
+
+```sh
+poetry run website-client generate --manifest ./captures/walk/normalized.json --name site-client --output ./clients/site-client
+```
+
+This also runs offline. It creates a standalone Python project, API methods,
+endpoint commands and `generation.json`, which records which definitions were
+used. Generation does not call the service's business operations.
+
+### 5. Install the client and see its commands
+
+```sh
+cd clients/site-client
+poetry install
+poetry run site-client --help
+```
+
+You are now in the generated project, using its own dependencies. Help lists the
+actual operation names. To call an operation, first inspect that operation's help
+for its inputs, API URL and authentication options. See
+[run a generated client](#run-a-generated-client) and
+[log into a generated client](#log-into-a-generated-client). A service request is a
+separate action; successful generation does not establish live compatibility.
+
+## Continue from another starting point
+
+| What you already have | Start with |
+| --- | --- |
+| A saved discovery directory or copied `manifest.json` | Step 3, passing that directory or file to `normalize`. No browser login is needed. |
+| OpenAPI or GraphQL definitions from another tool | [`import`, then normalize and generate](docs/discovery-pipeline.md#connect-a-different-producer). |
+| A browser network HAR file | [`discover --har`](#use-an-existing-har-instead), then step 3. HAR is the HTTP Archive format. |
+| Another tool that emits a discovery manifest | [Pipe it to normalization and generation](docs/discovery-pipeline.md#chain-commands-through-stdin-and-stdout). |
+| A generated client | [Install and run it](#run-a-generated-client); do not repeat discovery merely to execute a command. |
+
+For the full command pipeline, input merging, missing schemas, pipes and failure
+recovery, use [the pipeline guide](docs/discovery-pipeline.md). Its staged commands
+wait for each previous command to succeed. Pipe examples use `pipefail`, which
+reports failures but cannot undo downstream output after a late producer failure.
+For implementing another producer, see the [manifest format](docs/discovery-manifest-format.md)
+and [create_discovery_manifest.py](examples/create_discovery_manifest.py).
+
+## Check browser login only
+
+Replace `https://app.example.com` below with the website you want to use. This optional command checks
+only the login browser; it is not a prerequisite for discovery:
 
 ```sh
 poetry run website-client login --url https://app.example.com
@@ -49,23 +158,72 @@ the discovery command exports the sanitized traffic described below.
 Temporary profile files are removed on normal close; forced termination can leave
 temporary browser files.
 
-## Tests
+## Explore pages and discover read and write contracts
+
+Use exploration when the API calls you need appear on other pages, inside menus
+or in forms. It runs a deterministic browser traversal, with no agent, model
+account or API key. From the repository root, replace the example website address:
 
 ```sh
-poetry check
-poetry run pytest -q
-poetry build
-sh scripts/test-docker.sh
+mkdir -p captures
+poetry run website-client discover --url https://app.example.com --explore --output ./captures/example-walk
 ```
 
-Docker is needed only for the last command. It builds and installs the Python
-wheel using Poetry and tests a real terminal and headed Chromium against a local HTTPS login
-and verification-code fixture. The container has no host mounts or external
-network during execution. Playwright's bundled Node driver runs inside the
-container. No production credentials are used.
-These tests do not establish production service compatibility.
+1. Sign in in the temporary browser and open the application page where exploration
+   should start. Complete verification codes normally.
+2. Press Enter once. The command walks same-origin links in breadth-first order,
+   expands navigation menus, opens tabs and form dialogs, and follows pagination.
+   It records API traffic during the walk, then runs schema discovery.
+3. Read `exploration.json` for visited pages, attempted controls, queued pages,
+   blocked requests and limits. Use `discovery.json` for observed endpoints and
+   `self-discovery.json` for schema probe results. Generate clients from validated
+   definitions and captured or declared GraphQL documents as described below.
 
-## Find service definitions automatically
+The command inventories form actions, methods, upload types, named fields,
+constraints and submitter overrides. It also extracts GraphQL query and mutation
+documents from supported source literals in loaded same-origin frontend modules.
+Forms and frontend documents are **declarations**, not verified backend contracts.
+They are marked as unexecuted. Mutations can be included in the generated operation
+documents without being called. Each declaration records whether its document
+could be exported; inline literals are excluded from exported documents.
+
+During exploration, parsed GraphQL queries and GET/HEAD requests are permitted.
+API mutations, unknown POSTs and other write methods are blocked before sending;
+their inferred input shapes are recorded without payload values. Forms are never
+submitted. The tool may open an Add, New, Edit, Create or Upload dialog, but it
+does not activate its submit controls. Input contents, selected values and hidden
+tokens are not collected. Off-site document navigation is blocked and routed
+WebSockets are not connected to their servers,
+service workers are disabled, and the login tab is replaced before exploration.
+
+Defaults are 20 pages, 60 control actions, link depth 3 and 120 seconds of
+exploration. Change them with `--max-pages`, `--max-actions`, `--max-depth` and
+`--explore-seconds`. Schema probes have their separate `--max-probes` limit.
+The starting-page scan's `--observe-seconds` option cannot be combined with exploration.
+Exploration implies `--auto`; the simpler starting-page scan remains available
+below. Output directories must be new. Ctrl+C cancels and closes the browser.
+
+HTTP/REST traffic is collected as route and shape evidence for OpenAPI. GraphQL
+has additional operation parsing, which lets the explorer recognize queries
+carried by POST. Other POSTs are blocked when their read/write behavior is unknown,
+so a REST search implemented with POST may be missed. Discovery does not currently
+use an OpenAPI definition to authorize those requests. This limitation applies to
+the automatic walk; it does not prevent generation from an externally supplied
+OpenAPI definition. See [API coverage and architecture](ARCHITECTURE.md#http-discovery-and-supported-api-definitions).
+
+This is a bounded traversal, not proof of whole-site coverage. Custom widgets,
+popups, cross-site pages, persisted GraphQL operations and unknown read-via-POST
+APIs may be skipped or blocked. Only loaded same-origin scripts and literal
+GraphQL tags or `body` strings are inspected; minified/computed operation formats
+may not be understood. GET endpoints can have server-side effects despite their
+method. A page visit or form declaration does not establish payment, submission
+or approval. Review declared contracts before using them for writes.
+
+Inspection also has fixed limits: 200 links or controls per state, 100 retained
+forms with up to 100 fields each, and 30 loaded frontend modules of up to 1 MiB
+each with an 8 MiB combined source budget. Truncation and pending work are reported.
+
+## Find service definitions on the current page
 
 From the repository root, create `captures/` and choose a new output directory.
 The following example opens the website, waits for you to sign in, then discovers
@@ -150,6 +308,7 @@ sources use the same analysis and write the following files, when available:
 
 | File | What it contains |
 | --- | --- |
+| `manifest.json` | Versioned, self-contained bundle of all exported evidence and definitions, with API associations and hashes. Use this file for normalization and client generation. |
 | `capture.har` | Sanitized HAR with headers, cookies, payload values and URL query values removed or redacted. |
 | `discovery.json` | Observed routes, methods, named GraphQL operations, omitted data, conflicts and coverage limits. |
 | `self-discovery.json` | Automatic mode only: schema probe outcomes, request limits, unprobed candidates and observation limits. |
@@ -283,3 +442,19 @@ opening a browser. `poetry run` uses that environment without requiring activati
 that the lock is stale after an intentional dependency edit, run `poetry lock`
 and review both `pyproject.toml` and `poetry.lock` before committing. To change
 dependencies, use `poetry add PACKAGE` or `poetry add --group dev PACKAGE`.
+
+## Tests
+
+```sh
+poetry check
+poetry run pytest -q
+poetry build
+sh scripts/test-docker.sh
+```
+
+Docker is needed only for the last command. It builds and installs the Python
+wheel using Poetry and tests a real terminal and headed Chromium against a local HTTPS login
+and verification-code fixture. The container has no host mounts or external
+network during execution. Playwright's bundled Node driver runs inside the
+container. No production credentials are used.
+These tests do not establish production service compatibility.

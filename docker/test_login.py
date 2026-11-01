@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from graphql import get_introspection_query
 import website_client
 
-from fixture_site import FIXTURES_DIRECTORY, Site
+from fixture_site import Site
 from terminal_command import Command, eventually
 
 NETWORK_CAPTURE_SETTLE_SECONDS = 0.2
@@ -195,18 +195,28 @@ def generate_and_install_client(kind, capture_output, root):
         "--output",
         str(project),
     ]
-    if kind == "openapi":
-        definition = next(capture_output.glob("openapi-downloaded-*.json"))
-        arguments += ["--openapi", str(definition)]
-    else:
-        schema = next(capture_output.glob("graphql-schema-downloaded-*.graphql"))
-        arguments += [
-            "--graphql-schema",
-            str(schema),
-            "--operations",
-            str(FIXTURES_DIRECTORY / "operations.graphql"),
+    normalized = root / (kind + "-contracts.json")
+    run_program(
+        [
+            shutil.which("website-client"),
+            "normalize",
+            "--input",
+            str(capture_output),
+            "--output",
+            str(normalized),
         ]
+    )
+    bundle = json.loads(normalized.read_text())
+    target = next(
+        item
+        for item in bundle["services"]
+        if item["protocol"] == kind and item["status"] == "ready"
+    )
+    arguments += ["--bundle", str(normalized), "--service", target["id"]]
     run_program(arguments)
+    lineage = json.loads((project / "generation.json").read_text())["lineage"]
+    assert lineage["service"]["id"] == target["id"]
+    assert lineage["sourceBundles"]
     run_program(
         [
             "poetry",
@@ -332,6 +342,106 @@ def operation_inputs(kind, scenario):
     return "GetItem", {"id": "7"}
 
 
+def verify_exploration(site, root, *, limited=False):
+    output = root / ("explore-limited" if limited else "explore")
+    site.exploration = True
+    writes_before = site.api_writes
+    command = Command(
+        site,
+        args=[
+            "discover",
+            "--url",
+            site.url,
+            "--explore",
+            "--max-pages",
+            "1" if limited else "8",
+            "--max-actions",
+            "12",
+            "--explore-seconds",
+            "20",
+            "--max-probes",
+            "8",
+            "--output",
+            str(output),
+            "--browser",
+            "chromium",
+            "--browser-path",
+            "/work/docker/test-chromium.sh",
+        ],
+    )
+    try:
+        eventually(command.ready)
+        command.connect()
+        complete_login(command, site)
+        os.write(command.terminal, b"\n")
+        assert command.wait() == 0, command.output
+        command.cleanup_verified()
+        report = json.loads((output / "exploration.json").read_text())
+        assert len(report["pages"]) <= (1 if limited else 8)
+        assert len(report["actions"]) <= 12
+        assert site.api_writes == writes_before
+        assert site.logout_hits == 0
+        if limited:
+            assert report["queuedPagesNotVisited"] > 0
+        else:
+            urls = [item["url"] for item in report["pages"]]
+            assert any("/reports/details" in value for value in urls), report
+            assert any("/records?" in value for value in urls), report
+            assert {item["kind"] for item in report["actions"]} >= {
+                "menu",
+                "form_dialog",
+                "tab",
+                "pagination",
+            }, report
+            form = next(item for item in report["forms"] if item["method"] == "POST")
+            assert any(
+                field["name"] == "receipt"
+                and field["type"] == "file"
+                and field["required"]
+                for field in form["fields"]
+            )
+            operations = [
+                item
+                for module in report["frontendModules"]
+                for item in module["operations"]
+            ]
+            assert any(
+                item["name"] == "CreateItem"
+                and item["kind"] == "mutation"
+                and item["executed"] is False
+                for item in operations
+            )
+            assert any(
+                item["method"] == "POST" for item in report["blockedRequests"]
+            ), report
+            assert (
+                sum(item["method"] == "POST" for item in report["blockedRequests"]) >= 3
+            ), report
+            assert any(
+                item["method"] == "WebSocket" for item in report["blockedRequests"]
+            ), report
+            assert "mutation CreateItem" in (output / "operations.graphql").read_text()
+            assert list(output.glob("graphql-schema-downloaded-*.graphql"))
+        for output_file in output.iterdir():
+            text = output_file.read_text()
+            assert_no_credentials(text, site)
+            assert "do-not-export-form-value" not in text
+            assert "do-not-export-hidden-token" not in text
+        print(
+            "PASS algorithmic exploration: "
+            + (
+                "page budget"
+                if limited
+                else "navigation, forms, declarations and blocked writes"
+            ),
+            flush=True,
+        )
+        return output
+    finally:
+        command.stop()
+        site.exploration = False
+
+
 def generated_arguments(client, site, scenario, root):
     operation, inputs = operation_inputs(client.kind, scenario)
     input_path = root / f"{client.kind}-{scenario}.json"
@@ -430,10 +540,25 @@ def main():
             verify_capture(site, root)
             capture_output = verify_self_discovery(site, root)
             verify_self_discovery(site, root, disabled=True)
+            capture_output = verify_exploration(site, root)
+            verify_exploration(site, root, limited=True)
+            # The old directory is removed. Client generation can only use the
+            # copied manifest, with no accidental dependency on loose files.
+            portable = root / "portable-walk.json"
+            shutil.copyfile(capture_output / "manifest.json", portable)
+            shutil.rmtree(capture_output)
+            capture_output = portable
             for kind, scenarios in CLIENT_SCENARIOS.items():
                 client = generate_and_install_client(kind, capture_output, root)
                 for scenario in scenarios:
                     verify_generated_scenario(client, site, scenario, root)
+            from pipeline_scenarios import (
+                verify_external_pipeline,
+                verify_browser_pipeline,
+            )
+
+            verify_external_pipeline(root)
+            verify_browser_pipeline(site, root, complete_login, assert_no_credentials)
         finally:
             site.close()
 
