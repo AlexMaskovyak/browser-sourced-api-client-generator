@@ -72,3 +72,16 @@ def test_reserved_python_names_get_safe_parameters():
         "self": "7",
         "__private": "7",
     }
+
+
+def test_zero_input_operation_supports_absent_variable_definitions(monkeypatch):
+    from graphql import parse
+    import website_client.operation_contracts as contracts
+
+    document = parse("query Ping { __typename }")
+    # graphql-core 3.3 represents an absent variable list as None; 3.2 uses ().
+    document.definitions[0].variable_definitions = None
+    monkeypatch.setattr(contracts, "parse", lambda *_args, **_kwargs: document)
+    operation = compile_operations(("query Ping { __typename }",))[0]
+    assert operation.variables == ()
+    assert validate_variables(operation, {}) == {}
