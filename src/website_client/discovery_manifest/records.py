@@ -1,13 +1,14 @@
 """Immutable domain records; version 1 JSON is validated at both boundaries."""
 
-from dataclasses import MISSING, dataclass, field, fields
+from dataclasses import MISSING, dataclass, field, fields, replace
+from datetime import datetime, timezone
 from enum import StrEnum
 from functools import cache
 from types import UnionType
 from typing import ClassVar, get_args, get_origin, get_type_hints
 
 from ..browser import BrowserError
-from .model import MAX_ARTIFACT_BYTES, endpoint_url, sha256
+from .model import FORMAT, VERSION, PRODUCER, MAX_ARTIFACT_BYTES, endpoint_url, sha256
 from .validation import validate_bundle, validate_record
 
 
@@ -166,6 +167,29 @@ class Artifact(Record):
     sha256: str
     provenance: Provenance
 
+    @classmethod
+    def create(
+        cls, name: str, kind: Kind, content: str, source: Source, *,
+        locations: tuple[str, ...] = (), derived_from: tuple[str, ...] = (),
+        producer: Producer | None = None,
+    ):
+        if type(kind) is not Kind:
+            raise BrowserError("Artifact kind must be a Kind value.")
+        if type(name) is not str or type(content) is not str:
+            raise BrowserError("Artifact name and content must be strings.")
+        provenance = Provenance(
+            source, locations, derived_from,
+            (producer if producer is not None else Producer(**PRODUCER),),
+        )
+        provenance = replace(
+            provenance, locations=tuple(sorted(set(provenance.locations))),
+            derived_from=tuple(sorted(set(provenance.derived_from))),
+        )
+        return cls(
+            "artifact-" + sha256(kind.value + "\0" + name + "\0" + content),
+            name, kind, content, sha256(content), provenance,
+        )
+
     def __post_init__(self):
         Record.__post_init__(self)
         if len(self.content.encode("utf-8")) > MAX_ARTIFACT_BYTES:
@@ -194,6 +218,28 @@ class Service(Record):
     compiled_operations_artifact: str | None = json_field(
         "compiledOperationsArtifact", default=None, omit_none=True
     )
+
+    @classmethod
+    def create(
+        cls, protocol: Protocol, endpoint: str, schema: str | None = None,
+        operations: tuple[str, ...] = (), confidence: Confidence = Confidence.EXTERNAL,
+        identifier: str | None = None,
+    ):
+        if type(protocol) is not Protocol:
+            raise BrowserError("Service protocol must be a Protocol value.")
+        endpoint = endpoint_url(endpoint)
+        target = cls(
+            identifier if identifier is not None else "service-" + sha256(protocol.value + "\0" + endpoint)[:16],
+            protocol, endpoint, schema, operations, confidence,
+        )
+        return replace(target, operation_artifacts=tuple(dict.fromkeys(operations)))
+
+    def without_normalization(self):
+        return replace(
+            self, schema_artifact=self.source_schema_artifact or self.schema_artifact,
+            source_schema_artifact=None, compiled_operations_artifact=None,
+            status=None, issues=None, operation_names=None,
+        )
 
     def __post_init__(self):
         Record.__post_init__(self)
@@ -233,3 +279,17 @@ class Manifest(Record):
     normalization: Normalization | None = json_field(
         "normalization", default=None, omit_none=True
     )
+
+    @classmethod
+    def create(
+        cls, artifacts: tuple[Artifact, ...] = (), services: tuple[Service, ...] = (),
+        producer: Producer | None = None, *, created_at: str | None = None,
+        source_bundles: tuple[SourceBundle, ...] | None = None,
+    ):
+        return cls(
+            FORMAT, VERSION, Stage.DISCOVERY,
+            producer if producer is not None else Producer(**PRODUCER),
+            created_at if created_at is not None else datetime.now(timezone.utc).isoformat(),
+            artifacts, services,
+            source_bundles=source_bundles,
+        )

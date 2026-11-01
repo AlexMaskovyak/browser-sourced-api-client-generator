@@ -107,3 +107,38 @@ def test_typed_normalization_round_trips_all_metadata_and_is_idempotent():
 def test_typed_core_requires_the_validated_boundary():
     with pytest.raises(BrowserError, match="validated Manifest"):
         normalize_manifest(example_manifest())
+
+
+def test_typed_merging_preserves_immutable_inputs_and_combines_provenance():
+    from website_client.discovery_manifest.merging import merge_manifests
+
+    first = Manifest.from_dict(example_manifest())
+    evidence = replace(
+        first.artifacts[0],
+        provenance=replace(first.artifacts[0].provenance, locations=("https://source.test/",)),
+    )
+    second = replace(first, artifacts=(evidence,))
+    merged = merge_manifests((first, second))
+    assert merged.artifacts[0].provenance.locations == ("https://source.test/",)
+    assert first.artifacts[0].provenance.locations == ()
+    assert Manifest.from_dict(merged.to_dict()) == merged
+
+
+def test_typed_merge_requires_records_and_single_input_keeps_metadata():
+    from website_client.discovery_manifest.merging import merge_manifests
+
+    manifest = normalize_manifest(Manifest.from_dict(example_manifest()))
+    assert merge_manifests((manifest,)) == manifest
+    with pytest.raises(BrowserError, match="validated Manifest"):
+        merge_manifests((example_manifest(),))
+
+
+def test_typed_factories_reject_mutable_or_mislabelled_inputs():
+    from website_client.discovery_manifest.records import Kind, Source
+
+    with pytest.raises(BrowserError, match="Provenance.locations"):
+        Artifact.create("api.json", Kind.REPORT, "{}", Source.EXTERNAL, locations=[])
+    with pytest.raises(BrowserError, match="Service.operation_artifacts"):
+        Service.create(Protocol.GRAPHQL, "https://example.test/graphql", operations="abc")
+    with pytest.raises(BrowserError):
+        Manifest.create(created_at="")
