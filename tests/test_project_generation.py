@@ -67,6 +67,7 @@ def test_complete_project_reproduces_from_its_own_published_inputs(tmp_path):
     assert tree(first) == tree(second)
     assert "lineage" not in json.loads((first / "generation.json").read_text())
     assert "https://app.example.test/home" in (first / "README.md").read_text()
+    assert (first / "LICENSE").read_text().startswith("MIT License")
     assert "pytest" in (first / "pyproject.toml").read_text()
     result = subprocess.run(
         [sys.executable, "-m", "complete_client._cli", "Options", "--help"],
