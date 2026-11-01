@@ -4,10 +4,11 @@ from collections import deque
 import hashlib
 import time
 from types import SimpleNamespace
+from urllib.parse import urljoin
 
 from .browser import BrowserError, NAVIGATION_TIMEOUT_MILLISECONDS
 from .contracts import inspect_forms, FrontendContracts
-from .discovery import json_body, shape, operation
+from .discovery import MAX_BODY, json_body, shape, operation
 from .exploration_policy import (
     clean_navigation,
     label,
@@ -128,7 +129,9 @@ class SiteExplorer:
                 "sent": False,
             },
         )
-        socket.close()
+        # A routed socket is disconnected from the server unless
+        # connect_to_server is called. Closing it inside the handshake callback
+        # can wait on that callback itself; context shutdown removes the client.
 
     def prepare(self):
         if not self.session._block_service_workers:
@@ -229,9 +232,9 @@ class SiteExplorer:
         connection.call(
             "Network.enable",
             {
-                "maxTotalBufferSize": 8 * 1024 * 1024,
-                "maxResourceBufferSize": 1024 * 1024,
-                "maxPostDataSize": 1024 * 1024,
+                "maxTotalBufferSize": 8 * MAX_BODY,
+                "maxResourceBufferSize": MAX_BODY,
+                "maxPostDataSize": MAX_BODY,
             },
         )
         self._guard_installed = False
@@ -303,6 +306,8 @@ class SiteExplorer:
                     {
                         "page": safe_address(page.url),
                         "kind": "link",
+                        "target": safe_address(urljoin(page.url, href or "")),
+                        "source": "declared_link",
                         "reason": "definition_or_excluded_navigation",
                     },
                 )
@@ -320,6 +325,8 @@ class SiteExplorer:
         controls = page.locator(
             'summary, [role="tab"], button[aria-expanded], button[aria-haspopup], button, [role="button"]'
         )
+        if controls.count() > MAX_ELEMENTS:
+            self.omitted += controls.count() - MAX_ELEMENTS
         for index in range(min(controls.count(), MAX_ELEMENTS)):
             control = controls.nth(index)
             if not control.is_visible() or not control.is_enabled():

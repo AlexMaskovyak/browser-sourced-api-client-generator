@@ -156,7 +156,10 @@ class FrontendContracts:
                     or origin(response["url"]) != self.allowed_origin
                 ):
                     return
-                if len(self.modules) + len(self.pending) >= MAX_MODULES:
+                if (
+                    len(self.modules) + len(self.pending) + len(self.ready)
+                    >= MAX_MODULES
+                ):
                     self.omitted += 1
                     return
                 self.pending[identifier] = response["url"]
