@@ -5,7 +5,7 @@ import sys
 import tempfile
 
 from .browser import BrowserError
-from .bundle import (
+from .discovery_manifest import (
     artifact,
     digest,
     endpoint_url,

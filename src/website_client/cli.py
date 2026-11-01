@@ -298,7 +298,7 @@ def main(args=None):
                     json.dumps(automatic_report["exploration"], indent=2) + "\n"
                 )
             from .bundle_capture import capture_bundle
-            from .bundle import encoded
+            from .discovery_manifest import encoded
 
             manifest = capture_bundle(result, files)
             files["manifest.json"] = encoded(manifest)

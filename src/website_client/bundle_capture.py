@@ -4,7 +4,7 @@ import json
 from urllib.parse import urljoin
 
 from .browser import BrowserError
-from .bundle import (
+from .discovery_manifest import (
     artifact,
     new_bundle,
     observed_endpoint,

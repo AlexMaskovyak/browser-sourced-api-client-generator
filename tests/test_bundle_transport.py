@@ -6,7 +6,7 @@ import json
 import pytest
 
 from website_client.browser import BrowserError
-from website_client.bundle import read_bundle, read_text, validate_bundle
+from website_client.discovery_manifest import read_bundle, read_text, validate_bundle
 
 
 def independent_bundle():
