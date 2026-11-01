@@ -282,6 +282,7 @@ sources use the same analysis and write the following files, when available:
 
 | File | What it contains |
 | --- | --- |
+| `manifest.json` | Versioned, self-contained bundle of all exported evidence and definitions, with API associations and hashes. Use this file for normalization and client generation. |
 | `capture.har` | Sanitized HAR with headers, cookies, payload values and URL query values removed or redacted. |
 | `discovery.json` | Observed routes, methods, named GraphQL operations, omitted data, conflicts and coverage limits. |
 | `self-discovery.json` | Automatic mode only: schema probe outcomes, request limits, unprobed candidates and observation limits. |
