@@ -1,0 +1,321 @@
+"""Compile named GraphQL operations without inventing a server schema.
+
+This module is also copied into operation-document clients. It uses graphql-core
+for parsing and scalar checks; unknown input types remain JSON values.
+"""
+
+from dataclasses import dataclass
+import json
+import keyword
+import re
+from typing import Any
+
+from graphql import (
+    GraphQLBoolean,
+    GraphQLFloat,
+    GraphQLID,
+    GraphQLInt,
+    GraphQLString,
+    parse,
+    parse_type,
+    print_ast,
+    value_from_ast_untyped,
+)
+from graphql.language.ast import Node
+
+MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
+MAX_DOCUMENT_TOKENS = 20_000
+_RESERVED = {"self", "client", "UNSET"}
+_SCALARS = {
+    "Boolean": GraphQLBoolean,
+    "Float": GraphQLFloat,
+    "ID": GraphQLID,
+    "Int": GraphQLInt,
+    "String": GraphQLString,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Variable:
+    """A GraphQL variable's server name, Python parameter and declared type.
+
+    required is false for nullable variables and variables with server defaults.
+    parameter may differ from name when the server name is a Python keyword.
+    """
+
+    name: str
+    parameter: str
+    type: str
+    required: bool
+
+    def __post_init__(self):
+        """Reject invalid contracts even when constructed directly instead of parsed."""
+        if (
+            type(self.name) is not str
+            or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", self.name)
+            or type(self.parameter) is not str
+            or not self.parameter.isidentifier()
+            or keyword.iskeyword(self.parameter)
+            or self.parameter.startswith("__")
+            or self.parameter in _RESERVED
+            or type(self.type) is not str
+            or type(self.required) is not bool
+        ):
+            raise ValueError("Invalid GraphQL variable contract.")
+        try:
+            parse_type(self.type)
+        except Exception:
+            raise ValueError("Invalid GraphQL variable type.") from None
+
+
+@dataclass(frozen=True, slots=True)
+class Operation:
+    """One named query or mutation with all referenced fragments included.
+
+    The immutable contract records captured syntax, not a complete server schema.
+    method is the generated Python method name, not an HTTP verb.
+    """
+
+    name: str
+    method: str
+    kind: str
+    document: str
+    variables: tuple[Variable, ...]
+
+    def __post_init__(self):
+        """Require named, bounded query/mutation documents and immutable variable records."""
+        if (
+            type(self.name) is not str
+            or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", self.name)
+            or type(self.method) is not str
+            or not self.method.isidentifier()
+            or keyword.iskeyword(self.method)
+            or type(self.kind) is not str
+            or self.kind not in {"query", "mutation"}
+            or type(self.document) is not str
+            or len(self.document.encode()) > MAX_DOCUMENT_BYTES
+            or type(self.variables) is not tuple
+            or any(type(item) is not Variable for item in self.variables)
+        ):
+            raise ValueError("Invalid GraphQL operation contract.")
+
+    @property
+    def write(self):
+        """Whether execution requires explicit mutation permission."""
+        return self.kind == "mutation"
+
+
+def nodes(value):
+    """Walk executable GraphQL syntax, excluding variable declarations and source locations.
+
+    Skipping declarations lets callers count actual variable uses independently of
+    the variables an operation merely declares."""
+    if isinstance(value, Node):
+        yield value
+        for key in value.keys:
+            if key not in {"loc", "variable_definitions"}:
+                yield from nodes(getattr(value, key, None))
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            yield from nodes(item)
+
+
+def method_name(name):
+    """Convert an operation name to snake_case without hiding client lifecycle methods.
+
+    The compiler separately rejects two operation names that collapse to the same
+    Python name; this function does not silently add numeric suffixes."""
+    value = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).lower()
+    if (
+        keyword.iskeyword(value)
+        or value.startswith("_")
+        or value
+        in {
+            "close",
+            "execute",
+            "validate",
+            "http_client",
+            "headers",
+            "url",
+            "operations",
+            "allow_writes",
+        }
+    ):
+        value = "operation_" + value.lstrip("_")
+    return value
+
+
+def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
+    """Resolve fragments per source, deduplicate equivalent operations, fail closed."""
+    if not sources or sum(len(text.encode()) for text in sources) > MAX_DOCUMENT_BYTES:
+        raise ValueError("Operation documents are missing or exceed the 8 MiB limit.")
+    operations = {}
+    for source in sources:
+        try:
+            document = parse(source, max_tokens=MAX_DOCUMENT_TOKENS)
+        except Exception:
+            raise ValueError("Invalid GraphQL operation document.") from None
+        fragments, selected = {}, []
+        for definition in document.definitions:
+            if (
+                definition.kind not in {"operation_definition", "fragment_definition"}
+                or definition.name is None
+            ):
+                raise ValueError(
+                    "Only named GraphQL operations and fragments are supported."
+                )
+            name = definition.name.value
+            if definition.kind == "fragment_definition":
+                if name in fragments and print_ast(fragments[name]) != print_ast(
+                    definition
+                ):
+                    raise ValueError("Conflicting GraphQL fragment definitions.")
+                fragments[name] = definition
+            else:
+                if definition.operation.value not in {"query", "mutation"}:
+                    raise ValueError(
+                        "Subscriptions are not supported by this client backend."
+                    )
+                selected.append(definition)
+        for definition in selected:
+            # Resolve fragments within their original request document. Combining
+            # fragment namespaces first could silently bind a different capture's
+            # same-name fragment and change the operation sent to the server.
+            reached, active = set(), set()
+
+            def visit(name):
+                """Resolve one fragment recursively, rejecting missing references and active cycles."""
+                if name in active:
+                    raise ValueError("GraphQL fragment cycle.")
+                if name in reached:
+                    return
+                if name not in fragments:
+                    raise ValueError("Undefined GraphQL fragment.")
+                active.add(name)
+                for item in nodes(fragments[name]):
+                    if item.kind == "fragment_spread":
+                        visit(item.name.value)
+                active.remove(name)
+                reached.add(name)
+
+            for item in nodes(definition):
+                if item.kind == "fragment_spread":
+                    visit(item.name.value)
+            parts = [definition] + [fragments[name] for name in sorted(reached)]
+            used = {
+                item.name.value
+                for part in parts
+                for item in nodes(part)
+                if item.kind == "variable"
+            }
+            variables, names, parameters = [], set(), set()
+            # graphql-core 3.2 uses an empty tuple for absent variables; 3.3 can
+            # return None. Both represent a valid zero-input operation.
+            for variable in definition.variable_definitions or ():
+                name = variable.variable.name.value
+                if name in names:
+                    raise ValueError("Duplicate GraphQL variable definition.")
+                names.add(name)
+                parameter = name
+                # Preserve the server name separately while avoiding Python
+                # keywords, reserved client names and collisions among aliases.
+                while (
+                    keyword.iskeyword(parameter)
+                    or parameter.startswith("__")
+                    or parameter in _RESERVED
+                    or parameter in parameters
+                ):
+                    parameter = "argument_" + parameter
+                parameters.add(parameter)
+                if variable.default_value is not None:
+                    validate_value(
+                        value_from_ast_untyped(variable.default_value), variable.type
+                    )
+                variables.append(
+                    Variable(
+                        name,
+                        parameter,
+                        print_ast(variable.type),
+                        variable.type.kind == "non_null_type"
+                        and variable.default_value is None,
+                    )
+                )
+            if used - names:
+                raise ValueError("Undefined GraphQL variable.")
+            if names - used:
+                raise ValueError("Unused GraphQL variable.")
+            text = "\n\n".join(print_ast(part) for part in parts) + "\n"
+            operation = Operation(
+                definition.name.value,
+                method_name(definition.name.value),
+                definition.operation.value,
+                text,
+                tuple(variables),
+            )
+            prior = operations.get(operation.name)
+            if prior is not None and prior != operation:
+                raise ValueError("Conflicting GraphQL operation definitions.")
+            operations[operation.name] = operation
+    if not operations:
+        raise ValueError("No named GraphQL operations were supplied.")
+    result = tuple(operations[name] for name in sorted(operations))
+    if len({item.method for item in result}) != len(result):
+        raise ValueError("GraphQL operation names collide as Python method names.")
+    return result
+
+
+def validate_value(value: Any, type_node):
+    """Check nullability, lists and built-in GraphQL scalars recursively.
+
+    Custom scalars, enums and input objects have no local definition in an operation
+    document. Their contents remain JSON for the server to validate."""
+    if type_node.kind == "non_null_type":
+        if value is None:
+            raise ValueError("Input must satisfy its non-null GraphQL type.")
+        return validate_value(value, type_node.type)
+    if value is None:
+        return
+    if type_node.kind == "list_type":
+        # GraphQL also permits singleton coercion; use the same semantics.
+        for item in value if isinstance(value, list) else [value]:
+            validate_value(item, type_node.type)
+        return
+    scalar = _SCALARS.get(type_node.name.value)
+    if scalar is not None:
+        try:
+            if type_node.name.value in {"Int", "Float", "ID"} and type(value) is bool:
+                raise ValueError()
+            scalar.parse_value(value)
+        except Exception:
+            raise ValueError(
+                "Input must match its declared GraphQL scalar type."
+            ) from None
+
+
+def validate_variables(
+    operation: Operation, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate Python arguments and translate aliases back to GraphQL variable names.
+
+    Missing optional variables stay omitted so server defaults apply. Explicit None
+    remains null. Reject unknown names, invalid scalars and unbounded/non-JSON values."""
+    allowed = {item.parameter for item in operation.variables}
+    if arguments.keys() - allowed:
+        raise ValueError("Input has unknown fields; check operation help.")
+    values = {}
+    for variable in operation.variables:
+        if variable.parameter not in arguments:
+            if variable.required:
+                raise ValueError("A required input is missing: " + variable.parameter)
+            continue
+        value = arguments[variable.parameter]
+        validate_value(value, parse_type(variable.type))
+        values[variable.name] = value
+    try:
+        encoded = json.dumps(values, allow_nan=False)
+        if len(encoded.encode()) > MAX_DOCUMENT_BYTES:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValueError("Input must contain bounded JSON values.") from None
+    return values

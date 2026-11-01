@@ -10,6 +10,7 @@ from .discovery import import_har, new_output, publish
 
 
 def main(args=None):
+    """Parse website discovery and offline pipeline commands and dispatch the selected workflow."""
     parser = argparse.ArgumentParser(
         prog="website-client",
         description="Discover website endpoints from a logged-in browser or existing HAR; generate Python clients from standard definitions.",
@@ -106,8 +107,8 @@ def main(args=None):
     )
     generate_command = commands.add_parser(
         "generate",
-        help="Generate a standalone Python client from a standard definition.",
-        description="Use openapi-python-client for OpenAPI, or Ariadne Codegen for GraphQL schemas plus operation documents. Sends no API requests.",
+        help="Generate a Python client from captured operations or definitions.",
+        description="Generate from captured requests and operations. GraphQL documents work without a schema; an optional schema enables Ariadne Codegen models. HTTP definitions use openapi-python-client. Sends no API requests.",
     )
     definition = generate_command.add_mutually_exclusive_group(required=True)
     definition.add_argument(
@@ -354,6 +355,7 @@ def main(args=None):
 
 
 def entrypoint():
+    """Run the installed website-client command and propagate its exit status."""
     sys.exit(main())
 
 

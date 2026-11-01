@@ -50,10 +50,15 @@ SAFE_INPUT_ERROR_PREFIXES = (
 @dataclass
 class RequestState:
     # Set before calling the typed method: a later failure can be ambiguous.
+    """Track whether an endpoint method started so failure messages preserve uncertainty."""
     started: bool = False
 
 
 def convert(value, annotation):
+    """Convert JSON into the explicit Python type accepted by an upstream SDK method.
+
+    Support scalars, unions, enums and the upstream model adapters. Reject unsupported
+    types instead of coercing arbitrary input or introducing a competing schema."""
     if annotation in {typing.Any, inspect.Parameter.empty}:
         return value
     base = typing.get_origin(annotation)
@@ -100,6 +105,7 @@ def convert(value, annotation):
 
 
 def serialize(value):
+    """Convert supported SDK models, dates and enums into JSON-compatible values."""
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json", by_alias=True)
     if hasattr(value, "to_dict"):
@@ -137,6 +143,7 @@ def input_parameters(function):
 
 
 def describe_inputs(function):
+    """Describe required and optional parameters from a schema-backed SDK signature."""
     hints = typing.get_type_hints(function)
     descriptions = []
     for name, parameter in input_parameters(function).items():
@@ -146,7 +153,28 @@ def describe_inputs(function):
     return "; ".join(descriptions) or "none"
 
 
+def describe_operation_inputs(operation, function):
+    """Describe captured GraphQL variable types when Python annotations are only Any."""
+    if operation["kind"] != "graphql-operation":
+        return describe_inputs(function)
+    return (
+        "; ".join(
+            item["parameter"]
+            + ": "
+            + item["type"]
+            + (
+                " (required)"
+                if item["required"]
+                else " (optional; omitted unless supplied)"
+            )
+            for item in operation["variables"]
+        )
+        or "none"
+    )
+
+
 def add_operation_arguments(command):
+    """Add runtime input, authentication, output and write-confirmation flags."""
     command.add_argument(
         "--url",
         required=True,
@@ -202,6 +230,7 @@ def add_operation_arguments(command):
 
 
 def build_parser(operations):
+    """Build one endpoint subcommand per packaged operation without sending requests."""
     parser = argparse.ArgumentParser(
         description="Call generated endpoint methods. Help is local and sends no requests."
     )
@@ -217,7 +246,7 @@ def build_parser(operations):
             description=label + ". " + operation.get("description", ""),
             epilog=(
                 "JSON input fields: "
-                + describe_inputs(function)
+                + describe_operation_inputs(operation, function)
                 + ". Models use JSON objects; complex types may require "
                 "the generated Python API."
             ),
@@ -250,6 +279,7 @@ def validate_execution_options(options, operation):
 
 def validate_service_url(url):
     # Permit unencrypted HTTP only for local development and test services.
+    """Require HTTPS, except for loopback tests, and reject URL-embedded credentials."""
     parsed = urlsplit(url)
     local_http = parsed.scheme == "http" and parsed.hostname in {
         "localhost",
@@ -269,6 +299,7 @@ def validate_service_url(url):
 
 
 def read_input_json(input_path):
+    """Read one bounded JSON object for named endpoint arguments."""
     if not input_path:
         return {}
     source = Path(input_path)
@@ -325,6 +356,7 @@ def bind_input_arguments(function, data):
 
 
 def enter_browser_transport(stack, options, operation):
+    """Open a one-request authenticated browser transport only when --login is selected."""
     if not options.login:
         return None
     from .session_http import BrowserLoginTransport
@@ -363,9 +395,11 @@ def enter_generated_client(stack, options, operation, headers, transport):
         if transport is not None:
             import httpx
 
-            client_options["http_client"] = httpx.Client(
-                transport=transport, follow_redirects=False
+            client_options["http_client"] = stack.enter_context(
+                httpx.Client(transport=transport, follow_redirects=False)
             )
+        if operation["kind"] == "graphql-operation":
+            client_options["allow_writes"] = operation["write"]
         client = module.Client(**client_options)
     return stack.enter_context(client)
 
@@ -373,6 +407,10 @@ def enter_generated_client(stack, options, operation, headers, transport):
 def execute_operation(options, operation, function, arguments, headers, state):
     # Keep the client and browser alive for the typed method; close both on
     # success, failure or cancellation before serializing the returned data.
+    """Call one generated method while its client and optional browser remain open.
+
+    Set request uncertainty immediately before method invocation. ExitStack closes
+    owned resources on success, cancellation and failure before result serialization."""
     with ExitStack() as stack:
         transport = enter_browser_transport(stack, options, operation)
         client = enter_generated_client(stack, options, operation, headers, transport)
@@ -390,6 +428,7 @@ def execute_operation(options, operation, function, arguments, headers, state):
 
 
 def write_result(result, output_path):
+    """Serialize the result to stdout or an exclusively created private output file."""
     text = json.dumps(serialize(result)) + "\n"
     if not output_path:
         print(text, end="")
@@ -402,6 +441,10 @@ def write_result(result, output_path):
 
 
 def show_failure(error, state):
+    """Report bounded diagnostics without leaking inputs, credentials or server response bodies.
+
+    Distinguish pre-call validation from potentially completed requests. A transport
+    error after execution starts must never imply that retrying a write is safe."""
     if isinstance(error, ValueError) and not state.started:
         # Model errors may echo private inputs. Only our own validation messages
         # are eligible for display; all other diagnostics stay bounded.
@@ -409,8 +452,23 @@ def show_failure(error, state):
         if not message.startswith(SAFE_INPUT_ERROR_PREFIXES):
             message = "Input validation failed. Check operation help."
         print(message, file=sys.stderr)
-    elif not state.started and type(error).__name__ == "BrowserError":
+    elif (
+        type(error).__name__ == "OperationError"
+        and type(getattr(error, "http_status", None)) is int
+    ):
+        print(
+            f"Endpoint returned HTTP {error.http_status}. "
+            "No automatic retry occurred; check the service before retrying.",
+            file=sys.stderr,
+        )
+    elif type(error).__name__ == "BrowserError":
         print(str(error), file=sys.stderr)
+    elif not state.started:
+        print(
+            "Command setup failed before the endpoint method ran. "
+            "Check the generated package and dependencies.",
+            file=sys.stderr,
+        )
     else:
         print(
             "Endpoint call failed. A request may have succeeded; check the "
@@ -420,6 +478,7 @@ def show_failure(error, state):
 
 
 def main(args=None):
+    """Validate CLI inputs, execute one generated operation and return a process exit code."""
     operations = json.loads(files(__package__).joinpath("_operations.json").read_text())
     parser, functions = build_parser(operations)
     options = parser.parse_args(args)
@@ -432,6 +491,10 @@ def main(args=None):
         data = read_input_json(options.input)
         headers = read_runtime_headers(options.headers_stdin)
         arguments = bind_input_arguments(function, data)
+        if operation["kind"] == "graphql-operation":
+            from .operation_runtime import validate_arguments
+
+            validate_arguments(__package__, options.operation, arguments)
         result = execute_operation(
             options, operation, function, arguments, headers, state
         )
@@ -451,6 +514,7 @@ def main(args=None):
 
 
 def entrypoint():
+    """Exit the installed command with the status returned by main."""
     sys.exit(main())
 
 

@@ -1,15 +1,15 @@
 # Browser-Sourced API Client Generator
 
-Browser-Sourced API Client Generator discovers website endpoints from an
-authenticated browser or an existing HAR, exports standard definitions, and uses
-OpenAPI and GraphQL generators to create standalone Python clients with endpoint
-commands and help. HAR is the HTTP Archive format used by browser network tools.
+Browser-Sourced API Client Generator records requests and operations from an
+authenticated website or an existing HAR, then generates standalone Python clients
+with endpoint commands and help. HAR is the HTTP Archive format used by browser
+network tools. Published schemas are optional enrichment.
 
-For REST/HTTP APIs, it uses published OpenAPI definitions or exports inferred
-OpenAPI from captured routes for review. For GraphQL APIs, it uses a complete
-schema plus operation documents. These are two supported paths through the same
-discovery and generation commands. GraphQL is not required. Other API contract
-formats do not yet have dedicated client-generation support.
+For REST/HTTP APIs, captured routes and sample shapes produce inferred OpenAPI
+for review; a published OpenAPI definition can replace those samples. For GraphQL,
+named operation documents generate callable methods directly. If a complete schema
+is supplied or discovered, Ariadne Codegen adds schema-based models and validation.
+Other API contract formats do not yet have dedicated generation support.
 
 ## Start here: website to client
 
@@ -88,7 +88,10 @@ poetry run website-client generate --manifest ./captures/walk/normalized.json --
 
 This also runs offline. It creates a standalone Python project, API methods,
 endpoint commands and `generation.json`, which records which definitions were
-used. Generation does not call the service's business operations.
+used. Generation does not call the service's business operations. GraphQL operation
+clients validate declared variables and return JSON dictionaries. Unknown custom
+input fields and response shapes remain untyped without an optional schema;
+`generation.json` records whether schema validation was available.
 
 ### 5. Install the client and see its commands
 
@@ -342,7 +345,7 @@ definition or an inferred definition you have reviewed:
 poetry run website-client generate --openapi ./openapi.json --name example-client --output ./example-client
 ```
 
-For GraphQL, supply both a complete schema and the operations you want as methods:
+For GraphQL with an available schema, these file inputs enable stronger models:
 
 ```sh
 poetry run website-client generate --graphql-schema ./schema.graphql --operations ./operations.graphql --name example-graphql-client --output ./example-graphql-client
@@ -350,8 +353,9 @@ poetry run website-client generate --graphql-schema ./schema.graphql --operation
 
 The schema input can also be complete introspection JSON. Use the filenames listed
 in `discovery.json`, or definitions obtained directly from the service. Operation
-documents alone cannot supply a full schema. Conflicting operation definitions
-need review before combining them. Bundle external references into OpenAPI input
+documents also generate directly through `import --operations` and the manifest
+pipeline above, without a schema. Conflicting definitions need review before
+combining them. Bundle external references into OpenAPI input
 first; the tool does not fetch external references implicitly.
 
 OpenAPI generation calls [openapi-python-client](https://github.com/openapi-generators/openapi-python-client).
@@ -415,7 +419,11 @@ Chromium with `--browser chromium`, or supply an installed executable with
 Cookies stay in the native browser. Authorization and common CSRF headers observed
 for the selected API origin are held in memory. If the application uses another
 session header, add `--session-header HEADER_NAME` and visit the relevant page
-before pressing Enter; the value is observed from that session. No token copying
+before pressing Enter; the value is observed from that session. Repeat the flag
+for each required header. For example, an Apollo GraphQL application may require
+both `--session-header apollographql-client-name` and
+`--session-header apollographql-client-version`. These are header names, not values.
+The generator does not currently infer required custom headers from a capture. No token copying
 or browser debugging setup is required.
 
 Inputs and write confirmation are checked before opening the browser. For a write,
