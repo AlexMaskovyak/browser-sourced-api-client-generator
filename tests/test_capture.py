@@ -16,6 +16,10 @@ def test_native_network_events_are_scoped_bounded_and_discard_headers():
     assert "private-token" not in json.dumps(capture.pending)
     capture.event("Network.responseReceived", {"requestId": "1", "response": {"status": 200, "mimeType": "application/json"}})
     capture.event("Network.loadingFinished", {"requestId": "1", "timestamp": 1.1})
+    connection.call.assert_called_once_with("Network.getResponseBody", {"requestId": "1"})
+    # The next navigation can discard the browser's cached response before the
+    # next terminal poll. The completion callback must already have read it.
+    connection.call.side_effect = RuntimeError("response evicted by navigation")
     capture.drain()
     files = capture.discovery.files("browser")
     assert len(capture.discovery.entries) == 1

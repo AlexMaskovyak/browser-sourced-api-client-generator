@@ -131,9 +131,13 @@ def verify_capture(site, root):
 
         def capturing():
             command.pump()
+            assert command.status is None, command.output
             return "Capture started." in command.output
 
-        eventually(capturing)
+        try:
+            eventually(capturing)
+        except AssertionError:
+            raise AssertionError("Capture did not start: " + command.output) from None
         initial_read_count = site.api_reads
         urls = capture_urls(site)
         for expected_read_count, url in enumerate(urls, initial_read_count + 1):
