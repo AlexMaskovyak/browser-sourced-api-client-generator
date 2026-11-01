@@ -2,21 +2,30 @@
 
 ## PR 8 adversarial review and developer guidance
 
-1. Reproduce merge and chaining failures with focused tests. Verify schema
+1. [x] Reproduce merge and chaining failures with focused tests. Verify schema
    replacement after normalization, producer ordering, timestamp interoperability,
    malformed upstream input and upstream failure after complete JSON output.
-2. Split manifest construction, validation, transport and merging into owned
+2. [x] Split manifest construction, validation, transport and merging into owned
    modules. Keep the version 1 exchange format and existing CLI flags compatible.
    Repair stale schema selection and any demonstrated interoperability failures.
-3. Rewrite the pipeline documentation around developer tasks: run a saved capture,
+3. [x] Rewrite the pipeline documentation around developer tasks: run a saved capture,
    chain commands, connect another producer, then consult the format reference.
    Rename the independent producer example to describe its actual purpose.
-4. Run focused regressions, the full suite, package checks and installed Docker
+4. [x] Run focused regressions, the full suite, package checks and installed Docker
    scenarios. Push coherent commits to PR 8 and report remaining pipeline limits.
 
 Complete when review comments have concrete changes, failure-path evidence joins
 the successful handoff tests, and instructions explain inputs, outputs, exit status,
 manual login and recovery without requiring this conversation.
+
+Verified: 163 tests pass locally and in Docker, alongside all 21 installed-command
+scenarios. Poetry lock checks, source/wheel builds and local documentation links
+pass. Regressions reproduced stale normalized-schema selection, order-dependent
+inferred-schema conflicts and lowercase RFC 3339 timestamp failures before fixing
+them. Process-level tests prove truncated input prevents generation and `pipefail`
+cannot undo generation after a producer emits valid JSON and subsequently fails.
+The guide documents staged `&&` execution for that boundary. Normalization may
+succeed while retaining blocked APIs; readiness is checked again by generation.
 
 ## Portable discovery and normalization
 
