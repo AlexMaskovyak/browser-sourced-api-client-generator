@@ -136,8 +136,14 @@ def main(args=None):
     from .pipeline import add_commands, run_offline, generate_bundle
 
     add_commands(commands, generate_command, definition)
+    from .project_generation import add_build_command, project_from_options, build_project
+
+    add_build_command(commands)
     options = parser.parse_args(args)
     try:
+        if options.command == "build":
+            print(json.dumps(build_project(project_from_options(options), options.output)))
+            return 0
         if options.command in {"normalize", "import"}:
             run_offline(options)
             return 0
