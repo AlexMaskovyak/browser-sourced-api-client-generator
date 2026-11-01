@@ -396,6 +396,84 @@ def test_tampered_bundle_does_not_publish_a_client(tmp_path):
     assert not (tmp_path / "client").exists()
 
 
+def run_producer_pipeline(tmp_path, payload, exit_code):
+    """Use separate processes and pipefail, not a simulated stream handoff."""
+    import shlex
+
+    producer = tmp_path / "producer.py"
+    producer.write_text(
+        "import sys\nsys.stdout.write(" + repr(payload)
+        + ")\nsys.exit(" + str(exit_code) + ")\n"
+    )
+    commands = [
+        [sys.executable, str(producer)],
+        [sys.executable, "-m", "website_client.cli", "normalize", "--input", "-"],
+        [
+            sys.executable, "-m", "website_client.cli", "generate",
+            "--manifest", "-", "--output", str(tmp_path / "client"),
+        ],
+    ]
+    return subprocess.run(
+        [
+            "/bin/bash", "-o", "pipefail", "-c",
+            " | ".join(shlex.join(c) for c in commands),
+        ],
+        capture_output=True, text=True, timeout=40,
+    )
+
+
+def test_truncated_producer_output_stops_generation(tmp_path):
+    result = run_producer_pipeline(tmp_path, encoded(openapi_bundle())[:-20], 7)
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert not (tmp_path / "client").exists()
+
+
+def test_pipefail_reports_late_producer_failure_but_cannot_undo_generation(tmp_path):
+    result = run_producer_pipeline(tmp_path, encoded(openapi_bundle()), 7)
+    assert result.returncode == 7
+    assert (tmp_path / "client/generation.json").exists()
+
+
+def test_normalize_success_reports_blocked_apis_without_claiming_generation(tmp_path):
+    result = command(["normalize"], encoded(graphql_bundle(schema=False)))
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["services"][0]["status"] == "blocked"
+    assert not (tmp_path / "client").exists()
+
+
+def test_cli_combines_piped_operations_with_a_file_schema(tmp_path):
+    source = tmp_path / "registry.json"
+    write_bundle(graphql_bundle(operations=False), source)
+    result = command(
+        ["normalize", "--input", "-", "--input", str(source)],
+        encoded(graphql_bundle(schema=False)),
+    )
+    assert result.returncode == 0, result.stderr
+    target = json.loads(result.stdout)["services"][0]
+    assert target["status"] == "ready"
+    assert target["operationNames"] == ["CreateItem", "GetItem"]
+
+
+def test_merge_input_budget_stops_reading_before_all_inputs_accumulate(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from website_client import pipeline
+
+    content = encoded(graphql_bundle())
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    first.write_text(content)
+    second.write_text(content)
+    monkeypatch.setattr(pipeline, "MAX_BUNDLE_BYTES", len(content.encode()) + 10)
+    output = tmp_path / "merged.json"
+    options = SimpleNamespace(
+        command="normalize", input=[str(first), str(second)],
+        output=str(output), bind_schema=[], bind_operations=[],
+    )
+    with pytest.raises(BrowserError, match="size limit"):
+        pipeline.run_offline(options)
+    assert not output.exists()
+
+
 def test_discovery_manifest_preserves_schemas_and_frontend_documents_beyond_har():
     discovery = Discovery()
     endpoint = "https://example.test/graphql"
