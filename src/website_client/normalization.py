@@ -5,7 +5,7 @@ import copy
 from graphql import build_schema, parse, print_ast, validate
 
 from .browser import BrowserError
-from .bundle import artifact, digest, encoded, validate_bundle
+from .discovery_manifest import artifact, digest, encoded, validate_bundle
 from .definitions import MAX_DOCUMENT, graphql_schema, openapi_document
 
 

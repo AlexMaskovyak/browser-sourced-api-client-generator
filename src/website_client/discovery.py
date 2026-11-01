@@ -274,7 +274,7 @@ class Discovery:
 
 def import_har(path, max_entries=1000):
     try:
-        from .bundle import read_text
+        from .discovery_manifest import read_text
         document = json.loads(read_text(path, MAX_HAR))
         entries = document["log"]["entries"]
         if not isinstance(entries, list): raise ValueError()

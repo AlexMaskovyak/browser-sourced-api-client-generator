@@ -8,7 +8,7 @@ from graphql import build_schema, get_introspection_query, graphql_sync
 import pytest
 
 from website_client.browser import BrowserError
-from website_client.bundle import (
+from website_client.discovery_manifest import (
     artifact,
     digest,
     encoded,
@@ -209,6 +209,39 @@ def test_external_schema_producer_completes_a_capture():
         digest(upstream),
     }
     assert len(merged["services"][0]["operationArtifacts"]) == 1
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_merge_published_schema_replaces_previously_normalized_inference(reverse):
+    inputs = [normalize_bundle(openapi_bundle(inferred=True)), openapi_bundle()]
+    if reverse:
+        inputs.reverse()
+    normalized = normalize_bundle(merge_bundles(inputs))
+    target = normalized["services"][0]
+    assert target["status"] == "ready"
+    definitions = {item["id"]: item for item in normalized["artifacts"]}
+    spec = json.loads(definitions[target["schemaArtifact"]]["content"])
+    assert not spec.get("x-discovery-inferred")
+    assert target["sourceSchemaArtifact"] == openapi_bundle()["artifacts"][0]["id"]
+
+
+def test_merge_accepts_rfc3339_lowercase_timestamp():
+    first, second = graphql_bundle(), graphql_bundle()
+    first["createdAt"] = "2026-10-31T00:00:00Z"
+    second["createdAt"] = "2026-11-01t00:00:00z"
+    assert merge_bundles([first, second])["createdAt"] == "2026-11-01T00:00:00+00:00"
+
+
+def test_conflicting_inferred_schemas_do_not_depend_on_input_order():
+    first, second = openapi_bundle(inferred=True), openapi_bundle(inferred=True)
+    spec = json.loads(second["artifacts"][0]["content"])
+    spec["info"]["title"] = "A different sample"
+    replacement = artifact("other.json", "openapi", encoded(spec), "inferred")
+    second["artifacts"] = [replacement]
+    second["services"][0]["schemaArtifact"] = replacement["id"]
+    for inputs in ([first, second], [second, first]):
+        with pytest.raises(BrowserError, match="Conflicting schemas"):
+            merge_bundles(inputs)
 
 
 def test_operations_are_not_bound_by_schema_similarity():
