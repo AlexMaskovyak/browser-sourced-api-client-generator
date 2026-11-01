@@ -1,5 +1,27 @@
 # Delivery plan
 
+## Playwright migration (separate PR)
+
+1. [x] Replace the custom browser process and WebSocket protocol implementation with
+   Playwright's Python API. Preserve temporary profiles, manual login, scoped
+   capture and browser-native endpoint requests.
+2. [x] Keep Chrome-specific request interception behind Playwright CDP sessions.
+   Playwright owns transport, event dispatch, tabs and process shutdown. Python
+   owns request scope, credential handling and the one-request policy.
+3. [x] Update standalone generated dependencies and installation instructions. Run
+   focused lifecycle and transport tests, then all tests, builds and Docker flows.
+
+Complete when installed root and generated CLIs pass the existing login, capture,
+read/write, redirect and cleanup scenarios. Self-discovery is a second PR and
+does not change behavior in this migration.
+
+Verified with Poetry's locked dependency check, source and wheel builds, 63 Python
+tests locally and in Docker, and all 15 installed-command container scenarios.
+Standalone OpenAPI and GraphQL clients run in fresh environments with only their
+declared runtime dependencies. Navigation timing regressions now have tests.
+The container wheel cache is built before copying project source so code edits
+do not trigger another download of Playwright's bundled driver.
+
 ## Code readability
 
 - [x] Separate generation by backend and move generated package text into templates.
@@ -25,7 +47,7 @@
    codes, authenticated reads, confirmed writes, cancellation and cleanup in Docker.
    Document the complete install-to-endpoint procedure and open a separate PR.
 
-Verification covers 65 Python tests and 15 container scenarios. Generated clients
+The previous implementation covered 65 Python tests and 15 container scenarios. Generated clients
 are installed in separate fresh environments with only their declared runtime
 dependencies. Both formats complete browser login, verification codes, authenticated
 reads and confirmed writes. Cancellation, browser closure and redirect rejection

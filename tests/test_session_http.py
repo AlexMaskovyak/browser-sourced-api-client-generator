@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, Mock
 import httpx
 import pytest
 
-from website_client.browser import BrowserError, Connection
+from website_client.browser import BrowserError
 from website_client.session_http import BrowserLoginTransport
 
 
@@ -80,13 +80,23 @@ def prepare(monkeypatch, status=200):
     connection.pump.side_effect = lambda **_kwargs: connection.on_event(
         "Fetch.requestPaused", events.pop(0)
     )
-    monkeypatch.setattr(
-        "website_client.session_http.Connection", lambda *_args, **_kwargs: connection
-    )
+    target = Mock()
+
+    def navigate(*_args, **_kwargs):
+        while events:
+            connection.pump()
+
+    target.goto.side_effect = navigate
+    context = Mock()
+    context.new_page.return_value = target
     transport = BrowserLoginTransport("https://example.test/items", "POST")
     transport._session = SimpleNamespace(
-        _connection=parent, _port=1234, _check=lambda: None
+        _connection=parent,
+        _context=context,
+        connection_for=lambda _target: connection,
+        _check=lambda: None,
     )
+    parent.target = target
     transport._headers["authorization"] = "private-bearer"
     return transport, connection, parent
 
@@ -117,7 +127,7 @@ def test_typed_request_uses_browser_interception_and_aborts_response_rendering(
         call.args[0] == "Fetch.failRequest" and call.args[1]["errorReason"] == "Aborted"
         for call in calls
     )
-    assert parent.call.call_args_list[-1].args[0] == "Target.closeTarget"
+    parent.target.close.assert_called_once()
     with pytest.raises(BrowserError, match="one request"):
         transport.handle_request(request)
 
@@ -150,22 +160,6 @@ def test_other_origin_or_method_is_rejected_before_native_request(monkeypatch):
         with pytest.raises(BrowserError):
             transport.handle_request(request)
     parent.call.assert_not_called()
-
-
-def test_protocol_retains_responses_to_other_outstanding_commands(monkeypatch):
-    socket = Mock()
-    socket.recv.side_effect = [
-        json.dumps({"id": 1, "result": {"frameId": "frame"}}),
-        json.dumps({"id": 2, "result": {}}),
-    ]
-    monkeypatch.setattr(
-        "website_client.browser.websocket.create_connection",
-        lambda *_args, **_kwargs: socket,
-    )
-    connection = Connection("ws://127.0.0.1:123/devtools/page/target", 123)
-    connection.send("Page.navigate", {"url": "https://example.test"})
-    assert connection.call("Fetch.continueRequest", {"requestId": "r1"}) == {}
-    assert connection._responses[1] == {"id": 1, "result": {"frameId": "frame"}}
 
 
 def test_httpx_entering_the_transport_again_reuses_the_owned_session(monkeypatch):
@@ -202,3 +196,30 @@ def test_decoded_response_has_its_own_byte_limit(monkeypatch):
         transport.handle_request(
             httpx.Request("POST", "https://example.test/items", json={})
         )
+
+
+def test_interception_failure_is_returned_after_navigation_and_cleans_up(monkeypatch):
+    transport, connection, parent = prepare(monkeypatch)
+    connection.call.side_effect = RuntimeError("private-protocol-error")
+    with pytest.raises(BrowserError) as error:
+        transport.handle_request(httpx.Request("POST", "https://example.test/items"))
+    assert "private-protocol-error" not in str(error.value)
+    parent.target.close.assert_called_once()
+    assert transport._active_request is None
+    assert transport._active_body is None
+
+
+def test_aborted_navigation_keeps_intercepted_api_result(monkeypatch):
+    transport, _connection, parent = prepare(monkeypatch)
+    navigate = parent.target.goto.side_effect
+
+    def aborted_after_response(*args, **kwargs):
+        navigate(*args, **kwargs)
+        raise RuntimeError("navigation aborted after response interception")
+
+    parent.target.goto.side_effect = aborted_after_response
+    response = transport.handle_request(
+        httpx.Request("POST", "https://example.test/items")
+    )
+    assert response.json() == {"id": 7}
+    parent.target.close.assert_called_once()

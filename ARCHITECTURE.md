@@ -6,11 +6,12 @@ development dependency groups and builds. The project environment lives in
 separate application environment and tests the wheel built by Poetry. Poetry's
 own bootstrap environment is separate from application dependencies.
 
-Python owns the command, browser lifetime, discovery and generation. Chrome or
-Chromium is a separate native browser process. Python communicates with its
-loopback Chrome DevTools Protocol connection using the Python websocket-client
-library. No Node, Playwright or project JavaScript is needed. Websites still run
-their own scripts normally in the browser.
+Python owns the command, discovery and generation. Playwright's Python API owns
+Chrome or Chromium startup, tabs, event delivery and shutdown. Its bundled Node
+driver is a runtime dependency; project code remains Python. Browser-native
+network capture and request interception use Playwright CDP sessions, its interface
+to Chrome DevTools Protocol. There is no project WebSocket implementation.
+Websites still run their own scripts normally in the browser.
 
 The human owns sign-in and verification codes. The website owns account records
 and authentication. A temporary browser profile holds the live session. The
@@ -61,13 +62,13 @@ and validated before generation; no credentials are embedded in generated client
 
 ## Generated client authentication
 
-Generated packages include their own Python browser support and websocket-client
+Generated packages include their own Python browser support and Playwright
 dependency. An operation's --login option opens a fresh browser, waits for manual
 sign-in and verification codes, and then calls the upstream typed method. A custom
 login URL handles services whose application and API use different origins.
 
-An HTTPX transport sends that method's exact request through a separate background
-target in the same native browser. Request interception supplies its method and
+An HTTPX transport sends that method's exact request through a separate tab
+in the same native browser. Playwright creates and closes the tab. Request interception supplies its method and
 body. Response interception reads the bytes and stops navigation before response
 scripts run. Redirects are returned without following them. Only the chosen API
 origin and operation method are permitted, and each transport sends one request.
@@ -77,3 +78,10 @@ kept transiently for the exact API origin. Additional session-header names can b
 explicitly selected; their values are read from that session, not copied by the
 user. No authentication state enters generated source, HAR files or command output.
 Failure and cancellation close owned targets, browser processes and profiles.
+
+The adapter for CDP sessions retains only the network events needed by capture
+and request policy. It does not implement WebSocket framing or response matching.
+Completed response bodies are read during their completion callback so a later
+navigation cannot discard them before the next terminal poll. Production uses
+Playwright's private control pipe. Only the container test wrapper exposes a
+loopback debugging port for a second Playwright instance to act as the human.

@@ -41,8 +41,9 @@ browser requires installing Chrome or Chromium, or correcting that path. For an
 incomplete login, sign in fully and return to the requested website before
 confirming on a fresh run.
 
-The implementation connects to the native browser directly from Python. It needs
-no Node, npm, Playwright or JavaScript driver. Cookies and authentication stay in
+The implementation uses Playwright's Python API with your installed browser.
+Playwright includes its own Node driver; you do not need to install Node or npm.
+Project code and generated clients remain Python. Cookies and authentication stay in
 the browser or process memory. The login command exports no saved browser state;
 the discovery command exports the sanitized traffic described below.
 Temporary profile files are removed on normal close; forced termination can leave
@@ -60,7 +61,8 @@ sh scripts/test-docker.sh
 Docker is needed only for the last command. It builds and installs the Python
 wheel using Poetry and tests a real terminal and headed Chromium against a local HTTPS login
 and verification-code fixture. The container has no host mounts or external
-network during execution. It has no Node installation or production credentials.
+network during execution. Playwright's bundled Node driver runs inside the
+container. No production credentials are used.
 These tests do not establish production service compatibility.
 
 ## Discover endpoints after login
