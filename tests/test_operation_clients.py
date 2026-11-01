@@ -237,3 +237,17 @@ def test_partial_graphql_errors_fail_without_retry_or_server_message_leaks(
     assert result.returncode != 0
     assert "Input must satisfy its non-null" in result.stderr
     assert "may have succeeded" not in result.stderr
+
+
+def test_cli_failure_reports_safe_http_status_and_browser_reason(capsys):
+    from website_client.client_cli import RequestState, show_failure
+    from website_client.operation_runtime import OperationError
+    from website_client.browser import BrowserError
+
+    state = RequestState()
+    state.started = True
+    show_failure(OperationError("private-response", http_status=403), state)
+    output = capsys.readouterr().err
+    assert "403" in output and "private-response" not in output
+    show_failure(BrowserError("Browser request redirects are blocked."), state)
+    assert "redirects are blocked" in capsys.readouterr().err

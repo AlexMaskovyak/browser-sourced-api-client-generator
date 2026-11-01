@@ -149,11 +149,20 @@ def describe_inputs(function):
 def describe_operation_inputs(operation, function):
     if operation["kind"] != "graphql-operation":
         return describe_inputs(function)
-    return "; ".join(
-        item["parameter"] + ": " + item["type"]
-        + (" (required)" if item["required"] else " (optional; omitted unless supplied)")
-        for item in operation["variables"]
-    ) or "none"
+    return (
+        "; ".join(
+            item["parameter"]
+            + ": "
+            + item["type"]
+            + (
+                " (required)"
+                if item["required"]
+                else " (optional; omitted unless supplied)"
+            )
+            for item in operation["variables"]
+        )
+        or "none"
+    )
 
 
 def add_operation_arguments(command):
@@ -373,9 +382,9 @@ def enter_generated_client(stack, options, operation, headers, transport):
         if transport is not None:
             import httpx
 
-            client_options["http_client"] = stack.enter_context(httpx.Client(
-                transport=transport, follow_redirects=False
-            ))
+            client_options["http_client"] = stack.enter_context(
+                httpx.Client(transport=transport, follow_redirects=False)
+            )
         if operation["kind"] == "graphql-operation":
             client_options["allow_writes"] = operation["write"]
         client = module.Client(**client_options)
@@ -421,7 +430,16 @@ def show_failure(error, state):
         if not message.startswith(SAFE_INPUT_ERROR_PREFIXES):
             message = "Input validation failed. Check operation help."
         print(message, file=sys.stderr)
-    elif not state.started and type(error).__name__ == "BrowserError":
+    elif (
+        type(error).__name__ == "OperationError"
+        and type(getattr(error, "http_status", None)) is int
+    ):
+        print(
+            f"Endpoint returned HTTP {error.http_status}. "
+            "No automatic retry occurred; check the service before retrying.",
+            file=sys.stderr,
+        )
+    elif type(error).__name__ == "BrowserError":
         print(str(error), file=sys.stderr)
     elif not state.started:
         print(
