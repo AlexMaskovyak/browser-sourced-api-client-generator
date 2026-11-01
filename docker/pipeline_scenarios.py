@@ -143,3 +143,107 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
         command.stop()
         site.exploration = False
         site.introspection_disabled = False
+
+
+def verify_complete_project(root):
+    """Install and test untouched complete output, then reproduce it from shipped inputs."""
+    from website_client.discovery_manifest import (
+        artifact,
+        new_bundle,
+        service,
+        write_bundle,
+    )
+
+    document = artifact(
+        "operations.graphql",
+        "graphql-operations",
+        "query Read { value }\nmutation Change($input: Input!) { change(input: $input) }",
+        "external",
+    )
+    source = root / "project-source.json"
+    write_bundle(
+        new_bundle(
+            [document],
+            [
+                service(
+                    "graphql",
+                    "https://example.test/graphql",
+                    operations=[document["id"]],
+                )
+            ],
+        ),
+        source,
+    )
+    output, rebuilt = root / "complete-project", root / "rebuilt-project"
+    subprocess.run(
+        [
+            "website-client",
+            "build",
+            "--manifest",
+            str(source),
+            "--name",
+            "complete-project",
+            "--login-url",
+            "https://example.test/login",
+            "--session-header",
+            "x-app-context",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "website-client",
+            "build",
+            "--project",
+            str(output / "client-project.json"),
+            "--output",
+            str(rebuilt),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    snapshot = lambda directory: {
+        str(path.relative_to(directory)): path.read_bytes()
+        for path in directory.rglob("*")
+        if path.is_file()
+    }
+    assert snapshot(output) == snapshot(rebuilt)
+    env = root / "project-env"
+    subprocess.run([sys.executable, "-m", "venv", str(env)], check=True)
+    python = str(env / "bin/python")
+    environment = {
+        **os.environ,
+        "PIP_NO_INDEX": "1",
+        "PIP_FIND_LINKS": "/opt/client-wheels",
+    }
+    subprocess.run(
+        ["poetry", "--directory", str(output), "build", "--format", "wheel"],
+        check=True,
+        capture_output=True,
+    )
+    wheel = next((output / "dist").glob("*.whl"))
+    subprocess.run(
+        [python, "-m", "pip", "install", str(wheel), "pytest"],
+        env=environment,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [python, "-m", "pytest", "-q", str(output / "tests")],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [str(env / "bin/complete-project"), "Read", "--help"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    print(
+        "PASS complete project: untouched install, generated tests and byte-identical rebuild",
+        flush=True,
+    )
