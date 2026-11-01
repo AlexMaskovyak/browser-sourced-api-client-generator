@@ -1,0 +1,5 @@
+query Find($id: ID!, $limit: Int! = 5, $label: String) {
+  item(id: $id, limit: $limit, label: $label) { ...Fields }
+}
+fragment Fields on Item { id name }
+mutation Create($input: NewItemInput!) { createItem(input: $input) { id } }
