@@ -345,7 +345,7 @@ definition or an inferred definition you have reviewed:
 poetry run website-client generate --openapi ./openapi.json --name example-client --output ./example-client
 ```
 
-For GraphQL, supply both a complete schema and the operations you want as methods:
+For GraphQL with an available schema, these file inputs enable stronger models:
 
 ```sh
 poetry run website-client generate --graphql-schema ./schema.graphql --operations ./operations.graphql --name example-graphql-client --output ./example-graphql-client
@@ -353,8 +353,9 @@ poetry run website-client generate --graphql-schema ./schema.graphql --operation
 
 The schema input can also be complete introspection JSON. Use the filenames listed
 in `discovery.json`, or definitions obtained directly from the service. Operation
-documents alone cannot supply a full schema. Conflicting operation definitions
-need review before combining them. Bundle external references into OpenAPI input
+documents also generate directly through `import --operations` and the manifest
+pipeline above, without a schema. Conflicting definitions need review before
+combining them. Bundle external references into OpenAPI input
 first; the tool does not fetch external references implicitly.
 
 OpenAPI generation calls [openapi-python-client](https://github.com/openapi-generators/openapi-python-client).
