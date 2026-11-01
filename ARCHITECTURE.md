@@ -81,7 +81,11 @@ Discovery and client execution are separate sessions. A generated client's
 `--login` operation opens a fresh browser. Its HTTPX adapter sends the typed
 method's request through that session, scoped to the selected API origin and
 method. Writes require explicit command confirmation. Redirects are not followed
-and failed requests are not retried automatically.
+and failed requests are not retried automatically. Additional session header names
+are explicit command inputs. The adapter observes their values only for the API
+origin and holds them in memory. A caller sharing an existing browser session can
+supply the same bounded header selection without transferring browser ownership.
+HTTP rejection diagnostics report status codes without response bodies or tokens.
 
 ## Failure and recovery
 
