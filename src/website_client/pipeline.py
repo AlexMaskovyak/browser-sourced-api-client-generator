@@ -8,6 +8,7 @@ from .browser import BrowserError
 from .discovery_manifest import (
     artifact,
     digest,
+    encoded,
     endpoint_url,
     merge_bundles,
     new_bundle,
@@ -17,13 +18,16 @@ from .discovery_manifest import (
     write_bundle,
 )
 from .definitions import MAX_DOCUMENT, graphql_schema, openapi_document
+from .discovery_manifest.model import MAX_BUNDLE_BYTES
 from .normalization import choose_service, normalize_bundle
 
 
 def add_commands(commands, generate_command, definition):
     definition.add_argument(
+        "--manifest",
         "--bundle",
-        help="Discovery/normalized JSON bundle, manifest directory, or '-' for stdin.",
+        dest="bundle",
+        help="Discovery manifest JSON file, directory containing manifest.json, or '-' for stdin. --bundle is an alias.",
     )
     generate_command.add_argument(
         "--service", help="Service ID when more than one API is generation-ready."
@@ -35,12 +39,13 @@ def add_commands(commands, generate_command, definition):
     )
     normalize = commands.add_parser(
         "normalize",
-        help="Validate, group and merge portable discovery bundles offline.",
+        help="Validate and combine discovery manifests without opening a browser.",
+        description="Validate definitions and assign generation status to each API. Reads discovery manifests and writes one manifest JSON document. Sends no API requests; blocked APIs remain in the output for inspection.",
     )
     normalize.add_argument(
         "--input",
         action="append",
-        help="Bundle file/directory or '-'; repeat to merge producers. Default stdin.",
+        help="Manifest file/directory or '-'; repeat to combine inputs. Default stdin.",
     )
     normalize.add_argument(
         "--output", default="-", help="New normalized JSON file; default stdout."
@@ -49,17 +54,18 @@ def add_commands(commands, generate_command, definition):
         "--bind-schema",
         action="append",
         default=[],
-        help="Explicit SERVICE_ID=ARTIFACT_ID_OR_NAME schema association.",
+        help="Assign a schema document with SERVICE_ID=DOCUMENT_ID_OR_NAME. IDs and names are in the manifest.",
     )
     normalize.add_argument(
         "--bind-operations",
         action="append",
         default=[],
-        help="Explicit SERVICE_ID=ARTIFACT_ID_OR_NAME GraphQL document association.",
+        help="Assign GraphQL operations with SERVICE_ID=DOCUMENT_ID_OR_NAME. IDs and names are in the manifest.",
     )
     imported = commands.add_parser(
         "import",
-        help="Wrap an upstream OpenAPI or GraphQL definition in a portable bundle.",
+        help="Create a discovery manifest from another tool's API definition.",
+        description="Read a local OpenAPI definition or GraphQL schema and write manifest JSON for normalization and client generation. Sends no API requests. Use --endpoint for GraphQL or OpenAPI without absolute server URLs.",
     )
     source = imported.add_mutually_exclusive_group(required=True)
     source.add_argument(
@@ -92,7 +98,7 @@ def add_commands(commands, generate_command, definition):
         help="Upstream producer version or release identifier.",
     )
     imported.add_argument(
-        "--output", default="-", help="New bundle JSON file; default stdout."
+        "--output", default="-", help="New manifest JSON file; default stdout."
     )
 
 
@@ -184,8 +190,13 @@ def run_offline(options):
             raise BrowserError("Merge at most 20 bundles totaling at most 64 MiB.")
         if sources.count("-") > 1:
             raise BrowserError("Only one bundle input can use stdin.")
+        inputs, remaining = [], MAX_BUNDLE_BYTES
+        for source in sources:
+            document = read_bundle(source, limit=remaining)
+            remaining -= len(encoded(document).encode("utf-8"))
+            inputs.append(document)
         value = normalize_bundle(
-            merge_bundles([read_bundle(source) for source in sources]),
+            merge_bundles(inputs),
             bind_schema=options.bind_schema,
             bind_operations=options.bind_operations,
         )

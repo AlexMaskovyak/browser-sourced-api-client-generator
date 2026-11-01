@@ -98,9 +98,11 @@ def main(args=None):
         help="Exploration time limit, 1 to 1800 seconds (default 120).",
     )
     discover.add_argument(
+        "--emit-manifest",
         "--emit-bundle",
+        dest="emit_bundle",
         action="store_true",
-        help="Write the complete self-contained discovery bundle to stdout for command chaining. A manifest is always saved in --output.",
+        help="Write the complete discovery manifest JSON to stdout for command chaining. Also saves manifest.json in --output. --emit-bundle is an alias.",
     )
     generate_command = commands.add_parser(
         "generate",

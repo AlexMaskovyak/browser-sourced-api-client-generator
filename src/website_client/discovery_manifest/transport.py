@@ -33,10 +33,10 @@ def read_text(source, limit=MAX_BUNDLE_BYTES):
         ) from None
 
 
-def read_bundle(source):
+def read_bundle(source, limit=MAX_BUNDLE_BYTES):
     try:
         value = json.loads(
-            read_text(source),
+            read_text(source, limit),
             parse_constant=reject_constant,
             object_pairs_hook=unique_object,
         )
