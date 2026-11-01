@@ -396,9 +396,12 @@ class SiteExplorer:
         ):
             self._inspect(observer, depth)
             selected = None
-            # State hashes distinguish pagination/tab results without exporting
-            # page text, field values or account data.
-            state = hashlib.sha256(self.session._page.content().encode()).hexdigest()
+            # Successful request progress permits repeated pagination without
+            # reading page text or input values. Blocked writes are not progress.
+            state = sum(
+                200 <= entry["response"]["status"] < 300
+                for entry in capture.discovery.entries
+            )
             for control, text, role, index in self._controls():
                 key = (
                     self.session._page.url,
