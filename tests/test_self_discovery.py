@@ -11,6 +11,7 @@ from website_client.browser import BrowserError
 from website_client.cli import main
 from website_client.self_discovery import (
     DiscoveryObserver,
+    MAX_AUTH_ORIGINS,
     SelfDiscovery,
     schema_url,
     validate_settings,
@@ -67,6 +68,48 @@ def test_observer_keeps_headers_scoped_and_discovers_only_after_login():
     observer.clear()
     assert observer.headers == {}
 
+
+
+def request_event(url, *, headers=None, query=False):
+    return {
+        "documentURL": "https://example.test/app",
+        "request": {
+            "url": url, "method": "POST" if query else "GET",
+            "headers": headers or {},
+            "postData": json.dumps({"query": "query Probe { __typename }"}) if query else "",
+        },
+    }
+
+
+def test_headerless_origins_do_not_hide_a_late_graphql_endpoint():
+    observer = DiscoveryObserver("https://example.test/app")
+    observer.discovering = True
+    for number in range(MAX_AUTH_ORIGINS + 2):
+        observer.event("Network.requestWillBeSent", request_event(f"https://asset{number}.test/script.js"))
+    observer.event(
+        "Network.requestWillBeSent",
+        request_event("https://api.example.test/graphql", headers={"Authorization": "private"}, query=True),
+    )
+    assert observer.graphql_endpoints == ["https://api.example.test/graphql"]
+    assert observer.headers == {("api.example.test", 443): {"authorization": "private"}}
+
+
+def test_full_header_budget_does_not_prevent_endpoint_recognition():
+    observer = DiscoveryObserver("https://example.test/app")
+    observer.discovering = True
+    for number in range(MAX_AUTH_ORIGINS):
+        observer.event(
+            "Network.requestWillBeSent",
+            request_event(f"https://api{number}.test/", headers={"Authorization": "private"}),
+        )
+    observer.event(
+        "Network.requestWillBeSent",
+        request_event("https://late.example.test/graphql?private=omit", headers={"Authorization": "omit"}, query=True),
+    )
+    assert observer.graphql_endpoints == ["https://late.example.test/graphql"]
+    assert len(observer.headers) == MAX_AUTH_ORIGINS
+    assert ("late.example.test", 443) not in observer.headers
+    assert "private=omit" not in repr(vars(observer))
 
 def session():
     page = Mock()

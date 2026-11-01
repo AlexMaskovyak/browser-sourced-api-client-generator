@@ -110,12 +110,7 @@ class DiscoveryObserver:
                 return
             request = params["request"]
             target_origin = origin(request["url"])
-            if (
-                target_origin not in self.headers
-                and len(self.headers) >= MAX_AUTH_ORIGINS
-            ):
-                return
-            selected = self.headers.setdefault(target_origin, {})
+            selected = {}
             for name, value in request.get("headers", {}).items():
                 if (
                     name.lower() in DEFAULT_HEADERS
@@ -125,6 +120,12 @@ class DiscoveryObserver:
                     and "\n" not in value
                 ):
                     selected[name.lower()] = value
+            # Static/analytics requests without session headers consume no slot.
+            # Exhausted credential storage must not suppress endpoint evidence.
+            if selected and (
+                target_origin in self.headers or len(self.headers) < MAX_AUTH_ORIGINS
+            ):
+                self.headers.setdefault(target_origin, {}).update(selected)
             if not self.discovering:
                 return
             parsed = urlsplit(request["url"])
