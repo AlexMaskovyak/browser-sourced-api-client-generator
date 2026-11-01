@@ -6,10 +6,10 @@ from pathlib import Path
 import ssl
 import subprocess
 import threading
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, urlencode
 import uuid
 
-from graphql import build_schema, graphql_sync
+from graphql import build_schema, graphql_sync, get_operation_ast, parse
 
 # The fixture accepts only small login forms and example JSON requests.
 MAX_FIXTURE_REQUEST_BODY_BYTES = 4 * 1024
@@ -194,7 +194,14 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
         elif self.authenticated:
             self.site.counts["app"] += 1
-            self.send_html("<h1>Signed in</h1>")
+            content = "<h1>Signed in</h1>"
+            if self.site.self_discovery:
+                # The fixture page makes an ordinary GraphQL read without
+                # project JavaScript. Discovery must observe it, not replay it.
+                query = urlencode({"query": "query AutomaticRead { __typename }"})
+                content += '<link rel="service-desc" href="/openapi.json">'
+                content += '<iframe hidden src="/graphql?' + query + '"></iframe>'
+            self.send_html(content)
         else:
             self.redirect("/login")
 
@@ -206,7 +213,16 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
         data = json.loads(payload_text)
 
         if self.path == "/graphql":
-            if "mutation" in data["query"]:
+            if data.get("operationName") == "IntrospectionQuery":
+                self.site.introspection_reads += 1
+                if self.site.introspection_disabled:
+                    self.site.api_reads += 1
+                    self.send_json({"errors": [{"message": "Introspection disabled"}]})
+                    return
+            operation = get_operation_ast(
+                parse(data["query"]), data.get("operationName")
+            )
+            if operation is not None and operation.operation.value == "mutation":
                 self.site.api_writes += 1
             else:
                 self.site.api_reads += 1
@@ -271,6 +287,9 @@ class Site:
         self.api_reads = 0
         self.api_writes = 0
         self.redirect_hits = 0
+        self.self_discovery = False
+        self.introspection_disabled = False
+        self.introspection_reads = 0
         self.schema = build_schema((FIXTURES_DIRECTORY / "schema.graphql").read_text())
         self.openapi = json.loads((FIXTURES_DIRECTORY / "openapi.json").read_text())
 

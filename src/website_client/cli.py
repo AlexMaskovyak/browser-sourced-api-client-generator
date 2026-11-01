@@ -10,64 +10,223 @@ from .discovery import import_har, new_output, publish
 
 
 def main(args=None):
-    parser = argparse.ArgumentParser(prog="website-client", description="Discover website endpoints from a logged-in browser or existing HAR; generate Python clients from standard definitions.")
+    parser = argparse.ArgumentParser(
+        prog="website-client",
+        description="Discover website endpoints from a logged-in browser or existing HAR; generate Python clients from standard definitions.",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
-    login = commands.add_parser("login", help="Open a browser and sign in manually.",
+    login = commands.add_parser(
+        "login",
+        help="Open a browser and sign in manually.",
         description="Open a temporary browser, sign in and complete verification codes there, "
         "then press Enter in this terminal. The browser closes afterward. This does not save "
-        "a login or generate a client. Ctrl+C cancels.")
-    login.add_argument("--url", required=True, help="HTTPS address of the website to sign into.")
+        "a login or generate a client. Ctrl+C cancels.",
+    )
+    login.add_argument(
+        "--url", required=True, help="HTTPS address of the website to sign into."
+    )
     login.add_argument("--browser", choices=["chrome", "chromium"], default="chrome")
-    login.add_argument("--browser-path", help="Absolute path to an installed browser executable, if needed.")
-    discover = commands.add_parser("discover", help="Capture traffic after login, or analyze an existing HAR offline.",
+    login.add_argument(
+        "--browser-path",
+        help="Absolute path to an installed browser executable, if needed.",
+    )
+    discover = commands.add_parser(
+        "discover",
+        help="Find schemas or capture traffic after login, or import a HAR offline.",
         description="Save a sanitized HAR, endpoint evidence, GraphQL operations and inferred OpenAPI. "
-        "Actual observed OpenAPI and introspection responses are validated separately. No request is replayed.")
+        "Actual OpenAPI and introspection responses are validated separately. "
+        "Manual capture never replays traffic. --auto sends definition reads after login.",
+    )
     source = discover.add_mutually_exclusive_group(required=True)
-    source.add_argument("--url", help="HTTPS website to open for manual login, then capture.")
-    source.add_argument("--har", help="Existing HAR file to analyze offline, up to 32 MiB.")
-    discover.add_argument("--output", required=True, help="New output directory; its parent must exist.")
-    discover.add_argument("--max-entries", type=int, default=1000, help="Maximum retained requests, 1 to 10000 (default 1000).")
+    source.add_argument(
+        "--url", help="HTTPS website to open for manual login, then capture."
+    )
+    source.add_argument(
+        "--har", help="Existing HAR file to analyze offline, up to 32 MiB."
+    )
+    discover.add_argument(
+        "--output", required=True, help="New output directory; its parent must exist."
+    )
+    discover.add_argument(
+        "--max-entries",
+        type=int,
+        default=1000,
+        help="Maximum retained requests, 1 to 10000 (default 1000).",
+    )
     discover.add_argument("--browser", choices=["chrome", "chromium"])
     discover.add_argument("--browser-path")
-    generate_command = commands.add_parser("generate", help="Generate a standalone Python client from a standard definition.",
-        description="Use openapi-python-client for OpenAPI, or Ariadne Codegen for GraphQL schemas plus operation documents. Sends no API requests.")
+    discover.add_argument(
+        "--auto",
+        action="store_true",
+        help="After login, reload and find service definitions automatically. Sends schema GETs and read-only GraphQL introspection queries.",
+    )
+    discover.add_argument(
+        "--max-probes",
+        type=int,
+        help="Automatic discovery request limit, 1 to 30 (default 12).",
+    )
+    discover.add_argument(
+        "--observe-seconds",
+        type=int,
+        help="Observe traffic after reloading for 1 to 30 seconds (default 5).",
+    )
+    discover.add_argument(
+        "--graphql-endpoint",
+        action="append",
+        default=[],
+        help="Explicit HTTPS endpoint to introspect with --auto; repeat for multiple endpoints.",
+    )
+    generate_command = commands.add_parser(
+        "generate",
+        help="Generate a standalone Python client from a standard definition.",
+        description="Use openapi-python-client for OpenAPI, or Ariadne Codegen for GraphQL schemas plus operation documents. Sends no API requests.",
+    )
     definition = generate_command.add_mutually_exclusive_group(required=True)
-    definition.add_argument("--openapi", help="Local OpenAPI 3.0/3.1 JSON or YAML file with bundled references.")
-    definition.add_argument("--graphql-schema", help="Local GraphQL schema SDL or complete introspection JSON.")
-    generate_command.add_argument("--operations", help="GraphQL operation document, required with --graphql-schema.")
-    generate_command.add_argument("--output", required=True, help="New output directory for the standalone package.")
-    generate_command.add_argument("--name", default="service-client", help="Generated package and CLI name, lowercase with hyphens (default service-client).")
+    definition.add_argument(
+        "--openapi",
+        help="Local OpenAPI 3.0/3.1 JSON or YAML file with bundled references.",
+    )
+    definition.add_argument(
+        "--graphql-schema",
+        help="Local GraphQL schema SDL or complete introspection JSON.",
+    )
+    generate_command.add_argument(
+        "--operations",
+        help="GraphQL operation document, required with --graphql-schema.",
+    )
+    generate_command.add_argument(
+        "--output",
+        required=True,
+        help="New output directory for the standalone package.",
+    )
+    generate_command.add_argument(
+        "--name",
+        default="service-client",
+        help="Generated package and CLI name, lowercase with hyphens (default service-client).",
+    )
     options = parser.parse_args(args)
     try:
         if options.command == "generate":
             from .generation import generate
-            if options.openapi and options.operations: raise BrowserError("--operations is only used with --graphql-schema.")
-            report = generate(options.output, options.name, options.openapi, options.graphql_schema, options.operations)
+
+            if options.openapi and options.operations:
+                raise BrowserError("--operations is only used with --graphql-schema.")
+            report = generate(
+                options.output,
+                options.name,
+                options.openapi,
+                options.graphql_schema,
+                options.operations,
+            )
             print(json.dumps(report))
             return 0
         if options.command == "discover":
             output = new_output(options.output)
-            if not 1 <= options.max_entries <= 10000: raise BrowserError("--max-entries must be between 1 and 10000.")
+            automatic_report = None
+            if not 1 <= options.max_entries <= 10000:
+                raise BrowserError("--max-entries must be between 1 and 10000.")
+            if options.auto and options.har:
+                raise BrowserError("--auto requires --url; HAR import stays offline.")
+            if not options.auto and (
+                options.max_probes is not None
+                or options.observe_seconds is not None
+                or options.graphql_endpoint
+            ):
+                raise BrowserError("Probe and observation options require --auto.")
+            if options.auto:
+                from .self_discovery import (
+                    DEFAULT_MAX_PROBES,
+                    DEFAULT_OBSERVE_SECONDS,
+                    DiscoveryObserver,
+                    SelfDiscovery,
+                    validate_settings,
+                )
+
+                max_probes = (
+                    options.max_probes
+                    if options.max_probes is not None
+                    else DEFAULT_MAX_PROBES
+                )
+                observe_seconds = (
+                    options.observe_seconds
+                    if options.observe_seconds is not None
+                    else DEFAULT_OBSERVE_SECONDS
+                )
+                validate_settings(max_probes, observe_seconds, options.graphql_endpoint)
+                observer = DiscoveryObserver(options.url)
             if options.har:
-                if options.browser or options.browser_path: raise BrowserError("Browser options cannot be combined with --har.")
+                if options.browser or options.browser_path:
+                    raise BrowserError("Browser options cannot be combined with --har.")
                 result = import_har(options.har, options.max_entries)
             else:
                 origin(options.url)
-                if not sys.stdin.isatty(): raise BrowserError("Browser discovery requires an interactive terminal, without piped input.")
-                with BrowserSession(options.url, options.browser or "chrome", options.browser_path) as session:
-                    session.confirm_login(prompt="Log in and return to the requested website. Press Enter here to start capture. Ctrl+C cancels.")
-                    result = NetworkCapture(session, options.max_entries).run()
-            if not result.entries: raise BrowserError("No eligible requests were found. Reload and browse after capture starts, or check the HAR source.")
+                if not sys.stdin.isatty():
+                    raise BrowserError(
+                        "Browser discovery requires an interactive terminal, without piped input."
+                    )
+                with BrowserSession(
+                    options.url,
+                    options.browser or "chrome",
+                    options.browser_path,
+                    on_event=observer.event if options.auto else None,
+                ) as session:
+                    session.confirm_login(
+                        prompt="Log in and return to the requested website. Press Enter here to start "
+                        + ("discovery" if options.auto else "capture")
+                        + ". Ctrl+C cancels."
+                    )
+                    if options.auto:
+                        print(
+                            "Discovering service definitions. No captured business operation will be replayed.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        result, automatic_report = SelfDiscovery(
+                            session,
+                            observer,
+                            options.max_entries,
+                            max_probes,
+                            observe_seconds,
+                            options.graphql_endpoint,
+                        ).run()
+                    else:
+                        result = NetworkCapture(session, options.max_entries).run()
+            if not result.entries:
+                raise BrowserError(
+                    "No eligible requests were found. Reload and browse after capture starts, or check the HAR source."
+                )
             files = result.files("har" if options.har else "browser")
+            if automatic_report is not None:
+                files["self-discovery.json"] = (
+                    json.dumps(automatic_report, indent=2) + "\n"
+                )
             publish(output, files)
-            print(json.dumps({"harEntries": len(result.entries), "endpoints": len(result.endpoints), "omitted": result.omitted,
-                              "files": sorted(files), "liveVerified": False, "clientGenerated": False}))
+            print(
+                json.dumps(
+                    {
+                        "harEntries": len(result.entries),
+                        "endpoints": len(result.endpoints),
+                        "omitted": result.omitted,
+                        "files": sorted(files),
+                        "liveVerified": False,
+                        "clientGenerated": False,
+                    }
+                )
+            )
             return 0
         origin(options.url)
         if not sys.stdin.isatty():
-            raise BrowserError("Login requires an interactive terminal, without piped input.")
-        print("Opening a temporary browser. Enter credentials only into the website.", file=sys.stderr, flush=True)
-        with BrowserSession(options.url, options.browser, options.browser_path) as session:
+            raise BrowserError(
+                "Login requires an interactive terminal, without piped input."
+            )
+        print(
+            "Opening a temporary browser. Enter credentials only into the website.",
+            file=sys.stderr,
+            flush=True,
+        )
+        with BrowserSession(
+            options.url, options.browser, options.browser_path
+        ) as session:
             result = session.confirm_login()
         print(json.dumps({**result, "sessionClosed": True, "clientGenerated": False}))
         return 0
@@ -78,7 +237,10 @@ def main(args=None):
         print(str(error), file=sys.stderr)
         return 1
     except Exception:
-        print("Command failed. Check the inputs and use a new output directory before retrying.", file=sys.stderr)
+        print(
+            "Command failed. Check the inputs and use a new output directory before retrying.",
+            file=sys.stderr,
+        )
         return 1
 
 

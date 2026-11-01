@@ -1,5 +1,28 @@
 # Delivery plan
 
+## Automatic schema discovery (second PR)
+
+1. [x] Observe authenticated page reload traffic, inspect schema links and check a
+   bounded list of common definition paths. Introspect only observed GraphQL
+   endpoints or an explicitly supplied endpoint. Reuse the Playwright session.
+2. [x] Keep credentials transient and scoped by API origin. Only schema GETs and the
+   tool's own read-only introspection query are sent. Report every probe outcome,
+   limits and missing coverage. Preserve manual capture and offline HAR import.
+3. [x] Validate downloaded definitions with the existing standards validators and
+   use them with the existing client generators. Test scope, omissions, disabled
+   introspection and the installed end-to-end flow in Docker.
+
+Complete when an installed CLI can log in, discover real OpenAPI and GraphQL
+schemas without a second terminal confirmation, and generate working clients
+from them. This PR depends on the Playwright migration in PR #5.
+
+Verified: 84 Python tests pass locally and in Docker. All 17 installed-command
+container scenarios pass, including automatic OpenAPI/GraphQL discovery and
+disabled introspection. Both generated client formats use automatically discovered
+definitions and run in fresh runtime environments. Poetry lock validation and
+source/wheel builds pass. The fixture counts GraphQL writes from the parsed
+operation kind, so introspection's `mutationType` field cannot count as a write.
+
 ## Playwright migration (separate PR)
 
 1. [x] Replace the custom browser process and WebSocket protocol implementation with
