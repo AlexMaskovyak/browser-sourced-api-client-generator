@@ -5,7 +5,7 @@
 The browser discovers HTTP requests: addresses, methods, parameters, request and
 response shapes, and definitions served by the website. The common pipeline
 collects evidence, associates definitions with endpoints, validates them, then
-generates a standalone client. It does not require the website to use GraphQL.
+generates a standalone client.
 
 | API model | Discovery and definition | Client generator |
 | --- | --- | --- |
