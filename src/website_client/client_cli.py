@@ -423,6 +423,12 @@ def show_failure(error, state):
         print(message, file=sys.stderr)
     elif not state.started and type(error).__name__ == "BrowserError":
         print(str(error), file=sys.stderr)
+    elif not state.started:
+        print(
+            "Command setup failed before the endpoint method ran. "
+            "Check the generated package and dependencies.",
+            file=sys.stderr,
+        )
     else:
         print(
             "Endpoint call failed. A request may have succeeded; check the "

@@ -183,7 +183,7 @@ def compile_operations(sources: tuple[str, ...]) -> tuple[Operation, ...]:
                 if item.kind == "variable"
             }
             variables, names, parameters = [], set(), set()
-            for variable in definition.variable_definitions:
+            for variable in definition.variable_definitions or ():
                 name = variable.variable.name.value
                 if name in names:
                     raise ValueError("Duplicate GraphQL variable definition.")
