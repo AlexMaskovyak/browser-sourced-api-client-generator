@@ -1,6 +1,6 @@
 # Turn discovery results into a Python client
 
-Use this pipeline to discover a website once, save its API definitions, then
+Use this pipeline to discover a website once, save its requests and operation documents, then
 generate a client later without logging in again. It also accepts API definitions
 from another tool, so browser discovery can be one step in a larger build.
 
@@ -23,7 +23,7 @@ The commands are the same for both supported API models:
 | Website API | Definitions needed for generation |
 | --- | --- |
 | REST/HTTP | OpenAPI describing its routes, methods and inputs. Discovery can download a published definition or infer one from samples; inference needs review. |
-| GraphQL | A complete GraphQL schema and operation documents identifying the queries or mutations to generate. |
+| GraphQL | Named operation documents for the queries or mutations to generate. A complete schema is optional and enables stronger models and validation. |
 
 The manifest can hold both. Select the API you need at generation time. The
 tool does not currently generate from SOAP/WSDL, gRPC/protobuf or arbitrary custom
@@ -70,7 +70,8 @@ Replace example website addresses with the actual website before using discovery
    The terminal lists API IDs and status. In `normalized.json`, `services` contains
    each API's `endpoint`, `status` and `issues`. `ready` means its definitions are
    structurally usable, `review_required` means inferred OpenAPI needs review,
-   and `blocked` means definitions or operations are missing or invalid.
+   and `blocked` means callable operations or definitions are missing or invalid.
+   Missing GraphQL schemas do not block generation from bound operation documents.
 
 3. Create a standalone client from the only ready API:
 
@@ -115,8 +116,9 @@ read -r api_id
 poetry run website-client generate --manifest ./captures/walk/normalized.json --service "$api_id" --name selected-client --output ./clients/selected-client
 ```
 
-A blocked API cannot generate. Missing GraphQL schemas require a complete schema
-from the service or another tool; missing operations require operation documents.
+A blocked API cannot generate. Missing operations require captured or supplied
+operation documents. A schema is optional: without one, generation checks declared
+variables and returns JSON dictionaries rather than inventing server models.
 [Import or combine those inputs](#connect-a-different-producer), then normalize
 again using a new output filename. A form inventory alone cannot fill those gaps.
 
@@ -160,10 +162,10 @@ Browser discovery cannot accept piped stdin; offline HAR import accepts `--har -
 
 ## Connect a different producer
 
-If another tool emits OpenAPI, pipe its output to `import --openapi -`. GraphQL
-needs a complete schema, operation documents for the methods to generate, and the
-API's HTTPS endpoint. These inputs come from that tool or the service's API
-documentation, not from a form inventory.
+If another tool emits OpenAPI, pipe its output to `import --openapi -`. For
+GraphQL, supply operation documents and the API's HTTPS endpoint. An optional
+`--graphql-schema` supplies stronger validation and models. A form inventory alone
+is not an operation document or an executable request.
 
 This runnable offline example uses the repository's sample OpenAPI definition:
 
@@ -173,6 +175,26 @@ poetry run website-client import --openapi ./tests/fixtures/openapi.json --endpo
   poetry run website-client normalize --input - |
   poetry run website-client generate --manifest - --name sample-client --output ./clients/sample-client
 ```
+
+A schema-free GraphQL example uses the repository's operation documents:
+
+```sh
+set -o pipefail
+poetry run website-client import --operations ./tests/fixtures/operations.graphql --endpoint https://api.example.com/graphql |
+  poetry run website-client normalize --input - |
+  poetry run website-client generate --manifest - --name captured-client --output ./clients/captured-client
+```
+
+The result includes `GetItem` and `CreateItem` methods and CLI commands. Help lists
+GraphQL variable names, declared types, required values and optional omissions.
+Requests retain GET/POST and the `operationName` URL parameter when those were
+recorded in the capture; operation-only imports default to standard GraphQL POST.
+Each method sends its own operation and reachable fragments. Schema-free output
+reports `generationMode: operation-documents` and `schemaValidated: false`.
+Standard scalar, nullability and list constraints are checked, including the
+difference between omitting a variable and explicitly passing null. Unknown custom
+input types and response fields remain JSON, without invented validation rules.
+A complete schema added through import/merge uses the existing schema backend.
 
 Another tool can emit the manifest format directly. The independent
 [create_discovery_manifest.py](../examples/create_discovery_manifest.py) example

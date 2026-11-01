@@ -127,7 +127,7 @@ def test_merge_uses_timestamp_instant_instead_of_timezone_text_order():
 
 
 def test_producer_readiness_is_recomputed():
-    value = graphql_bundle(schema=False)
+    value = graphql_bundle(schema=False, operations=False)
     value["stage"] = "normalized"
     value["services"][0]["status"] = "ready"
     normalized = normalize_bundle(value)
@@ -436,7 +436,7 @@ def test_pipefail_reports_late_producer_failure_but_cannot_undo_generation(tmp_p
 
 
 def test_normalize_success_reports_blocked_apis_without_claiming_generation(tmp_path):
-    result = command(["normalize"], encoded(graphql_bundle(schema=False)))
+    result = command(["normalize"], encoded(graphql_bundle(schema=False, operations=False)))
     assert result.returncode == 0
     assert json.loads(result.stdout)["services"][0]["status"] == "blocked"
     assert not (tmp_path / "client").exists()

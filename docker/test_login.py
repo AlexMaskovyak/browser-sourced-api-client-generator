@@ -1,6 +1,6 @@
 """Verify installed commands against real terminal, browser and HTTPS behavior."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
@@ -23,6 +23,7 @@ LOGIN_SCENARIOS = ("success", "unfinished", "cancelled", "closed", "terminated")
 CLIENT_SCENARIOS = {
     "openapi": ("read", "write", "cancel", "redirect"),
     "graphql": ("read", "write", "closed"),
+    "operations": ("read", "write", "closed"),
 }
 
 
@@ -186,6 +187,20 @@ def verify_capture(site, root):
 def generate_and_install_client(kind, capture_output, root):
     """Build a wheel, then install only its declared runtime dependencies."""
     project = root / (kind + "-client")
+    if kind == "operations":
+        from website_client.discovery_manifest import read_manifest, write_manifest
+        from website_client.discovery_manifest.records import Kind, Protocol
+
+        captured = read_manifest(capture_output)
+        operations_only = replace(
+            captured,
+            services=tuple(replace(item, schema_artifact=None)
+                           for item in captured.services if item.protocol is Protocol.GRAPHQL),
+            artifacts=tuple(item for item in captured.artifacts
+                            if item.kind not in {Kind.GRAPHQL_SCHEMA, Kind.OPENAPI}),
+        )
+        capture_output = root / "operations-only-manifest.json"
+        write_manifest(operations_only, capture_output)
     name = "fixture-" + kind
     arguments = [
         shutil.which("website-client"),
@@ -210,11 +225,15 @@ def generate_and_install_client(kind, capture_output, root):
     target = next(
         item
         for item in bundle["services"]
-        if item["protocol"] == kind and item["status"] == "ready"
+        if item["protocol"] == ("graphql" if kind == "operations" else kind) and item["status"] == "ready"
     )
     arguments += ["--bundle", str(normalized), "--service", target["id"]]
     run_program(arguments)
     lineage = json.loads((project / "generation.json").read_text())["lineage"]
+    if kind == "operations":
+        report = json.loads((project / "generation.json").read_text())
+        assert report["generationMode"] == "operation-documents"
+        assert report["schemaValidated"] is False
     assert lineage["service"]["id"] == target["id"]
     assert lineage["sourceBundles"]
     run_program(

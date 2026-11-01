@@ -223,3 +223,65 @@ def test_aborted_navigation_keeps_intercepted_api_result(monkeypatch):
     )
     assert response.json() == {"id": 7}
     parent.target.close.assert_called_once()
+
+
+def test_explicit_shared_session_headers_are_retained_without_taking_ownership():
+    session = SimpleNamespace(_url="https://app.example.test", close=Mock())
+    transport = BrowserLoginTransport.for_session(
+        session,
+        "https://api.example.test/graphql",
+        "POST",
+        {"X-App-Context": "private-context"},
+    )
+    assert transport._headers == {"x-app-context": "private-context"}
+    transport.close()
+    session.close.assert_not_called()
+
+
+def test_shared_session_ignores_managed_headers_and_rejects_excess_headers():
+    session = SimpleNamespace(_url="https://app.example.test")
+    transport = BrowserLoginTransport.for_session(
+        session,
+        "https://api.example.test/graphql",
+        "POST",
+        {"Cookie": "private", "Sec-Fetch-Site": "same-site"},
+    )
+    assert transport._headers == {}
+    with pytest.raises(BrowserError):
+        BrowserLoginTransport.for_session(
+            session,
+            "https://api.example.test/graphql",
+            "POST",
+            {f"X-Header-{number}": "private" for number in range(40)},
+        )
+
+
+def test_selected_protocol_identification_headers_follow_the_scoped_request(
+    monkeypatch,
+):
+    transport, connection, _parent = prepare(monkeypatch)
+    transport._allowed_headers.update(
+        {"apollographql-client-name", "apollographql-client-version"}
+    )
+    transport._observe(
+        "Network.requestWillBeSent",
+        {
+            "documentURL": "https://example.test/home",
+            "request": {
+                "url": "https://example.test/graphql",
+                "headers": {
+                    "apollographql-client-name": "example-ui",
+                    "apollographql-client-version": "example-version",
+                },
+            },
+        },
+    )
+    transport.handle_request(httpx.Request("POST", "https://example.test/items"))
+    continued = next(
+        call.args[1]
+        for call in connection.call.call_args_list
+        if call.args[0] == "Fetch.continueRequest"
+    )
+    headers = {item["name"]: item["value"] for item in continued["headers"]}
+    assert headers["apollographql-client-name"] == "example-ui"
+    assert headers["apollographql-client-version"] == "example-version"

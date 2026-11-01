@@ -11,6 +11,7 @@ from .discovery_manifest.records import (
     Service, Source, SourceBundle, Stage, Status,
 )
 from .definitions import MAX_DOCUMENT, graphql_schema, openapi_document
+from .operation_contracts import compile_operations
 
 
 @dataclass(slots=True)
@@ -20,6 +21,10 @@ class ArtifactIndex:
     items: dict[str, Artifact]
 
     def derive(self, name: str, kind: Kind, content: str, parents: tuple[str, ...]) -> str:
+        """Add a canonical derived document and preserve its source references.
+
+        Reuse identical content, merge provenance and reject content collisions rather
+        than overwrite an existing document that happens to share an identifier."""
         item = Artifact.create(
             name, kind, content, Source.NORMALIZED, derived_from=parents
         )
@@ -40,6 +45,7 @@ class ArtifactIndex:
 
 
 def resolve_artifact(artifacts: ArtifactIndex, reference: str, kind: Kind) -> Artifact:
+    """Select exactly one document by ID or name and require its expected kind."""
     matches = [
         item for item in artifacts.items.values() if reference in {item.id, item.name}
     ]
@@ -51,6 +57,10 @@ def resolve_artifact(artifacts: ArtifactIndex, reference: str, kind: Kind) -> Ar
 def apply_bindings(
     targets: dict[str, Service], artifacts: ArtifactIndex, bindings, *, schema: bool
 ) -> None:
+    """Apply explicit service-to-document assignments to the working record index.
+
+    Schema replacement clears the old source-schema reference. Operation assignment
+    only extends GraphQL services and never duplicates an existing reference."""
     for binding in bindings:
         identifier, separator, reference = binding.partition("=")
         if not separator or identifier not in targets:
@@ -75,6 +85,10 @@ def apply_bindings(
 
 
 def combined_operations(items: tuple[Artifact, ...], schema_sdl: str):
+    """Combine named definitions and validate the result against a complete GraphQL schema.
+
+    Identical definitions deduplicate; same-name conflicting definitions fail. This
+    schema-backed path must not infer missing server types from request samples."""
     definitions = {}
     for item in items:
         if len(item.content.encode()) > MAX_DOCUMENT:
@@ -117,6 +131,7 @@ def combined_operations(items: tuple[Artifact, ...], schema_sdl: str):
 
 
 def normalize_openapi(target: Service, source: Artifact, artifacts: ArtifactIndex) -> Service:
+    """Canonicalize an OpenAPI definition and mark inferred definitions for review."""
     if target.operation_artifacts:
         raise BrowserError("OpenAPI services must not contain GraphQL operation documents.")
     spec = openapi_document(source.content)
@@ -141,6 +156,7 @@ def normalize_openapi(target: Service, source: Artifact, artifacts: ArtifactInde
 
 
 def normalize_graphql(target: Service, source: Artifact, artifacts: ArtifactIndex) -> Service:
+    """Canonicalize a full schema and compile its assigned operations into one document."""
     schema_sdl = graphql_schema(source.content)
     schema_id = artifacts.derive(
         "normalized-schema.graphql", Kind.GRAPHQL_SCHEMA, schema_sdl, (source.id,),
@@ -162,12 +178,29 @@ def normalize_graphql(target: Service, source: Artifact, artifacts: ArtifactInde
 
 
 def normalize_service(target: Service, artifacts: ArtifactIndex) -> Service:
+    """Recompute one service's readiness from its original source documents.
+
+    GraphQL operation documents can be ready without a schema. If a full schema is
+    provided, validate against it rather than silently falling back after errors.
+    Preserve failures as blocked-service issues so other services remain inspectable."""
     source_id = target.source_schema_artifact or target.schema_artifact
     target = replace(
         target, compiled_operations_artifact=None, status=Status.BLOCKED,
         issues=(), operation_names=(), source_schema_artifact=source_id,
     )
     if source_id is None:
+        if target.protocol is Protocol.GRAPHQL and target.operation_artifacts:
+            try:
+                documents = tuple(artifacts.items[ref] for ref in target.operation_artifacts)
+                if any(item.kind is not Kind.GRAPHQL_OPERATIONS for item in documents):
+                    raise ValueError("A GraphQL service references a non-operation artifact.")
+                operations = compile_operations(tuple(item.content for item in documents))
+                return replace(
+                    target, status=Status.READY,
+                    operation_names=tuple(item.name for item in operations),
+                )
+            except ValueError as error:
+                return replace(target, issues=(str(error),))
         return replace(target, issues=("Missing complete API schema.",))
     source = artifacts.items[source_id]
     expected = Kind.OPENAPI if target.protocol is Protocol.OPENAPI else Kind.GRAPHQL_SCHEMA
@@ -184,6 +217,7 @@ def normalize_service(target: Service, artifacts: ArtifactIndex) -> Service:
 
 
 def unassigned_documents(artifacts: ArtifactIndex, services: tuple[Service, ...]) -> tuple[str, ...]:
+    """List contract documents that no service uses, excluding already-used derivations."""
     used = set()
     for target in services:
         used.update(target.operation_artifacts)
@@ -203,6 +237,11 @@ def unassigned_documents(artifacts: ArtifactIndex, services: tuple[Service, ...]
 
 
 def normalize_manifest(manifest: Manifest, *, bind_schema=(), bind_operations=()) -> Manifest:
+    """Return a validated, normalized manifest without contacting the website.
+
+    Preserve original source hashes, apply explicit assignments, normalize each
+    service independently and report unused contracts. Readiness permits generation;
+    it does not establish live compatibility or complete website coverage."""
     if type(manifest) is not Manifest:
         raise BrowserError("Normalize requires a validated Manifest record.")
     sources = manifest.source_bundles
@@ -235,6 +274,10 @@ def normalize_bundle(value, *, bind_schema=(), bind_operations=()):
 
 
 def select_service(manifest: Manifest, identifier=None, *, allow_inferred=False) -> Service:
+    """Choose one ready service, requiring explicit permission for inferred HTTP definitions.
+
+    Ambiguous or blocked selections fail with available choices instead of selecting
+    an arbitrary API from a multi-service capture."""
     if type(manifest) is not Manifest:
         raise BrowserError("Selection requires a validated Manifest record.")
     targets = manifest.services
