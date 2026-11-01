@@ -122,6 +122,10 @@ class Discovery:
         self.endpoints = {}
         self.documents = {}
         self.definitions = {}
+        self.definition_sources = {}
+        self.document_sources = {}
+        self.document_declarations = {}
+        self.graphql_endpoints = set()
         self.omitted = 0
         self.failures = 0
         self.capture_failures = 0
@@ -146,6 +150,8 @@ class Discovery:
             graphql = operation(payload)
             graphql_unknown = not graphql and (isinstance(payload, dict) and "query" in payload
                 or isinstance(payload, list) and any(isinstance(item, dict) and "query" in item for item in payload))
+            if graphql or graphql_unknown:
+                self.graphql_endpoints.add(request["url"])
             content = response.get("content", {})
             raw = content.get("text", "")
             if content.get("encoding") == "base64" and isinstance(raw, str) and len(raw) <= MAX_BODY:
@@ -171,6 +177,7 @@ class Discovery:
             if graphql and graphql["document"]:
                 digest = hashlib.sha256(graphql["document"].encode()).hexdigest()
                 self.documents[digest] = graphql["document"]
+                self.document_sources.setdefault(digest, set()).add(request["url"])
             safe_url = base + quote(path, safe="/%-._~")
             if query_names: safe_url += "?" + urlencode([(key, "[REDACTED]") for key in query_names])
             request_version = str(request.get("httpVersion", ""))[:16]
@@ -194,16 +201,22 @@ class Discovery:
             self.entries.append({"startedDateTime": started, "time": duration,
                 "request": safe_request, "response": safe_response, "cache": {},
                 "timings": {"send": 0, "wait": duration, "receive": 0}, "_timingsEstimated": True, "_sanitized": True})
-            if 200 <= status < 300 and isinstance(body, dict): self._definition(body)
+            if 200 <= status < 300 and isinstance(body, dict): self._definition(body, request["url"])
             elif 200 <= status < 300 and body is None and isinstance(raw, str) and len(raw.encode()) <= MAX_BODY and ("graphql" in response_mime or urlsplit(request["url"]).path.endswith((".graphql", ".gql"))):
                 try:
                     text = graphql_schema(raw)
-                    self.definitions[("graphql-schema", hashlib.sha256(text.encode()).hexdigest())] = text
+                    self.record_definition("graphql-schema", text, request["url"])
                 except BrowserError: self.failures += 1
         except Exception:
             self.omitted += 1
 
-    def _definition(self, body):
+    def record_definition(self, kind, text, location=None):
+        key = (kind, hashlib.sha256(text.encode()).hexdigest())
+        self.definitions[key] = text
+        if location:
+            self.definition_sources.setdefault(key, set()).add(location)
+
+    def _definition(self, body, location=None):
         try:
             if "openapi" in body:
                 value = openapi_document(body)
@@ -211,8 +224,7 @@ class Discovery:
             elif "__schema" in body or isinstance(body.get("data"), dict) and "__schema" in body["data"]:
                 kind, text = "graphql-schema", graphql_schema(body)
             else: return
-            digest = hashlib.sha256(text.encode()).hexdigest()
-            self.definitions[(kind, digest)] = text
+            self.record_definition(kind, text, location)
         except BrowserError:
             self.failures += 1
 
@@ -262,9 +274,8 @@ class Discovery:
 
 def import_har(path, max_entries=1000):
     try:
-        path = Path(path)
-        if path.stat().st_size > MAX_HAR: raise ValueError()
-        document = json.loads(path.read_text())
+        from .discovery_manifest import read_text
+        document = json.loads(read_text(path, MAX_HAR))
         entries = document["log"]["entries"]
         if not isinstance(entries, list): raise ValueError()
     except Exception:

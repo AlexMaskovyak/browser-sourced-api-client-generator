@@ -8,7 +8,7 @@ from .discovery import Discovery, MAX_BODY
 
 
 class NetworkCapture:
-    def __init__(self, session, max_entries=1000):
+    def __init__(self, session, max_entries=1000, defer_bodies=False):
         self.session = session
         self.connection = session._connection
         self.discovery = Discovery(max_entries)
@@ -16,6 +16,7 @@ class NetworkCapture:
         self.finished = []
         self.body_failures = 0
         self.pending_bytes = 0
+        self.defer_bodies = defer_bodies
 
     def event(self, method, params):
         identifier = params.get("requestId")
@@ -53,7 +54,8 @@ class NetworkCapture:
             self.finished.append((identifier, params.get("timestamp", 0), method == "Network.loadingFailed"))
             # Read completed bodies before another navigation can evict them.
             # Playwright delivers this callback while servicing the browser.
-            self._consume_finished()
+            if not self.defer_bodies:
+                self._consume_finished()
 
     def drain(self):
         self.connection.pump()

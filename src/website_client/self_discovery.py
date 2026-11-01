@@ -1,6 +1,5 @@
 """Find service definitions with bounded reads in an authenticated browser."""
 
-import hashlib
 import json
 import re
 import time
@@ -167,19 +166,25 @@ class SelfDiscovery:
         max_probes=DEFAULT_MAX_PROBES,
         observe_seconds=DEFAULT_OBSERVE_SECONDS,
         graphql_endpoints=(),
+        explorer=None,
     ):
         validate_settings(max_probes, observe_seconds, graphql_endpoints)
         self.session = session
         self.observer = observer
-        self.capture = NetworkCapture(session, max_entries)
+        self.capture = NetworkCapture(
+            session, max_entries, defer_bodies=explorer is not None
+        )
         self.max_probes = max_probes
         self.observe_seconds = observe_seconds
         self.explicit_endpoints = list(graphql_endpoints)
         self.attempts = []
+        self.explorer = explorer
 
     def _event(self, method, params):
         self.observer.event(method, params)
         self.capture.event(method, params)
+        if self.explorer is not None:
+            self.explorer.event(method, params)
 
     def _candidates(self):
         candidates = [
@@ -200,7 +205,7 @@ class SelfDiscovery:
         ]
         return list(dict.fromkeys(candidates))
 
-    def _save_definition(self, response, kind):
+    def _save_definition(self, response, kind, endpoint=None):
         text = response.text
         if kind == "graphql":
             value = graphql_schema(text)
@@ -212,8 +217,9 @@ class SelfDiscovery:
             except BrowserError:
                 value = graphql_schema(text)
                 definition_kind = "graphql-schema"
-        digest = hashlib.sha256(value.encode()).hexdigest()
-        self.capture.discovery.definitions[(definition_kind, digest)] = value
+        self.capture.discovery.record_definition(definition_kind, value, endpoint)
+        if kind == "graphql" and endpoint:
+            self.capture.discovery.graphql_endpoints.add(endpoint)
         return definition_kind
 
     def _probe(self, kind, endpoint):
@@ -267,7 +273,9 @@ class SelfDiscovery:
                 attempt["outcome"] = "http_error"
             else:
                 try:
-                    attempt["definitionKind"] = self._save_definition(response, kind)
+                    attempt["definitionKind"] = self._save_definition(
+                        response, kind, endpoint
+                    )
                     attempt["outcome"] = "found"
                 except BrowserError:
                     attempt["outcome"] = (
@@ -294,12 +302,18 @@ class SelfDiscovery:
                     "maxPostDataSize": MAX_BODY,
                 },
             )
-            self.session._page.reload(wait_until="domcontentloaded", timeout=30_000)
-            deadline_seconds = time.monotonic() + self.observe_seconds
-            while time.monotonic() < deadline_seconds:
-                self.session._check()
-                self.capture.drain()
+            exploration = None
+            if self.explorer is not None:
+                exploration = self.explorer.run(self.capture, self.observer)
+            else:
+                self.session._page.reload(wait_until="domcontentloaded", timeout=30_000)
+                deadline_seconds = time.monotonic() + self.observe_seconds
+                while time.monotonic() < deadline_seconds:
+                    self.session._check()
+                    self.capture.drain()
             candidates = self._candidates()
+            if self.explorer is not None:
+                self.explorer.freeze()
             for kind, endpoint in candidates[: self.max_probes]:
                 self.session._check()
                 self._probe(kind, endpoint)
@@ -323,8 +337,12 @@ class SelfDiscovery:
                 "completeServiceCoverage": False,
                 "businessOperationsReplayed": False,
             }
+            if exploration is not None:
+                report["exploration"] = exploration
             return result, report
         finally:
-            connection.on_event = previous
+            if self.explorer is not None:
+                self.explorer.close()
+            self.session._connection.on_event = previous
             self.observer.discovering = False
             self.observer.clear()

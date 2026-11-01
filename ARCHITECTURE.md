@@ -1,97 +1,102 @@
-# Architecture
+# How the generator is built
 
-Poetry owns package metadata, dependency resolution, the committed `poetry.lock`,
-development dependency groups and builds. The project environment lives in
-`.venv/` and is ignored by Git. Docker installs the locked dependencies into a
-separate application environment and tests the wheel built by Poetry. Poetry's
-own bootstrap environment is separate from application dependencies.
+The tool collects a website's API definitions and turns them into a standalone
+Python client. For commands, start with the [README](README.md). This document
+explains where the work happens in the code.
 
-Python owns the command, discovery and generation. Playwright's Python API owns
-Chrome or Chromium startup, tabs, event delivery and shutdown. Its bundled Node
-driver is a runtime dependency; project code remains Python. Browser-native
-network capture and request interception use Playwright CDP sessions, its interface
-to Chrome DevTools Protocol. There is no project WebSocket implementation.
-Websites still run their own scripts normally in the browser.
+## Data flow
 
-The human owns sign-in and verification codes. The website owns account records
-and authentication. A temporary browser profile holds the live session. The
-browser-session context manager retains that session in memory for later discovery
-and generation; the initial login command closes it after terminal confirmation.
-User-confirmed readiness and basic page checks do not prove an authenticated API
-request. No credentials, headers, recordings or storage state are exported.
+```text
+Temporary browser session ─┐
+Existing HAR file ─────────┼─> discovery manifest JSON
+External API definitions ─┘             |
+                                   normalize
+                                       |
+                              select one API
+                                       |
+                                    generate
+                                       |
+                            standalone Python client
+```
 
-Discovery will own endpoint evidence and coverage. Generation will own standalone
-Python source and operation help. Service repositories own domain validation and
-multi-request workflows. Private orchestration owns real files and ledgers.
+The manifest is the saved handoff between discovery and generation. It contains
+complete definitions, supporting reports, endpoint associations and content hashes.
+Later steps can run from that file alone, without the browser or original capture
+directory. Its [format reference](docs/discovery-manifest-format.md) defines the
+versioned JSON contract.
 
-Login navigates the website but never replays discovered business operations.
-Production writes require explicit authorization. Generated clients must remain
-independent of the generator.
+## Components
 
-Failures expose bounded messages. Success, cancellation, termination and browser
-closure close owned connections and processes and remove the temporary profile.
-A fresh command requires a fresh login. Forced process termination can leave
-temporary browser files. Existing browser profiles and repositories are untouched.
+Paths below are relative to `src/website_client/`.
 
-Unit tests cover parsing and failure handling. Docker tests install the Python
-wheel, use a real terminal and headed Chromium, and complete a local HTTPS login
-with a verification code. They contain no production data and prove neither
-production compatibility nor endpoint completeness.
+| Component | Responsibility |
+| --- | --- |
+| `cli.py`, `pipeline.py` | Parse commands and connect discovery, import, normalization and generation. |
+| `browser.py` | Open a temporary browser through Playwright's Python API; close its session and profile. Playwright supplies the underlying browser driver. |
+| `capture.py`, `discovery.py` | Collect browser requests or import HAR traffic; extract routes, sample shapes and encountered definitions. |
+| `exploration.py`, `exploration_policy.py`, `contracts.py` | Walk pages and controls within explicit limits; classify requests and record declared forms and supported frontend operations. |
+| `self_discovery.py` | Look for published API definitions and request GraphQL schema introspection where applicable. |
+| `bundle_capture.py`, `discovery_manifest/` | Build the manifest; validate its version, hashes and references; read/write files and streams; combine producer inputs. |
+| `normalization.py`, `definitions.py` | Normalize validated, immutable dataclasses; check API definitions and assigned operations, preserve unresolved evidence, and calculate which APIs can generate. |
+| `generation.py`, `templates/` | Run the upstream code generators and package their output with endpoint commands and authentication support. |
+| `client_cli.py`, `session_http.py` | Supply the generated client's command interface and browser-authenticated HTTP transport. |
 
-## Discovery sources and definitions
+Project code is Python. Poetry manages dependencies and builds. Generated packages
+have their own dependencies and can run independently of this repository.
 
-Automatic discovery adds bounded schema reads after human login. The website is
-the source of complete definitions; captured shapes remain inferred evidence.
-Python owns candidate selection, credential scoping and probe reporting. A page
-reload observes the application's own traffic. Only same-origin schema links and
-common definition paths are fetched automatically. GraphQL introspection uses
-observed endpoints or the explicitly selected endpoint, never captured business
-operations. Redirects are blocked. Failure to obtain a schema remains unknown
-coverage, not evidence that the API has no other operations. Retry starts a fresh
-command and output directory; the existing output is never replaced.
+`discovery_manifest/records.py` supplies immutable dataclasses throughout capture,
+import, merging, normalization and generation. JSON is parsed or serialized at
+input/output; standard OpenAPI and HAR documents keep their native formats.
+Construction and replacement check field types and schema rules. Document hashes
+and manifest references are also validated. Nested collections are tuples;
+changes create new records rather than mutating producer data.
 
-Browser capture starts after login confirmation. Python receives native network
-events from the owned tab, including requests initiated by that page to API origins.
-An existing HAR is a second, offline source feeding the same analysis. Neither
-source replays captured requests. Request headers, cookies and raw payload values
-are removed before durable output. Captured GraphQL documents exclude literal
-values and comments; variables are not exported. Bounds and omissions are reported.
+## HTTP discovery and supported API definitions
 
-The outputs distinguish a sanitized HAR, endpoint evidence, GraphQL operation
-documents, inferred OpenAPI, and actual downloaded schemas. Inferred OpenAPI
-describes only observed routes, methods and sample shapes. It is not a complete
-service specification. GraphQL operation documents are not a full GraphQL schema.
-Actual introspection data is validated and converted to schema definition language.
-Actual OpenAPI documents are validated separately. External references require
-bundling before generation rather than implicit network resolution.
+| API | Generation input | Upstream generator |
+| --- | --- | --- |
+| REST/HTTP | Published OpenAPI 3.0/3.1, or inferred OpenAPI accepted after review. | `openapi-python-client` |
+| GraphQL | Complete schema plus the query/mutation documents to generate. | Ariadne Codegen |
 
-Standalone Python source generation delegates to openapi-python-client for OpenAPI
-and Ariadne Codegen for GraphQL schemas plus operation documents. Service workflows
-remain outside these generated layers. Inputs and output directories are bounded
-and validated before generation; no credentials are embedded in generated clients.
+Both use the same manifest and commands. Other contract formats need additional
+readers and generators. Observed routes and form fields alone may be insufficient
+to generate a usable client.
 
-## Generated client authentication
+During automatic exploration, request checks permit ordinary GET/HEAD, OPTIONS
+and recognized GraphQL queries, subject to navigation and action checks. Unknown
+POSTs and write methods are blocked; forms are inventoried without submission.
+Consequently a REST search using POST can be missed. OpenAPI does not currently
+control request authorization. This policy belongs to `exploration_policy.py`.
 
-Generated packages include their own Python browser support and Playwright
-dependency. An operation's --login option opens a fresh browser, waits for manual
-sign-in and verification codes, and then calls the upstream typed method. A custom
-login URL handles services whose application and API use different origins.
+## Authentication and service changes
 
-An HTTPX transport sends that method's exact request through a separate tab
-in the same native browser. Playwright creates and closes the tab. Request interception supplies its method and
-body. Response interception reads the bytes and stops navigation before response
-scripts run. Redirects are returned without following them. Only the chosen API
-origin and operation method are permitted, and each transport sends one request.
+The website remains authoritative for authentication and business records. A
+human signs in through the temporary browser. Credentials remain in that browser
+or process memory; discovery exports sanitized evidence, not a reusable login.
 
-Browser cookies stay in the browser. Observed authorization and CSRF headers are
-kept transiently for the exact API origin. Additional session-header names can be
-explicitly selected; their values are read from that session, not copied by the
-user. No authentication state enters generated source, HAR files or command output.
-Failure and cancellation close owned targets, browser processes and profiles.
+Discovery and client execution are separate sessions. A generated client's
+`--login` operation opens a fresh browser. Its HTTPX adapter sends the typed
+method's request through that session, scoped to the selected API origin and
+method. Writes require explicit command confirmation. Redirects are not followed
+and failed requests are not retried automatically.
 
-The adapter for CDP sessions retains only the network events needed by capture
-and request policy. It does not implement WebSocket framing or response matching.
-Completed response bodies are read during their completion callback so a later
-navigation cannot discard them before the next terminal poll. Production uses
-Playwright's private control pipe. Only the container test wrapper exposes a
-loopback debugging port for a second Playwright instance to act as the human.
+## Failure and recovery
+
+A valid manifest can contain blocked APIs. Normalization records their issues;
+generation revalidates and requires one selected, usable API. Conflicting inputs
+are rejected or leave that API blocked rather than silently choosing a contract.
+
+Commands preserve existing output. On failure, inspect any newly created partial
+output and retry with a new path. Browser cleanup runs on normal exit and
+cancellation; forced termination can leave temporary profile files. For an
+uncertain service write, check the service before retrying.
+
+The shell sequences commands. Pipes carry complete JSON documents, so an upstream
+failure after emitting valid JSON cannot undo downstream generation. Use staged
+files and `&&` when each command must succeed before the next starts. Runnable
+examples and recovery steps belong in the [pipeline guide](docs/discovery-pipeline.md).
+
+Unit tests exercise parsing and policies. Docker installs the built wheel and
+checks browser login, discovery, command chaining and both generated client types
+against a local HTTPS fixture. Compatibility with a real service requires its
+own verification.

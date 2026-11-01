@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlsplit, urlencode
 import uuid
 
 from graphql import build_schema, graphql_sync, get_operation_ast, parse
+from exploration_site import response as exploration_response
 
 # The fixture accepts only small login forms and example JSON requests.
 MAX_FIXTURE_REQUEST_BODY_BYTES = 4 * 1024
@@ -177,6 +178,19 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         target = urlsplit(self.path)
+        if self.authenticated and self.site.exploration:
+            if target.path == "/logout":
+                self.site.logout_hits += 1
+            if target.path == "/outside":
+                self.redirect("https://outside.invalid/exit")
+                return
+            content = exploration_response(self.path)
+            if content:
+                self.send_response(200)
+                self.send_header("Content-Type", content[0])
+                self.end_headers()
+                self.wfile.write(content[1].encode())
+                return
         if target.path == "/redirect-target":
             self.site.redirect_hits += 1
             self.send_error(500)
@@ -290,6 +304,8 @@ class Site:
         self.self_discovery = False
         self.introspection_disabled = False
         self.introspection_reads = 0
+        self.exploration = False
+        self.logout_hits = 0
         self.schema = build_schema((FIXTURES_DIRECTORY / "schema.graphql").read_text())
         self.openapi = json.loads((FIXTURES_DIRECTORY / "openapi.json").read_text())
 
