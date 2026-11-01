@@ -419,7 +419,11 @@ Chromium with `--browser chromium`, or supply an installed executable with
 Cookies stay in the native browser. Authorization and common CSRF headers observed
 for the selected API origin are held in memory. If the application uses another
 session header, add `--session-header HEADER_NAME` and visit the relevant page
-before pressing Enter; the value is observed from that session. No token copying
+before pressing Enter; the value is observed from that session. Repeat the flag
+for each required header. For example, an Apollo GraphQL application may require
+both `--session-header apollographql-client-name` and
+`--session-header apollographql-client-version`. These are header names, not values.
+The generator does not currently infer required custom headers from a capture. No token copying
 or browser debugging setup is required.
 
 Inputs and write confirmation are checked before opening the browser. For a write,
