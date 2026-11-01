@@ -2,11 +2,16 @@
 
 ## PR 7 API coverage clarification
 
-1. Explain general HTTP discovery before format-specific handling. Document the
+1. [x] Explain general HTTP discovery before format-specific handling. Document the
    REST/OpenAPI and GraphQL paths, current adapters and unknown-POST limitations.
-2. Align the architecture, README and pipeline guide with the implemented capture,
+2. [x] Align the architecture, README and pipeline guide with the implemented capture,
    request policy and generation backends. Check documentation links and the diff,
    then commit and push the clarification to PR 7 without changing runtime policy.
+
+Checked the descriptions against HTTP capture, exploration request classification,
+definition readers and generation backends. Documentation links, section anchors
+and whitespace checks pass. This clarification changes documentation only; it
+does not extend supported formats or alter permitted exploration requests.
 
 ## Command walkthrough
 
