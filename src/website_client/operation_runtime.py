@@ -20,6 +20,14 @@ from .operation_contracts import (
 UNSET = object()
 
 
+class OperationError(RuntimeError):
+    """Safe diagnostics without server messages, bodies or credential values."""
+
+    def __init__(self, message, *, http_status=None):
+        super().__init__(message)
+        self.http_status = http_status
+
+
 @dataclass(frozen=True, slots=True)
 class BoundOperation:
     operation: Operation
@@ -126,8 +134,9 @@ class OperationClient:
             options["json"] = payload
         with self.http_client.stream(bound.method, url, **options) as response:
             if not 200 <= response.status_code < 300:
-                raise RuntimeError(
-                    "Endpoint returned a non-success status; no automatic retry occurred."
+                raise OperationError(
+                    "Endpoint returned a non-success status; no automatic retry occurred.",
+                    http_status=response.status_code,
                 )
             chunks, size = [], 0
             for chunk in response.iter_bytes():
