@@ -75,7 +75,7 @@ def main(args=None):
         "--graphql-endpoint",
         action="append",
         default=[],
-        help="Explicit HTTPS endpoint to introspect with --auto; repeat for multiple endpoints.",
+        help="Explicit HTTPS endpoint to introspect with --auto. One endpoint also assigns unexecuted frontend operation declarations to that API; multiple endpoints leave declarations unassigned.",
     )
     discover.add_argument(
         "--explore",

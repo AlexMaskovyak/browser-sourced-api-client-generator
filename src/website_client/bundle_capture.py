@@ -89,7 +89,16 @@ def capture_manifest(discovery, files) -> Manifest:
         elif kind is Kind.GRAPHQL_SCHEMA:
             gql_schemas.append((item, sources))
         elif kind is Kind.GRAPHQL_OPERATIONS and name != "operations.graphql":
-            operations.append((item, sources))
+            # The explicit CLI endpoint assigns frontend declarations without
+            # pretending that a write has been observed or verified. Multiple
+            # API endpoints remain ambiguous and require normal assignment.
+            assigned = list(sources)
+            declared_endpoint = discovery.declared_graphql_endpoint
+            if not assigned and declarations and declared_endpoint:
+                assigned = locations([declared_endpoint])
+                if assigned[0] not in gql_endpoints:
+                    gql_endpoints.append(assigned[0])
+            operations.append((item, assigned))
     for endpoint in gql_endpoints:
         schemas = [item for item, sources in gql_schemas if endpoint in sources]
         if not schemas:
