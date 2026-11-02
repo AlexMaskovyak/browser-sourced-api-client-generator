@@ -506,7 +506,9 @@ poetry run website-client build \
 
 This example requires your own capture at `./capture/manifest.json` and the actual
 website login URL. Repeat `--manifest` to merge inputs automatically. Use `--service`
-when the inputs contain multiple APIs. An inferred HTTP definition requires review
+when the inputs contain multiple APIs. Add `--require-operation OPERATION_NAME`
+for each operation the client must contain; a missing operation prevents publication.
+These requirements are retained in `client-project.json`. An inferred HTTP definition requires review
 and explicit `--allow-inferred`; the project file preserves that permission for
 rebuilds. Add `--session-header HEADER_NAME` for each
 additional header required by the website, never its value. These settings become
@@ -531,7 +533,8 @@ poetry run website-client build \
 Both output directories must be new, with existing parent directories. A saved
 project resolves paths relative to its own file and refuses command-line setting
 overrides. It contains `name`, `manifests`, `loginUrl`, `sessionHeaders`, optional
-`service`, optional `lockfile` and boolean `allowInferred` (default false). Unknown fields, including credential fields,
+`service`, optional `lockfile`, boolean `allowInferred` (default false), and
+`requiredOperations` (default empty). Unknown fields, including credential fields,
 are rejected. Its shipped input manifest retains only the selected API definition
 and required operation documents or HTTP conventions. Original capture reports and private source
 locations are excluded. Review operation documents before publishing any client;
