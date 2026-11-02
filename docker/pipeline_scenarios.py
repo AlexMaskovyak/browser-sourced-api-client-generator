@@ -125,7 +125,7 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
         command.connect()
         complete_login(command, site)
         os.write(command.terminal, b"\n")
-        assert command.wait() == 0, command.output
+        assert command.wait(timeout_seconds=60) == 0, command.output
         command.cleanup_verified()
         assert_no_credentials(command.output, site)
         report = json.loads((output / "generation.json").read_text())
@@ -274,3 +274,148 @@ def verify_complete_project(root, kind="operations"):
         + "): untouched install, generated tests and byte-identical rebuild",
         flush=True,
     )
+
+
+def verify_page_record_discovery(site, root, complete_login, assert_no_credentials):
+    """A delayed listing on the starting page must reach the generated client's output."""
+    from graphql import build_schema, print_schema
+    from website_client.discovery_manifest import read_manifest
+    from website_client.discovery_manifest.records import Protocol
+
+    schema, disabled = site.schema, site.introspection_disabled
+    site.schema = build_schema(
+        print_schema(schema)
+        + "\nextend type Query { records(first: Int, includeDetails: Boolean, search: String): RecordConnection! }\ntype RecordConnection { nodes: [Record!]! pageInfo: RecordPageInfo! }\ntype Record { id: ID! status: String! }\ntype RecordPageInfo { endCursor: String hasNextPage: Boolean! }"
+    )
+    site.page_records = True
+    site.introspection_disabled = True
+    output = root / "page-record-discovery"
+    command = Command(
+        site,
+        args=[
+            "discover",
+            "--url",
+            site.url,
+            "--explore",
+            "--max-pages",
+            "1",
+            "--max-actions",
+            "1",
+            "--max-depth",
+            "0",
+            "--explore-seconds",
+            "15",
+            "--max-probes",
+            "1",
+            "--output",
+            str(output),
+            "--browser",
+            "chromium",
+            "--browser-path",
+            "/work/docker/test-chromium.sh",
+        ],
+    )
+    before = site.api_writes
+    try:
+        eventually(command.ready)
+        command.connect()
+        complete_login(command, site)
+        command.connection.call(
+            "Runtime.evaluate",
+            {"expression": "sessionStorage.setItem('record-scope','selected')"},
+        )
+        os.write(command.terminal, b"\n")
+        assert command.wait(timeout_seconds=60) == 0, command.output
+        command.cleanup_verified()
+        command.driver.stop()
+        command.driver = None
+        manifest = read_manifest(output / "manifest.json")
+        target = next(
+            item for item in manifest.services if item.protocol is Protocol.GRAPHQL
+        )
+        documents = [
+            item for item in manifest.artifacts if item.id in target.operation_artifacts
+        ]
+        assert any("query ListRecords" in item.content for item in documents)
+        report = json.loads((output / "self-discovery.json").read_text())["exploration"]
+        assert any(
+            "localhost" in item["url"] and item.get("sourceInspected")
+            for item in report["frontendModules"]
+        )
+        project = root / "page-record-client"
+        subprocess.run(
+            [
+                "website-client",
+                "build",
+                "--manifest",
+                str(output / "manifest.json"),
+                "--service",
+                target.id,
+                "--name",
+                "page-record-client",
+                "--login-url",
+                site.url,
+                "--output",
+                str(project),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["poetry", "--directory", str(project), "build", "--format", "wheel"],
+            check=True,
+            capture_output=True,
+        )
+        env = root / "page-record-env"
+        subprocess.run([sys.executable, "-m", "venv", str(env)], check=True)
+        subprocess.run(
+            [
+                str(env / "bin/python"),
+                "-m",
+                "pip",
+                "install",
+                "--no-index",
+                "--find-links",
+                "/opt/client-wheels",
+                str(next((project / "dist").glob("*.whl"))),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        result = root / "page-record-result.json"
+        call = Command(
+            site,
+            executable=str(env / "bin/page-record-client"),
+            args=[
+                "ListRecords",
+                "--login",
+                "--output",
+                str(result),
+                "--browser",
+                "chromium",
+                "--browser-path",
+                "/work/docker/test-chromium.sh",
+            ],
+        )
+        try:
+            eventually(call.ready)
+            call.connect()
+            complete_login(call, site)
+            os.write(call.terminal, b"\n")
+            assert call.wait() == 0, call.output
+            call.cleanup_verified()
+            records = json.loads(result.read_text())["records"]["nodes"]
+            assert records == [{"id": "record-7", "status": "SUBMITTED"}]
+            assert_no_credentials(call.output, site)
+        finally:
+            call.stop()
+        assert site.api_writes == before
+        print(
+            "PASS page discovery: delayed asset-origin listing through independently generated client",
+            flush=True,
+        )
+    finally:
+        command.stop()
+        site.page_records = False
+        site.introspection_disabled = disabled
+        site.schema = schema

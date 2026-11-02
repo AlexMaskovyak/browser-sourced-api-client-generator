@@ -132,3 +132,22 @@ login defaults. Credential values are observed during future login, never stored
 in the project file. Rebuild inputs preserve operation/request contracts rather
 than unrelated capture context. No service-specific packaging or post-build
 source edits are required.
+
+## First-page data discovery
+
+`SiteExplorer` retains the authenticated tab so tab-scoped state survives setup.
+It resets script execution, waits for hydration and request activity, and exercises
+empty read-only search controls before global navigation. This exposes requests
+for lists whose initial rows were embedded in HTML. Source inspection includes
+HTML and scripts actually loaded for the owned page across asset origins; unrelated
+scripts remain excluded. Per-source, aggregate and source-count limits are fixed.
+
+`Discovery` preserves typed Boolean defaults and bounded pagination literals while
+withholding opaque data literals. Withheld documents carry an explicit reason.
+Captured request/response evidence, rather than a declared frontend operation alone,
+assigns a document to its API endpoint. Client generation remains a separate stage.
+
+The page-data container scenario starts with rendered records, a tab-scoped view
+selection and a script on an asset origin. Only exercising search produces the
+list request. The test generates and independently installs a client from that
+capture, calls the generated list method and checks the returned record/status.
