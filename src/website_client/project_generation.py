@@ -368,6 +368,42 @@ def project_readme(project, endpoint, metadata, stage, package):
             "Python calls use the backend's generated API; CLI write confirmation "
             "does not impose a separate write-permission switch on those Python calls."
         )
+    upload_examples = [name for name, item in metadata.items() if item.get("fileUpload")]
+    upload_section = ""
+    if upload_examples:
+        upload_name = upload_examples[0]
+        workflow = metadata[upload_name]["fileUpload"]
+        upload_section = f"""
+## Submit with a file
+
+The `{upload_name}` command supports `{workflow['protocol']}`. Prepare its original
+JSON input using the command's help and the application's actual fields. Omit
+`{workflow['inputVariable']}.{workflow['attachmentField']}`: the upload supplies it.
+A server schema is needed to validate fields inside a custom input object.
+
+The following examples assume `input.json` contains that verified input and
+`receipt.pdf` is your existing local file. Replace those paths as needed.
+Preview validates the file and prints its hash, variables and target endpoints;
+it sends no requests and needs no login or write confirmation:
+
+```sh
+poetry run {project.name} {upload_name} --input input.json --receipt receipt.pdf --preview
+```
+
+After reviewing the preview, this command uploads the file and changes remote data:
+
+```sh
+poetry run {project.name} {upload_name} --input input.json --receipt receipt.pdf --login --confirm-write {upload_name}
+```
+
+One login covers all three stages. Python callers use
+`Client.{metadata[upload_name]['method']}_with_file(receipt_path=..., metadata_client=..., **arguments)`
+with `allow_writes=True`; supply an application-authenticated metadata client when
+its origin differs from the API. Storage stays credential-free. No stage retries.
+A failed creation can leave an unattached file. Check the application after an
+uncertain result before submitting again. File contracts are inferred source
+evidence; they do not prove live service acceptance or reimbursement.
+"""
     return f"""# {project.name}
 
 Python methods and CLI commands generated from {len(metadata)} API operations.
@@ -441,6 +477,7 @@ existing project. Reuse the same generator revision and lock for reproducibility
 The service remains authoritative for its records. Generation and
 synthetic tests do not verify submissions or payment. HTTP failures report status
 without response bodies. Authentication stays in browser/process memory.
+{upload_section}
 """
 
 
