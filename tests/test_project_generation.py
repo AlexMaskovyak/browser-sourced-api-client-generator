@@ -332,3 +332,33 @@ def test_schema_cli_uses_defaults_and_real_backend_request_builder(
         assert requests[0].url.path == "/items/7"
     else:
         assert json.loads(requests[0].content)["variables"] == {"id": "7"}
+
+
+def test_missing_required_operation_does_not_publish_startup_only_client(tmp_path):
+    manifest = source(tmp_path)
+    with pytest.raises(
+        BrowserError, match="Required operations were not discovered: Expenses"
+    ):
+        build_project(
+            Project(
+                "required-client",
+                (manifest,),
+                "https://app.example.test",
+                required_operations=("Expenses",),
+            ),
+            tmp_path / "missing",
+        )
+    assert not (tmp_path / "missing").exists()
+    output = tmp_path / "complete"
+    build_project(
+        Project(
+            "required-client",
+            (manifest,),
+            "https://app.example.test",
+            required_operations=("Options",),
+        ),
+        output,
+    )
+    assert Project.read(output / "client-project.json").required_operations == (
+        "Options",
+    )

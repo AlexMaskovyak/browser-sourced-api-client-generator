@@ -8,6 +8,7 @@ inputs and are deliberately absent from the project format.
 from dataclasses import dataclass
 import ast
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -52,11 +53,20 @@ class Project:
     service: str | None = None
     lockfile: Path | None = None
     allow_inferred: bool = False
+    required_operations: tuple[str, ...] = ()
 
     def __post_init__(self):
         """Reject invalid names, unbounded input lists and unsafe header selections."""
         if type(self.allow_inferred) is not bool:
             raise BrowserError("Project allowInferred must be a boolean.")
+        if len(self.required_operations) > 100 or any(
+            not isinstance(name, str)
+            or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", name)
+            for name in self.required_operations
+        ):
+            raise BrowserError(
+                "Required operations must be at most 100 operation names."
+            )
         package_name_for(self.name)
         origin(self.login_url)
         if not self.manifests or len(self.manifests) > 20:
@@ -80,6 +90,7 @@ class Project:
             "service",
             "lockfile",
             "allowInferred",
+            "requiredOperations",
         }
         if (
             not isinstance(value, dict)
@@ -102,6 +113,9 @@ class Project:
             not isinstance(item, str) for item in headers
         ):
             raise BrowserError("Project sessionHeaders must contain header names only.")
+        required = value.get("requiredOperations", [])
+        if not isinstance(required, list):
+            raise BrowserError("Project requiredOperations must be a list of names.")
         for key in ("service", "lockfile"):
             if value.get(key) is not None and not isinstance(value[key], str):
                 raise BrowserError(
@@ -115,6 +129,7 @@ class Project:
             value.get("service"),
             path.parent / value["lockfile"] if value.get("lockfile") else None,
             value.get("allowInferred", False),
+            tuple(required),
         )
 
 
@@ -136,6 +151,12 @@ def add_build_command(commands):
     )
     command.add_argument(
         "--output", required=True, help="New directory; existing output is refused."
+    )
+    command.add_argument(
+        "--require-operation",
+        action="append",
+        default=[],
+        help="Required operation name; repeat to reject incomplete discovery before publication.",
     )
     command.add_argument("--name", help="Package and CLI name when using --manifest.")
     command.add_argument(
@@ -171,6 +192,7 @@ def project_from_options(options):
             or options.session_header
             or options.lockfile
             or options.allow_inferred
+            or options.require_operation
         ):
             raise BrowserError(
                 "Do not override project settings; edit the project file and rebuild."
@@ -186,6 +208,7 @@ def project_from_options(options):
         options.service,
         Path(options.lockfile).resolve() if options.lockfile else None,
         options.allow_inferred,
+        tuple(options.require_operation),
     )
 
 
@@ -303,7 +326,8 @@ def project_readme(project, endpoint, metadata, stage, package):
     available = {
         name: required_inputs(stage, package, item) for name, item in metadata.items()
     }
-    reads = [name for name, item in metadata.items() if not item["write"]]
+    preferred = project.required_operations or tuple(metadata)
+    reads = [name for name in preferred if not metadata[name]["write"]]
     ready = [name for name in reads if not available[name]]
     example = (ready or reads or list(metadata))[0]
     if ready:
@@ -429,6 +453,13 @@ def build_project(project, output):
             manifest_path, stage, project.name, target.id, project.allow_inferred
         )
         metadata = json.loads((stage / package / "_operations.json").read_text())
+        missing = sorted(set(project.required_operations) - metadata.keys())
+        if missing:
+            raise BrowserError(
+                "Required operations were not discovered: "
+                + ", ".join(missing)
+                + ". No client was published."
+            )
         defaults = {
             "url": target.endpoint,
             "loginUrl": project.login_url,
@@ -466,6 +497,7 @@ def build_project(project, output):
             "service": None,
             "lockfile": "poetry.lock" if project.lockfile else None,
             "allowInferred": project.allow_inferred,
+            "requiredOperations": list(project.required_operations),
         }
         write_json(stage / "client-project.json", recipe)
         (stage / "tests").mkdir()
