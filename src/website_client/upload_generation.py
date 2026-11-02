@@ -41,6 +41,8 @@ def install_file_methods(stage, package, metadata, manifest, endpoint):
         variables = operation["variables"]
         if workflow.inputVariable not in {item["parameter"] for item in variables}:
             raise BrowserError("Upload input variable is missing from the mutation.")
+        if workflow.inputVariable in {"receipt_path", "metadata_client", "storage_client"}:
+            raise BrowserError("Upload input variable conflicts with file-helper arguments.")
         method = operation["method"] + "_with_file"
         if method in {item["method"] for item in metadata.values()}:
             raise BrowserError("A file-upload method conflicts with an existing generated method.")

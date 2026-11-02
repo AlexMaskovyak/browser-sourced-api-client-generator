@@ -141,7 +141,9 @@ def submit_with_file(client, operation, arguments, workflow, receipt, *, metadat
         # GraphQL top-level errors are handled by the generated operation runtime;
         # ordinary payload validation errors must also not look like success.
         if isinstance(result, dict) and any(isinstance(value, dict) and value.get("errors") for value in result.values()):
-            raise FileWriteError(stage, "rejected", uploaded=True)
+            # A generic payload error does not prove transaction rollback.
+            # Treat it as uncertain even when the service reports validation errors.
+            raise FileWriteError(stage, "unknown", uploaded=True)
         return result
     except FileWriteError:
         raise

@@ -39,6 +39,7 @@ class UploadWorkflow:
     maxBytes: int = MAX_FILE_BYTES
 
     def __post_init__(self):
+        """Validate endpoints, identifiers, protocol bounds and source hashes."""
         for name in (self.operation, self.inputVariable, self.attachmentField):
             if not isinstance(name, str) or not IDENTIFIER.fullmatch(name):
                 raise ValueError("Invalid upload workflow identifier.")
