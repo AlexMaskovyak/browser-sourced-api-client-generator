@@ -253,3 +253,102 @@ def test_exploration_cli_validation_precedes_login(monkeypatch, tmp_path, argume
     monkeypatch.setattr("website_client.cli.BrowserSession", factory)
     assert main(["discover", "--output", str(tmp_path / "new"), *arguments]) == 1
     factory.assert_not_called()
+
+
+def test_frontend_inspects_scripts_loaded_from_asset_origins_for_owned_page():
+    connection = Mock()
+    connection.call.return_value = {
+        "body": 'const document={query: "query Expenses($first:Int) { expenses(first:$first) { id status } }"};'
+    }
+    discovery = Discovery()
+    frontend = FrontendContracts(connection, discovery, ("example.test", 443))
+    frontend.event(
+        "Network.requestWillBeSent",
+        {
+            "requestId": "asset",
+            "type": "Script",
+            "documentURL": "https://example.test/expenses",
+            "request": {"url": "https://assets.example.net/expenses.js"},
+        },
+    )
+    frontend.event(
+        "Network.responseReceived",
+        {
+            "requestId": "asset",
+            "type": "Script",
+            "response": {"url": "https://assets.example.net/expenses.js"},
+        },
+    )
+    frontend.event("Network.loadingFinished", {"requestId": "asset"})
+    frontend.drain()
+    assert frontend.modules[0]["sourceInspected"] is True
+    assert frontend.modules[0]["operations"][0]["name"] == "Expenses"
+    assert discovery.documents
+
+
+def test_unowned_cross_origin_scripts_are_not_inspected():
+    connection = Mock()
+    frontend = FrontendContracts(connection, Discovery(), ("example.test", 443))
+    frontend.event(
+        "Network.requestWillBeSent",
+        {
+            "requestId": "other",
+            "type": "Script",
+            "documentURL": "https://other.test/app",
+            "request": {"url": "https://assets.example.net/other.js"},
+        },
+    )
+    frontend.event(
+        "Network.responseReceived",
+        {
+            "requestId": "other",
+            "type": "Script",
+            "response": {"url": "https://assets.example.net/other.js"},
+        },
+    )
+    frontend.event("Network.loadingFinished", {"requestId": "other"})
+    frontend.drain()
+    connection.call.assert_not_called()
+    assert not frontend.modules
+
+
+def test_document_inline_operation_declarations_are_inspected_without_exporting_values():
+    connection = Mock()
+    connection.call.return_value = {
+        "body": '<script>window.secret="do-not-export";const doc={query:"query PageExpenses { expenses { id status } }"};</script>'
+    }
+    discovery = Discovery()
+    frontend = FrontendContracts(connection, discovery, ("example.test", 443))
+    frontend.event(
+        "Network.responseReceived",
+        {
+            "requestId": "doc",
+            "type": "Document",
+            "response": {"url": "https://example.test/expenses"},
+        },
+    )
+    frontend.event("Network.loadingFinished", {"requestId": "doc"})
+    frontend.drain()
+    assert frontend.modules[0]["sourceType"] == "Document"
+    assert "PageExpenses" in discovery.files("browser")["operations.graphql"]
+    assert "do-not-export" not in str(discovery.files("browser"))
+
+
+def test_prepare_retains_the_authenticated_tab_and_session_storage():
+    page = Mock()
+    connection = Mock()
+    browser = SimpleNamespace(
+        current_url=lambda: "https://example.test/expenses",
+        _origin=("example.test", 443),
+        _page=page,
+        _connection=connection,
+        _context=Mock(),
+        _block_service_workers=True,
+        connection_for=Mock(),
+    )
+    explorer = SiteExplorer(browser)
+    explorer.prepare()
+    assert browser._page is page
+    page.goto.assert_called_once_with("about:blank", wait_until="commit")
+    page.close.assert_not_called()
+    browser._context.new_page.assert_not_called()

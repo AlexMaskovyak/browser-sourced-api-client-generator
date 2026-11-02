@@ -297,8 +297,8 @@ class SelfDiscovery:
             connection.call(
                 "Network.enable",
                 {
-                    "maxTotalBufferSize": 8 * MAX_BODY,
-                    "maxResourceBufferSize": MAX_BODY,
+                    "maxTotalBufferSize": 32 * MAX_BODY,
+                    "maxResourceBufferSize": 4 * MAX_BODY,
                     "maxPostDataSize": MAX_BODY,
                 },
             )
