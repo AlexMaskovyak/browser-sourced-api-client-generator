@@ -4,7 +4,7 @@ from collections import deque
 import hashlib
 import time
 from types import SimpleNamespace
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from .browser import BrowserError, NAVIGATION_TIMEOUT_MILLISECONDS
 from .contracts import inspect_forms, FrontendContracts
@@ -508,7 +508,23 @@ class SiteExplorer:
             except Exception:
                 action["restoredEmpty"] = False
 
-    def _walk_controls(self, capture, observer, depth):
+    def _control_priority(self, item):
+        """Prefer the page's creation screen over unrelated application menus.
+
+        Use semantic main regions and words already present in the URL. No page
+        values are read or retained, and priority never grants write permission.
+        """
+        control, text, role, index = item
+        primary = bool(control.locator(
+            'xpath=ancestor::*[self::main or @role="main"]'
+        ).count())
+        path_words = {word.rstrip("s").lower() for word in
+                      urlsplit(self.session._page.url).path.replace("-", "/").split("/")
+                      if len(word) > 3}
+        contextual = any(word.rstrip("s").lower() in path_words for word in text.split())
+        return role != "form_dialog", not contextual, not primary, index
+
+    def _walk_controls(self, capture, observer, depth, *, forms_only=False):
         while (
             len(self.actions) < self.max_actions
             and time.monotonic() < self.deadline_seconds
@@ -521,7 +537,12 @@ class SiteExplorer:
                 200 <= entry["response"]["status"] < 300
                 for entry in capture.discovery.entries
             )
-            for control, text, role, index in self._controls():
+            # Creation screens reveal lazy-loaded write contracts. Visit them
+            # before global menus or pagination consume the action budget.
+            controls = sorted(self._controls(), key=self._control_priority)
+            for control, text, role, index in controls:
+                if forms_only and role != "form_dialog":
+                    continue
                 key = (
                     self.session._page.url,
                     state if role == "pagination" else "",
@@ -611,6 +632,7 @@ class SiteExplorer:
                     "document.visibilityState"
                 )
                 record["outcome"] = "visited"
+                self._walk_controls(capture, observer, depth, forms_only=True)
                 self._exercise_search(capture)
                 self._walk_controls(capture, observer, depth)
             except BrowserError:

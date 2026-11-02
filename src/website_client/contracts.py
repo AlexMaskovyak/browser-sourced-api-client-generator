@@ -7,22 +7,24 @@ import re
 from urllib.parse import urljoin
 
 from graphql import parse, print_ast
+from graphql.language.ast import DocumentNode
+from graphql.language.visitor import Visitor, visit
 
 from .discovery import FIELD, MAX_BODY, operation
 from .exploration_policy import safe_address
 
 MAX_FORMS = 30
 MAX_FIELDS = 100
-MAX_MODULES = 60
+# Modern applications load many small shared chunks before feature code. Keep
+# a separate byte cap while allowing the feature sources to be inspected.
+MAX_MODULES = 4096
 MAX_MODULE_BYTES = 4 * MAX_BODY
 MAX_SOURCE_BYTES = 32 * MAX_BODY
 MAX_DOCUMENTS_PER_MODULE = 100
 # Only literal source strings are decoded. Interpolated templates and executable
 # expressions are not evaluated or guessed.
 LITERAL = r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`)'
-GRAPHQL_LITERAL = re.compile(
-    r"(?:\b(?:body|query)\s*:\s*|\b(?:gql|graphql)\s*)" + LITERAL, re.S
-)
+GRAPHQL_LITERAL = re.compile(LITERAL, re.S)
 
 
 def inspect_forms(page):
@@ -117,8 +119,14 @@ def extract_documents(source):
     if len(source.encode()) > MAX_MODULE_BYTES:
         return []
     result = []
-    for match in list(GRAPHQL_LITERAL.finditer(source))[:MAX_DOCUMENTS_PER_MODULE]:
+    for match in GRAPHQL_LITERAL.finditer(source):
         raw = match.group(1)
+        # Bundlers also store fragments in ordinary string constants. Inspect
+        # literal contents, not only strings next to a query/body property.
+        if not re.search(r"\b(query|mutation|fragment|subscription)\b", raw[:120]):
+            continue
+        if len(result) >= MAX_DOCUMENTS_PER_MODULE:
+            break
         try:
             if raw.startswith("`"):
                 if "${" in raw:
@@ -149,6 +157,8 @@ class FrontendContracts:
         self.resource_types = {}
         self.activity = 0
         self.source_slots = 0
+        self.declarations = []
+        self.published_declarations = {}
 
     def event(self, method, params):
         from .browser import origin
@@ -211,6 +221,8 @@ class FrontendContracts:
             }
             self.modules.append(record)
             try:
+                if self.bytes_read >= MAX_SOURCE_BYTES:
+                    raise ValueError()
                 body = self.connection.call(
                     "Network.getResponseBody", {"requestId": identifier}
                 )
@@ -224,43 +236,9 @@ class FrontendContracts:
                     raise ValueError()
                 self.bytes_read += len(source.encode())
                 documents = extract_documents(source)
-                names = []
                 for text in documents:
-                    for definition in parse(text).definitions:
-                        if (
-                            definition.kind != "operation_definition"
-                            or definition.name is None
-                        ):
-                            continue
-                        item = operation(
-                            {"query": text, "operationName": definition.name.value}
-                        )
-                        if item:
-                            names.append(
-                                {
-                                    "name": item["name"],
-                                    "kind": item["kind"],
-                                    "variables": item["variables"],
-                                    "source": "frontend_declaration",
-                                    "executed": False,
-                                    "endpointVerified": False,
-                                    "documentExported": item["document"] is not None,
-                                }
-                            )
-                            if item["document"]:
-                                self.discovery.documents[
-                                    hashlib.sha256(
-                                        item["document"].encode()
-                                    ).hexdigest()
-                                ] = item["document"]
-                                digest = hashlib.sha256(
-                                    item["document"].encode()
-                                ).hexdigest()
-                                self.discovery.document_declarations.setdefault(
-                                    digest, set()
-                                ).add(url)
+                    self.declarations.append((url, parse(text), record))
                 record.update(
-                    operations=names,
                     sourceInspected=True,
                     sourceBytes=len(source.encode()),
                     documentAstCandidates=len(
@@ -270,3 +248,91 @@ class FrontendContracts:
             except Exception:
                 record["reason"] = "source_unavailable_or_size_limit"
                 self.omitted += 1
+
+        self._publish_declarations()
+
+    def _publish_declarations(self):
+        """Complete source operations with uniquely declared fragment dependencies.
+
+        A fragment may be emitted in a different loaded module. Local definitions
+        win; external definitions must agree byte for byte. Missing, conflicting
+        or cyclic dependencies stay in the report and cannot generate a method.
+        Recompute exports when more modules arrive, retaining observed requests.
+        """
+        for digest, urls in self.published_declarations.items():
+            locations = self.discovery.document_declarations.get(digest, set())
+            locations.difference_update(urls)
+            if not locations:
+                self.discovery.document_declarations.pop(digest, None)
+                if not self.discovery.document_sources.get(digest):
+                    self.discovery.documents.pop(digest, None)
+        self.published_declarations.clear()
+        fragments = {}
+        for url, document, record in self.declarations:
+            record["operations"] = []
+            for node in document.definitions:
+                if node.kind == "fragment_definition":
+                    fragments.setdefault(node.name.value, {})[print_ast(node)] = (node, url)
+        for url, document, record in self.declarations:
+            local = {node.name.value: node for node in document.definitions
+                     if node.kind == "fragment_definition"}
+            for node in document.definitions:
+                if node.kind != "operation_definition" or node.name is None:
+                    continue
+                reached, active, unresolved = {}, set(), set()
+                locations = {url}
+
+                def resolve(name):
+                    if name in active:
+                        unresolved.add(name)
+                        return
+                    if name in reached:
+                        return
+                    fragment = local.get(name)
+                    if fragment is None:
+                        candidates = fragments.get(name, {})
+                        if len(candidates) != 1:
+                            unresolved.add(name)
+                            return
+                        fragment, source = next(iter(candidates.values()))
+                        locations.add(source)
+                    active.add(name)
+                    for dependency in fragment_spreads(fragment):
+                        resolve(dependency)
+                    active.remove(name)
+                    reached[name] = fragment
+
+                for name in fragment_spreads(node):
+                    resolve(name)
+                text = print_ast(DocumentNode(definitions=(node, *reached.values())))
+                item = operation({"query": text, "operationName": node.name.value})
+                if item is None:
+                    continue
+                exported = not unresolved and item["document"] is not None
+                record["operations"].append({
+                    "name": item["name"], "kind": item["kind"],
+                    "variables": item["variables"], "source": "frontend_declaration",
+                    "executed": False, "endpointVerified": False,
+                    "documentExported": exported,
+                    "unresolvedFragments": sorted(unresolved),
+                })
+                if exported:
+                    digest = hashlib.sha256(item["document"].encode()).hexdigest()
+                    self.discovery.documents[digest] = item["document"]
+                    self.discovery.document_declarations.setdefault(digest, set()).update(locations)
+                    self.published_declarations.setdefault(digest, set()).update(locations)
+
+
+def fragment_spreads(node):
+    """Return referenced fragment names without evaluating website source."""
+    class Spreads(Visitor):
+        def __init__(self):
+            super().__init__()
+            self.names = set()
+
+        def enter_fragment_spread(self, item, *_args):
+            self.names.add(item.name.value)
+
+    collector = Spreads()
+    visit(node, collector)
+    return sorted(collector.names)
