@@ -54,11 +54,14 @@ class Project:
     lockfile: Path | None = None
     allow_inferred: bool = False
     required_operations: tuple[str, ...] = ()
+    required_uploads: tuple[str, ...] = ()
 
     def __post_init__(self):
         """Reject invalid names, unbounded input lists and unsafe header selections."""
         if type(self.allow_inferred) is not bool:
             raise BrowserError("Project allowInferred must be a boolean.")
+        if len(self.required_uploads) > 100 or any(not isinstance(name, str) or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", name) for name in self.required_uploads):
+            raise BrowserError("Required upload operations must be at most 100 operation names.")
         if len(self.required_operations) > 100 or any(
             not isinstance(name, str)
             or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", name)
@@ -91,6 +94,7 @@ class Project:
             "lockfile",
             "allowInferred",
             "requiredOperations",
+            "requiredUploads",
         }
         if (
             not isinstance(value, dict)
@@ -113,6 +117,9 @@ class Project:
             not isinstance(item, str) for item in headers
         ):
             raise BrowserError("Project sessionHeaders must contain header names only.")
+        uploads = value.get("requiredUploads", [])
+        if not isinstance(uploads, list):
+            raise BrowserError("Project requiredUploads must be a list of names.")
         required = value.get("requiredOperations", [])
         if not isinstance(required, list):
             raise BrowserError("Project requiredOperations must be a list of names.")
@@ -130,6 +137,7 @@ class Project:
             path.parent / value["lockfile"] if value.get("lockfile") else None,
             value.get("allowInferred", False),
             tuple(required),
+            tuple(uploads),
         )
 
 
@@ -158,6 +166,8 @@ def add_build_command(commands):
         default=[],
         help="Required operation name; repeat to reject incomplete discovery before publication.",
     )
+    command.add_argument("--require-upload", action="append", default=[],
+                         help="Require a discovered file-upload workflow for this mutation; repeat as needed.")
     command.add_argument("--name", help="Package and CLI name when using --manifest.")
     command.add_argument(
         "--service", help="Select one API when inputs contain several."
@@ -193,6 +203,7 @@ def project_from_options(options):
             or options.lockfile
             or options.allow_inferred
             or options.require_operation
+            or options.require_upload
         ):
             raise BrowserError(
                 "Do not override project settings; edit the project file and rebuild."
@@ -209,6 +220,7 @@ def project_from_options(options):
         Path(options.lockfile).resolve() if options.lockfile else None,
         options.allow_inferred,
         tuple(options.require_operation),
+        tuple(options.require_upload),
     )
 
 
@@ -279,8 +291,12 @@ def portable_manifest(target, metadata, normalized):
         json.dumps(report, sort_keys=True),
         Source.EXTERNAL,
     )
+    from .upload_generation import workflow_artifact
+    from .upload_workflows import UploadWorkflow
+    uploads = tuple(UploadWorkflow.from_dict(item["fileUpload"]) for item in metadata.values() if "fileUpload" in item)
+    extra = (workflow_artifact(uploads),) if uploads else ()
     return Manifest.create(
-        documents + (evidence,),
+        documents + (evidence,) + extra,
         (
             Service.create(
                 Protocol.GRAPHQL,
@@ -395,8 +411,13 @@ the application request and update `client-project.json` if its contract changes
 For operations with inputs, create a JSON object using the names/types in that
 operation's help and pass `--input FILE`. Write commands require
 `--confirm-write OPERATION` with the exact operation name. No automatic retries occur. Check the service before
-retrying an uncertain write. Receipt uploads, pagination and other multi-step
-workflows require their own captured operations and orchestration.
+retrying an uncertain write. Operations with a discovered file-upload contract
+accept `--receipt FILE`: metadata upload, exact-byte storage upload and mutation
+run within one login. Supply the original input object without its attachment
+field. Python callers use the generated `<method>_with_file` helper and an
+authenticated metadata client when the application origin differs from the API.
+Unsupported upload protocols and operations without a discovered contract do not
+accept this flag. Pagination and other multi-step workflows remain separate.
 
 ## Reproduce this project
 
@@ -453,6 +474,11 @@ def build_project(project, output):
             manifest_path, stage, project.name, target.id, project.allow_inferred
         )
         metadata = json.loads((stage / package / "_operations.json").read_text())
+        from .upload_generation import install_file_methods
+        install_file_methods(stage, package, metadata, normalized, target.endpoint)
+        missing_uploads = sorted(name for name in project.required_uploads if not metadata.get(name, {}).get("fileUpload"))
+        if missing_uploads:
+            raise BrowserError("Required file-upload workflows were not discovered: " + ", ".join(missing_uploads) + ". No client was published.")
         missing = sorted(set(project.required_operations) - metadata.keys())
         if missing:
             raise BrowserError(
@@ -498,6 +524,7 @@ def build_project(project, output):
             "lockfile": "poetry.lock" if project.lockfile else None,
             "allowInferred": project.allow_inferred,
             "requiredOperations": list(project.required_operations),
+            "requiredUploads": list(project.required_uploads),
         }
         write_json(stage / "client-project.json", recipe)
         (stage / "tests").mkdir()
@@ -577,7 +604,10 @@ def render_tests(package, metadata):
     request implementations rather than a synthetic replacement runtime.
     """
     if all(item["kind"] == "graphql-operation" for item in metadata.values()):
-        return render_operation_tests(package)
+        rendered = render_operation_tests(package)
+        if any(item.get("fileUpload") for item in metadata.values()):
+            rendered += render_file_tests(package)
+        return rendered
     return f'''"""Generated checks are local and make no service requests."""
 import inspect
 import json
@@ -605,4 +635,53 @@ def test_write_requires_confirmation_before_transport(name, monkeypatch, capsys)
     monkeypatch.setattr(_cli, 'execute_operation', forbidden)
     assert _cli.main([name, '--url', 'https://example.test']) == 1
     assert '--confirm-write ' + name in capsys.readouterr().err
+'''
+
+
+def render_file_tests(package):
+    """Generate protocol and CLI-preview tests without inventing business input fields."""
+    return f'''
+
+@pytest.mark.parametrize('name', [name for name, item in OPERATIONS.items() if item.get('fileUpload')])
+def test_file_upload_request_sequence(name, tmp_path):
+    """Exercise upload/attachment mechanics against local synthetic transports."""
+    from urllib.parse import urlsplit
+    from unittest.mock import patch
+    workflow = OPERATIONS[name]['fileUpload']
+    original = {{workflow['inputVariable']: {{}}}}
+    receipt = tmp_path / 'synthetic-receipt.pdf'
+    receipt.write_bytes(b'%PDF-1.7\\nsynthetic test bytes')
+    calls = []
+    signed_id = 'synthetic-signed-blob'
+    def metadata_response(request):
+        calls.append('metadata')
+        assert str(request.url) == workflow['metadataEndpoint']
+        blob = json.loads(request.content)['blob']
+        endpoint = urlsplit(workflow['metadataEndpoint'])
+        storage = endpoint.scheme + '://' + endpoint.netloc + '/synthetic-storage?signature=synthetic'
+        return httpx.Response(200, json={{**blob, 'signed_id': signed_id,
+            'direct_upload': {{'url': storage, 'headers': {{'Content-Type': blob['content_type'], 'Content-MD5': blob['checksum']}}}}}})
+    def storage_response(request):
+        calls.append('storage')
+        assert request.content == receipt.read_bytes()
+        assert 'cookie' not in request.headers and 'authorization' not in request.headers
+        return httpx.Response(200)
+    def mutation_response(request):
+        calls.append('mutation')
+        payload = json.loads(request.content)
+        assert payload['variables'][workflow['inputVariable']][workflow['attachmentField']] == signed_id
+        return httpx.Response(200, json={{'data': {{'created': {{'id': 'synthetic-record'}}}}}})
+    with httpx.Client(transport=httpx.MockTransport(metadata_response)) as app, \\
+         httpx.Client(transport=httpx.MockTransport(storage_response)) as storage, \\
+         httpx.Client(transport=httpx.MockTransport(mutation_response)) as api:
+        with Client(workflow['apiEndpoint'], http_client=api, allow_writes=True) as client:
+            method = getattr(client, OPERATIONS[name]['method'] + '_with_file')
+            # These checks exercise transport and sequencing, not server-specific
+            # custom input validation, which needs a schema or live verification.
+            with patch('{package}.operation_contracts.validate_variables', side_effect=lambda op, args: args), \\
+                 patch('{package}.operation_runtime.validate_variables', side_effect=lambda op, args: args):
+                result = method(receipt_path=receipt, metadata_client=app, storage_client=storage, **original)
+    assert calls == ['metadata', 'storage', 'mutation']
+    assert result == {{'created': {{'id': 'synthetic-record'}}}}
+    assert original == {{workflow['inputVariable']: {{}}}}
 '''
