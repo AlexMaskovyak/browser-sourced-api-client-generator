@@ -38,6 +38,8 @@ SAFE_INPUT_ERROR_PREFIXES = (
     "Output already exists",
     "Input exceeds",
     "Input must",
+    "Receipt ",
+    "Upload preview ",
     "Headers exceed",
     "Invalid runtime",
     "Input has unknown",
@@ -488,6 +490,13 @@ def show_failure(error, state):
             "No automatic retry occurred; check the service before retrying.",
             file=sys.stderr,
         )
+    elif type(error).__name__ == "FileWriteError":
+        stage = getattr(error, "stage", "unknown")
+        stage = stage if stage in {"metadata", "storage", "mutation"} else "unknown"
+        outcome = "rejected" if getattr(error, "outcome", None) == "rejected" else "unknown"
+        uploaded = getattr(error, "uploaded", None) is True
+        print(f"File-backed write failed at {stage}; outcome={outcome}; file_uploaded={uploaded}. "
+              "No automatic retry occurred. Check the service before retrying.", file=sys.stderr)
     elif type(error).__name__ == "BrowserError":
         print(str(error), file=sys.stderr)
     elif not state.started:
@@ -538,6 +547,8 @@ def main(args=None):
             workflow = operation["fileUpload"]
             if options.url != workflow["apiEndpoint"] or not isinstance(arguments.get(workflow["inputVariable"]), dict) or workflow["attachmentField"] in arguments[workflow["inputVariable"]]:
                 raise ValueError("Receipt input must use its discovered API and omit the attachment field.")
+            if not options.login and not getattr(options, "preview", False) and urlsplit(workflow["metadataEndpoint"]).netloc != urlsplit(options.url).netloc:
+                raise ValueError("Receipt uploads to a separate application origin require --login.")
             options.prepared_file = prepare_file(options.receipt, workflow["maxBytes"])
             if getattr(options, "preview", False):
                 receipt = options.prepared_file
