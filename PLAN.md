@@ -1,31 +1,20 @@
 # Current work
 
-Discover the operations used by the requested application page and validate the
-result through an independently generated client.
+Generate callable write operations discovered from a page's creation forms without
+submitting those forms during discovery.
 
-1. Trace the actual expense page's network and loaded-source paths. Inspect scripts
-   loaded for that page across asset origins, inline declarations and hydration
-   timing. Preserve contracts and safe diagnostics, never credential values.
-2. Fix the generic discovery paths supported by that evidence. Add regressions
-   where a page's business operations live outside startup requests. Keep writes
-   unexecuted and preserve explicit source/endpoint ownership.
-3. Run discovery against Gusto, build only from its output, and verify a generated
-   expense-list read with statuses and pagination. Run shared and container tests.
+1. Inspect discovery limits, control ordering, source collection and the handoff
+   from frontend declarations to client generation. Keep the logged-in browser.
+2. Prioritize form-opening controls, retain bounded lazy-loaded source contracts,
+   and make their API association explicit rather than dropping unexecuted writes.
+   Add narrow regressions for the actual failures found.
+3. Run shared and container checks, repeat discovery in the retained browser, and
+   build from its manifest. Verify generated write commands and confirmation
+   requirements without submitting a real expense.
 
-Complete requires a discovered expense retrieval operation and a successful read
-through generated code. Startup-only capture or successful packaging is incomplete.
-No service-specific operation documents may be supplied to satisfy this check.
-
-## Verified result
-
-The ordinary installed CLI was run against Gusto from a fresh browser login.
-Its first-page discovery manifest contains the captured MemberExpenses document.
-The ordinary build command generated a client from that manifest, with MemberExpenses
-required before publication. An exact rebuild matched, and that newly generated
-client returned 100 live expense records with status and pagination metadata.
-No older operation documents or generated-file edits were supplied. The existing
-authenticated session was retained for subsequent read verification.
-
-Shared checks: 225 tests and 29 clean-container scenarios pass. The first-page
-scenario exercises a rendered listing, tab state, asset-origin code, search-driven
-API traffic, HAR capture, generation and an independently installed client read.
+Browser traffic and loaded source own the discovered contracts. The manifest owns
+replayable generation input. Generated projects remain unedited. Submission and
+receipt upload are distinct contracts; a mutation alone does not prove the whole
+workflow. Missing or ambiguous contracts must remain visible. Complete requires
+write contracts to survive discovery, normalization, build and command help, with
+no real business write during verification.
