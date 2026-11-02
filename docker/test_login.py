@@ -574,8 +574,11 @@ def main():
             from pipeline_scenarios import (
                 verify_external_pipeline,
                 verify_browser_pipeline,
+                verify_complete_project,
             )
 
+            for backend in ("openapi", "graphql", "operations"):
+                verify_complete_project(root, backend)
             verify_external_pipeline(root)
             verify_browser_pipeline(site, root, complete_login, assert_no_credentials)
         finally:

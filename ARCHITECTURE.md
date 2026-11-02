@@ -113,3 +113,22 @@ Unit tests exercise parsing and policies. Docker installs the built wheel and
 checks browser login, discovery, command chaining and both generated client types
 against a local HTTPS fixture. Compatibility with a real service requires its
 own verification.
+
+## Complete project ownership
+
+`project_generation.py` owns the version 1 project definition and complete build.
+It reads and merges bounded portable manifests, normalizes them, selects one
+API and invokes the existing generation dispatcher in staging. REST/OpenAPI,
+schema-backed GraphQL and operation-document GraphQL keep their existing request
+builders and model ownership. An inferred HTTP contract requires explicit review
+permission, which is retained in the versioned project definition.
+It then generates documentation, synthetic tests, runtime defaults and portable
+rebuild inputs. An explicit Poetry lock is verified before the tree is published.
+Failure leaves the requested output absent; existing output is never replaced.
+
+`client_cli.py` applies packaged endpoint, login URL and header-name defaults only
+at that endpoint. Explicitly selecting a different endpoint does not reuse those
+login defaults. Credential values are observed during future login, never stored
+in the project file. Rebuild inputs preserve operation/request contracts rather
+than unrelated capture context. No service-specific packaging or post-build
+source edits are required.
