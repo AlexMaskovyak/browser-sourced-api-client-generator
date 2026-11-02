@@ -1,6 +1,8 @@
 """Local HTTPS service for browser login and generated endpoint tests."""
 
 import http.server
+import base64
+import hashlib
 import json
 from pathlib import Path
 import ssl
@@ -188,8 +190,11 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
             # The mutation and its response fragment are separate constants,
             # just as a bundler may emit them. Loading never calls the API.
             script = (
-                'const create="mutation CreateRecord($name: String!) { createItem(name:$name) { ...CreatedRecord } }";'
-                'const fields="fragment CreatedRecord on Item { id name }";'
+                'const create="mutation CreateRecord($input: RecordInput!) { createRecord(input:$input) { ...CreatedRecord } }";'
+                'const fields="fragment CreatedRecord on CreatedRecord { id name receipt { id sha256 } }";'
+                'const uploadEndpoint="/rails/active_storage/direct_uploads";'
+                'const activeStorageFields=["signed_id","direct_upload","checksum","byte_size"];'
+                'const pendingInput={attachmentId:undefined};'
                 """document.getElementById("creation").innerHTML='<form method="post"><input name="name"><button>Submit</button></form>';"""
             )
             self.send_response(200)
@@ -239,7 +244,7 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
         elif self.authenticated:
             self.site.counts["app"] += 1
-            content = "<h1>Signed in</h1>"
+            content = '<meta name="csrf-token" content="fixture-csrf"><h1>Signed in</h1>'
             if self.site.page_records:
                 asset_base = self.site.url.rsplit("/", 1)[0].replace(
                     "127.0.0.1", "localhost"
@@ -294,6 +299,7 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
                         "nodes": [{"id": "record-7", "status": "SUBMITTED"}],
                         "pageInfo": {"endCursor": None, "hasNextPage": False},
                     },
+                    "createRecord": lambda _info, input: self.create_record(input),
                 },
             )
             self.send_json(result.formatted)
@@ -302,6 +308,28 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
             assert data == {"name": "Created"}
             self.send_json({"id": 2}, status_code=201)
 
+    def create_record(self, input):
+        """Associate only the exact uploaded file and retain it for independent checks."""
+        assert input["attachmentId"] == "fixture-signed-blob"
+        assert self.site.upload_bytes
+        result = {"id": "2", "name": input["name"],
+                  "receipt": {"id": "blob-1", "sha256": hashlib.sha256(self.site.upload_bytes).hexdigest()}}
+        self.site.created_records.append(result)
+        return result
+
+    def do_PUT(self):
+        """The storage connection must carry bytes but no application credentials."""
+        assert urlsplit(self.path).path == "/storage/receipt"
+        assert not self.headers.get("Cookie") and not self.headers.get("Authorization")
+        assert not self.headers.get("X-CSRF-Token")
+        data = self.rfile.read(int(self.headers["Content-Length"]))
+        assert self.site.upload_metadata["checksum"] == base64.b64encode(hashlib.md5(data).digest()).decode()
+        assert self.site.upload_metadata["byte_size"] == len(data)
+        self.site.upload_bytes = data
+        self.site.upload_puts += 1
+        self.send_response(200)
+        self.end_headers()
+
     def do_POST(self):
         content_length_bytes = int(self.headers.get("Content-Length", "0"))
         if content_length_bytes > MAX_FIXTURE_REQUEST_BODY_BYTES:
@@ -309,6 +337,16 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         payload_text = self.rfile.read(content_length_bytes).decode()
+        if self.path == "/rails/active_storage/direct_uploads" and self.authenticated:
+            assert self.headers.get("X-CSRF-Token") == "fixture-csrf"
+            blob = json.loads(payload_text)["blob"]
+            self.site.upload_metadata = blob
+            self.site.upload_posts += 1
+            self.send_json({**blob, "signed_id": "fixture-signed-blob", "direct_upload": {
+                "url": self.site.url.rsplit("/", 1)[0] + "/storage/receipt?signature=private",
+                "headers": {"Content-Type": blob["content_type"], "Content-MD5": blob["checksum"]},
+            }})
+            return
         if self.path in {"/items", "/graphql"} and self.authenticated:
             self.api_post(payload_text)
             return
@@ -353,6 +391,12 @@ class Site:
         self.introspection_reads = 0
         self.exploration = False
         self.page_records = False
+        self.upload_metadata = None
+        self.upload_bytes = None
+        self.upload_posts = 0
+        self.upload_puts = 0
+        self.created_records = []
+        self.ca_path = str(root / "ca.crt")
         self.logout_hits = 0
         self.schema = build_schema((FIXTURES_DIRECTORY / "schema.graphql").read_text())
         self.openapi = json.loads((FIXTURES_DIRECTORY / "openapi.json").read_text())

@@ -285,7 +285,7 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
     schema, disabled = site.schema, site.introspection_disabled
     site.schema = build_schema(
         print_schema(schema)
-        + "\nextend type Query { records(first: Int, includeDetails: Boolean, search: String): RecordConnection! }\ntype RecordConnection { nodes: [Record!]! pageInfo: RecordPageInfo! }\ntype Record { id: ID! status: String! }\ntype RecordPageInfo { endCursor: String hasNextPage: Boolean! }"
+        + "\nextend type Query { records(first: Int, includeDetails: Boolean, search: String): RecordConnection! }\ntype RecordConnection { nodes: [Record!]! pageInfo: RecordPageInfo! }\ntype Record { id: ID! status: String! }\ntype RecordPageInfo { endCursor: String hasNextPage: Boolean! }\ninput RecordInput { name: String! attachmentId: String! }\nextend type Mutation { createRecord(input: RecordInput!): CreatedRecord! }\ntype CreatedRecord { id: ID! name: String! receipt: UploadedReceipt! }\ntype UploadedReceipt { id: ID! sha256: String! }"
     )
     site.page_records = True
     site.introspection_disabled = True
@@ -358,6 +358,8 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
                 target.id,
                 "--name",
                 "page-record-client",
+                "--require-upload",
+                "CreateRecord",
                 "--login-url",
                 site.url,
                 "--output",
@@ -389,7 +391,7 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
         )
         help_result = subprocess.run([str(env / "bin/page-record-client"), "CreateRecord", "--help"],
                                      check=True, capture_output=True, text=True)
-        assert "--confirm-write" in help_result.stdout
+        assert "--confirm-write" in help_result.stdout and "--receipt" in help_result.stdout
         result = root / "page-record-result.json"
         call = Command(
             site,
@@ -419,7 +421,9 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
             call.stop()
         assert site.api_writes == before
         write_input = root / "page-record-write.json"
-        write_input.write_text(json.dumps({"name": "Created"}))
+        write_input.write_text(json.dumps({"input": {"name": "Created"}}))
+        receipt = root / "local-receipt.pdf"
+        receipt.write_bytes(b"%PDF-1.7\nlocal synthetic receipt bytes\x00\xff")
         rejected = subprocess.run(
             [str(env / "bin/page-record-client"), "CreateRecord", "--login", "--input", str(write_input)],
             capture_output=True, text=True,
@@ -427,11 +431,13 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
         assert rejected.returncode != 0 and "--confirm-write CreateRecord" in rejected.stderr
         assert site.api_writes == before
         written = root / "page-record-written.json"
+        login_count = site.counts["password"]
         write = Command(site, executable=str(env / "bin/page-record-client"), args=[
             "CreateRecord", "--login", "--input", str(write_input),
             "--confirm-write", "CreateRecord", "--output", str(written),
+            "--receipt", str(receipt),
             "--browser", "chromium", "--browser-path", "/work/docker/test-chromium.sh",
-        ])
+        ], env={"SSL_CERT_FILE": site.ca_path})
         try:
             eventually(write.ready)
             write.connect()
@@ -439,13 +445,19 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
             os.write(write.terminal, b"\n")
             assert write.wait() == 0, write.output
             write.cleanup_verified()
-            assert json.loads(written.read_text())["createItem"] == {"id": "2", "name": "Created"}
+            created = json.loads(written.read_text())["createRecord"]
+            assert created["id"] == "2" and created["name"] == "Created"
+            assert created["receipt"]["sha256"] == hashlib.sha256(receipt.read_bytes()).hexdigest()
+            assert site.created_records == [created]
+            assert site.upload_bytes == receipt.read_bytes()
+            assert site.upload_posts == 1 and site.upload_puts == 1
+            assert site.counts["password"] == login_count + 1
             assert site.api_writes == before + 1
             assert_no_credentials(write.output, site)
         finally:
             write.stop()
         print(
-            "PASS page discovery: lazy submission through independently generated client, confirmation and successful write response",
+            "PASS page discovery: generated metadata upload, exact-byte storage PUT and associated record creation with one login",
             flush=True,
         )
     finally:
