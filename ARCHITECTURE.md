@@ -171,3 +171,17 @@ Within source declarations, fragment definitions are resolved locally first and
 then against unique loaded definitions. Missing, conflicting or cyclic fragments
 prevent export. More source arrivals recompute declarations; observed request
 documents are preserved.
+
+## File-backed writes
+
+Upload discovery records the metadata endpoint and protocol separately from the
+business mutation and its attachment input field. These are portable, validated
+contracts, not saved signed URLs or credentials. The generated runtime owns file
+validation, metadata POST, exact-byte storage PUT and the final mutation. The
+browser transport owns authenticated application requests; a credential-free HTTP
+transport owns storage requests using only the metadata response's signed URL
+and permitted headers. Both refuse redirects and automatic retries.
+
+The generated command validates local inputs and explicit confirmation before
+opening a browser or sending any write. It reports the failed stage after an
+uncertain outcome and never replays a completed upload or business write.
