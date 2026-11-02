@@ -145,6 +145,7 @@ class Discovery:
         self.graphql_endpoints = set()
         # A single explicitly supplied API can own unexecuted frontend contracts.
         self.declared_graphql_endpoint = None
+        self.upload_workflows = ()
         self.omitted = 0
         self.failures = 0
         self.capture_failures = 0
@@ -281,6 +282,9 @@ class Discovery:
                     if key in combined and print_ast(combined[key]) != print_ast(definition): conflicts.add(definition.name.value)
                     combined[key] = definition
             if not conflicts: files["operations.graphql"] = print_ast(DocumentNode(definitions=tuple(combined.values()))) + "\n"
+        if self.upload_workflows:
+            from .upload_workflows import write_workflows
+            files["upload-workflows.json"] = write_workflows(self.upload_workflows)
         files["discovery.json"] = json.dumps({"source": source, "observations": self.seen, "harEntries": len(self.entries),
             "omitted": self.omitted, "definitionFailures": self.failures, "bounded": self.omitted > 0,
             "captureFailures": self.capture_failures,

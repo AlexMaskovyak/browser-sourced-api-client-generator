@@ -12,6 +12,7 @@ from graphql.language.visitor import Visitor, visit
 
 from .discovery import FIELD, MAX_BODY, operation
 from .exploration_policy import safe_address
+from .upload_discovery import source_upload_signals
 
 MAX_FORMS = 30
 MAX_FIELDS = 100
@@ -241,6 +242,8 @@ class FrontendContracts:
                 record.update(
                     sourceInspected=True,
                     sourceBytes=len(source.encode()),
+                    sourceSha256=hashlib.sha256(source.encode()).hexdigest(),
+                    uploadSignals=source_upload_signals(source, "https://" + self.allowed_origin[0] + (":" + str(self.allowed_origin[1]) if self.allowed_origin[1] != 443 else "") + "/"),
                     documentAstCandidates=len(
                         re.findall(r'kind\s*:\s*["\']Document["\']', source)
                     ),
@@ -321,6 +324,12 @@ class FrontendContracts:
                     self.discovery.documents[digest] = item["document"]
                     self.discovery.document_declarations.setdefault(digest, set()).update(locations)
                     self.published_declarations.setdefault(digest, set()).update(locations)
+
+        from .upload_inference import discover_workflows
+        api_endpoint = self.discovery.declared_graphql_endpoint
+        if not api_endpoint and len(self.discovery.graphql_endpoints) == 1:
+            api_endpoint = next(iter(self.discovery.graphql_endpoints))
+        self.discovery.upload_workflows = discover_workflows(self.modules, api_endpoint)
 
 
 def fragment_spreads(node):
