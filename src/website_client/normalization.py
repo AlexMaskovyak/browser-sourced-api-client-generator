@@ -244,14 +244,14 @@ def normalize_manifest(manifest: Manifest, *, bind_schema=(), bind_operations=()
     it does not establish live compatibility or complete website coverage."""
     if type(manifest) is not Manifest:
         raise BrowserError("Normalize requires a validated Manifest record.")
-    from .upload_generation import assign_upload_operations
-    manifest = assign_upload_operations(manifest)
     sources = manifest.source_bundles
     if manifest.stage is Stage.DISCOVERY:
         source = SourceBundle(digest(manifest.to_dict()), manifest.producer, manifest.created_at)
         sources = sources or ()
         if source not in sources:
             sources += (source,)
+    from .upload_generation import assign_upload_operations
+    manifest = assign_upload_operations(manifest)
     artifacts = ArtifactIndex({item.id: item for item in manifest.artifacts})
     targets = {item.id: item for item in manifest.services}
     apply_bindings(targets, artifacts, bind_schema, schema=True)

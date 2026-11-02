@@ -6,7 +6,9 @@ from urllib.parse import urljoin
 from .browser import origin
 
 UPLOAD_PATH = re.compile(r'''["'`]((?:https://[^"'`\s]+)?/rails/active_storage/direct_uploads)["'`]''')
-ATTACHMENT_FIELD = re.compile(r'\b(fileId|receiptId|attachmentId|blobId|signedBlobId)\s*:')
+PROPERTY = re.compile(r'\b([_A-Za-z][_0-9A-Za-z]{0,127})\s*:')
+ATTACHMENT_NAME = re.compile(r'file|receipt|attachment|blob', re.I)
+ID_SUFFIX = re.compile(r'(?:Id|_id)$')
 
 
 def source_upload_signals(source, application_url):
@@ -22,7 +24,8 @@ def source_upload_signals(source, application_url):
             endpoints.append(endpoint)
     return {
         "metadataEndpoints": endpoints,
-        "attachmentFields": sorted(set(ATTACHMENT_FIELD.findall(source))),
+        "attachmentFields": sorted({name for name in PROPERTY.findall(source)
+                                    if ATTACHMENT_NAME.search(name) and ID_SUFFIX.search(name)}),
         "activeStorageImplementation": all(word in source for word in ("signed_id", "direct_upload", "checksum", "byte_size")),
     }
 
