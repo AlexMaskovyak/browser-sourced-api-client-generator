@@ -151,3 +151,16 @@ The page-data container scenario starts with rendered records, a tab-scoped view
 selection and a script on an asset origin. Only exercising search produces the
 list request. The test generates and independently installs a client from that
 capture, calls the generated list method and checks the returned record/status.
+
+## Discovering creation screens
+
+The explorer opens creation screens before global menus and pagination. Opening
+is separate from submitting: form submitters remain excluded and network write
+requests remain blocked. Loaded source declarations are retained even when they
+have never been executed. Source limits apply across the walk and omissions are
+reported so a successful listing capture cannot imply submission coverage.
+
+Frontend declarations do not prove an API destination. An unobserved declaration
+must receive an explicit API assignment before generation. Discovery must retain
+that evidence and the normal command must expose how to make the assignment;
+it must not silently discard write operations or send them to a guessed service.
