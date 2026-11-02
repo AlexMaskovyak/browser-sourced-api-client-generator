@@ -178,6 +178,25 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         target = urlsplit(self.path)
+        if self.site.page_records and target.path.startswith("/shared-chunk-"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.end_headers()
+            self.wfile.write(b"void 0;")
+            return
+        if self.site.page_records and target.path == "/records-create.js":
+            # The mutation and its response fragment are separate constants,
+            # just as a bundler may emit them. Loading never calls the API.
+            script = (
+                'const create="mutation CreateRecord($name: String!) { createItem(name:$name) { ...CreatedRecord } }";'
+                'const fields="fragment CreatedRecord on Item { id name }";'
+                """document.getElementById("creation").innerHTML='<form method="post"><input name="name"><button>Submit</button></form>';"""
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.end_headers()
+            self.wfile.write(script.encode())
+            return
         if self.site.page_records and target.path == "/records-data.js":
             query = "query ListRecords($includeDetails: Boolean = false, $search: String) { records(first: 100, includeDetails: $includeDetails, search: $search) { nodes { id status } pageInfo { endCursor hasNextPage } } }"
             script = (
@@ -225,6 +244,9 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
                 asset_base = self.site.url.rsplit("/", 1)[0].replace(
                     "127.0.0.1", "localhost"
                 )
+                content += "".join('<script src="/shared-chunk-' + str(i) + '.js"></script>' for i in range(70))
+                content += '<div hidden>' + '<button type="button">Add unrelated</button>' * 250 + '</div>'
+                content += """<main><form><button type="button" onclick="const script=document.createElement('script');script.src='/records-create.js';document.body.appendChild(script)">Add record</button></form><div id="creation"></div></main>"""
                 content += (
                     '<input type="search" placeholder="Search records"><table><tbody><tr><td>record-7</td><td>SUBMITTED</td></tr></tbody></table><div id="records"></div><script src="'
                     + asset_base

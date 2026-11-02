@@ -300,11 +300,13 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
             "--max-pages",
             "1",
             "--max-actions",
-            "1",
+            "3",
             "--max-depth",
             "0",
             "--explore-seconds",
-            "15",
+            "25",
+            "--graphql-endpoint",
+            site.url.rsplit("/", 1)[0] + "/graphql",
             "--max-probes",
             "1",
             "--output",
@@ -337,6 +339,9 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
             item for item in manifest.artifacts if item.id in target.operation_artifacts
         ]
         assert any("query ListRecords" in item.content for item in documents)
+        assert any("mutation CreateRecord" in item.content and "fragment CreatedRecord" in item.content
+                   for item in documents)
+        assert site.api_writes == before
         report = json.loads((output / "self-discovery.json").read_text())["exploration"]
         assert any(
             "localhost" in item["url"] and item.get("sourceInspected")
@@ -382,6 +387,9 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
             check=True,
             capture_output=True,
         )
+        help_result = subprocess.run([str(env / "bin/page-record-client"), "CreateRecord", "--help"],
+                                     check=True, capture_output=True, text=True)
+        assert "--confirm-write" in help_result.stdout
         result = root / "page-record-result.json"
         call = Command(
             site,
@@ -410,8 +418,34 @@ def verify_page_record_discovery(site, root, complete_login, assert_no_credentia
         finally:
             call.stop()
         assert site.api_writes == before
+        write_input = root / "page-record-write.json"
+        write_input.write_text(json.dumps({"name": "Created"}))
+        rejected = subprocess.run(
+            [str(env / "bin/page-record-client"), "CreateRecord", "--login", "--input", str(write_input)],
+            capture_output=True, text=True,
+        )
+        assert rejected.returncode != 0 and "--confirm-write CreateRecord" in rejected.stderr
+        assert site.api_writes == before
+        written = root / "page-record-written.json"
+        write = Command(site, executable=str(env / "bin/page-record-client"), args=[
+            "CreateRecord", "--login", "--input", str(write_input),
+            "--confirm-write", "CreateRecord", "--output", str(written),
+            "--browser", "chromium", "--browser-path", "/work/docker/test-chromium.sh",
+        ])
+        try:
+            eventually(write.ready)
+            write.connect()
+            complete_login(write, site)
+            os.write(write.terminal, b"\n")
+            assert write.wait() == 0, write.output
+            write.cleanup_verified()
+            assert json.loads(written.read_text())["createItem"] == {"id": "2", "name": "Created"}
+            assert site.api_writes == before + 1
+            assert_no_credentials(write.output, site)
+        finally:
+            write.stop()
         print(
-            "PASS page discovery: delayed asset-origin listing through independently generated client",
+            "PASS page discovery: lazy submission through independently generated client, confirmation and successful write response",
             flush=True,
         )
     finally:
