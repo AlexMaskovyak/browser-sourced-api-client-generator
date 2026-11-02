@@ -104,6 +104,8 @@ def test_failed_stage_stops_without_retry_or_sensitive_errors(tmp_path, failure,
         submit_with_file(client, "CreateRecord", {"input": {}}, WORKFLOW, path, metadata_client=app, storage_client=storage)
     assert captured.value.stage == stage
     assert captured.value.uploaded == (stage == "mutation")
+    if stage == "mutation":
+        assert captured.value.outcome == "unknown"
     assert calls == expected
     assert "private" not in str(captured.value) and "signature" not in str(captured.value)
 
