@@ -6,6 +6,7 @@ inputs and are deliberately absent from the project format.
 """
 
 from dataclasses import dataclass
+import ast
 import json
 from pathlib import Path
 import shutil
@@ -31,7 +32,7 @@ from .discovery_manifest.records import (
 )
 from .generation import package_name_for, publish_tree, write_json
 from .normalization import normalize_manifest, select_service
-from .operation_generation import generate_operation_client
+from .pipeline import generate_bundle
 from .session_http import BrowserLoginTransport
 
 
@@ -50,9 +51,12 @@ class Project:
     session_headers: tuple[str, ...] = ()
     service: str | None = None
     lockfile: Path | None = None
+    allow_inferred: bool = False
 
     def __post_init__(self):
         """Reject invalid names, unbounded input lists and unsafe header selections."""
+        if type(self.allow_inferred) is not bool:
+            raise BrowserError("Project allowInferred must be a boolean.")
         package_name_for(self.name)
         origin(self.login_url)
         if not self.manifests or len(self.manifests) > 20:
@@ -75,6 +79,7 @@ class Project:
             "sessionHeaders",
             "service",
             "lockfile",
+            "allowInferred",
         }
         if (
             not isinstance(value, dict)
@@ -109,6 +114,7 @@ class Project:
             tuple(headers),
             value.get("service"),
             path.parent / value["lockfile"] if value.get("lockfile") else None,
+            value.get("allowInferred", False),
         )
 
 
@@ -133,7 +139,7 @@ def add_build_command(commands):
     )
     command.add_argument("--name", help="Package and CLI name when using --manifest.")
     command.add_argument(
-        "--service", help="Select one GraphQL API when inputs contain several."
+        "--service", help="Select one API when inputs contain several."
     )
     command.add_argument(
         "--login-url", help="Public website sign-in URL; requires --manifest."
@@ -143,6 +149,11 @@ def add_build_command(commands):
         action="append",
         default=[],
         help="Additional header NAME to observe at login, never a value; repeat as needed.",
+    )
+    command.add_argument(
+        "--allow-inferred",
+        action="store_true",
+        help="Build a reviewed inferred HTTP definition; preserve this permission in rebuild inputs.",
     )
     command.add_argument(
         "--lockfile",
@@ -159,6 +170,7 @@ def project_from_options(options):
             or options.login_url
             or options.session_header
             or options.lockfile
+            or options.allow_inferred
         ):
             raise BrowserError(
                 "Do not override project settings; edit the project file and rebuild."
@@ -173,16 +185,46 @@ def project_from_options(options):
         tuple(options.session_header),
         options.service,
         Path(options.lockfile).resolve() if options.lockfile else None,
+        options.allow_inferred,
     )
 
 
-def portable_manifest(target, metadata, created_at):
+def portable_manifest(target, metadata, normalized):
     """Retain selected operation documents and request conventions, dropping capture context.
 
     Original reports may include unrelated endpoints, private filenames and source
     locations. Only the contracts already shipped in the SDK are needed to rebuild.
     Each operation keeps its own document so fragments remain source-local.
     """
+    if target.schema_artifact is not None:
+        # Preserve the canonical selected definition rather than source locations
+        # or unrelated captured requests. This supports both schema backends.
+        indexed = {item.id: item for item in normalized.artifacts}
+        original = indexed[target.schema_artifact]
+        schema = Artifact.create(
+            "definition", original.kind, original.content, Source.EXTERNAL
+        )
+        documents = ()
+        if target.compiled_operations_artifact is not None:
+            operations = indexed[target.compiled_operations_artifact]
+            documents = (
+                Artifact.create(
+                    "operations.graphql",
+                    Kind.GRAPHQL_OPERATIONS,
+                    operations.content,
+                    Source.EXTERNAL,
+                ),
+            )
+        selected = Service.create(
+            target.protocol,
+            target.endpoint,
+            schema.id,
+            operations=tuple(item.id for item in documents),
+            confidence=target.confidence,
+        )
+        return Manifest.create(
+            (schema,) + documents, (selected,), created_at=normalized.created_at
+        )
     documents = tuple(
         Artifact.create(
             name + ".graphql",
@@ -223,22 +265,72 @@ def portable_manifest(target, metadata, created_at):
                 operations=tuple(item.id for item in documents),
             ),
         ),
-        created_at=created_at,
+        created_at=normalized.created_at,
     )
 
 
-def project_readme(project, endpoint, metadata):
-    """Generate runnable commands from the same defaults used by the packaged CLI."""
-    reads = [
-        name
-        for name, item in metadata.items()
-        if not item["write"]
-        and not any(variable["required"] for variable in item["variables"])
+def required_inputs(stage, package, operation):
+    """Read required Python arguments from generated syntax without importing code.
+
+    Backend models and Python aliases remain authoritative. Do not infer required
+    fields from URL patterns or assume all read operations have zero arguments.
+    """
+    if operation["kind"] == "openapi":
+        path = stage.joinpath(*operation["module"].split(".")).with_suffix(".py")
+        name = "sync_detailed"
+    else:
+        path, name = stage / package / "client.py", operation["method"]
+    matches = [
+        node
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.FunctionDef) and node.name == name
     ]
-    example = reads[0] if reads else next(iter(metadata))
+    if len(matches) != 1:
+        raise BrowserError("Generated operation has no unambiguous Python signature.")
+    args = matches[0].args
+    positional = args.posonlyargs + args.args
+    required = positional[: len(positional) - len(args.defaults)]
+    required += [
+        item
+        for item, default in zip(args.kwonlyargs, args.kw_defaults)
+        if default is None
+    ]
+    return tuple(item.arg for item in required if item.arg not in {"self", "client"})
+
+
+def project_readme(project, endpoint, metadata, stage, package):
+    """Generate runnable commands from the same defaults used by the packaged CLI."""
+    available = {
+        name: required_inputs(stage, package, item) for name, item in metadata.items()
+    }
+    reads = [name for name, item in metadata.items() if not item["write"]]
+    ready = [name for name in reads if not available[name]]
+    example = (ready or reads or list(metadata))[0]
+    if ready:
+        call = f"poetry run {project.name} {example} --login"
+        action = "The command sends one read and prints JSON."
+    else:
+        call = f"poetry run {project.name} {example} --help"
+        action = (
+            "This command displays help only. Create a JSON object containing the required "
+            "fields shown there and pass its path with --input FILE when calling the operation."
+        )
+    kind = next(iter(metadata.values()))["kind"]
+    if kind == "graphql-operation":
+        validation = (
+            "Declared standard scalar types are validated; custom input fields and response "
+            "shapes remain JSON without a complete server schema. Python mutation calls "
+            "require Client(..., allow_writes=True)."
+        )
+    else:
+        validation = (
+            "Input and response models come from the supplied API definition. "
+            "Python calls use the backend's generated API; CLI write confirmation "
+            "does not impose a separate write-permission switch on those Python calls."
+        )
     return f"""# {project.name}
 
-Python methods and CLI commands generated from {len(metadata)} captured GraphQL operations.
+Python methods and CLI commands generated from {len(metadata)} API operations.
 The generator produced every file in this project. No service-specific source
 patches are needed. This operation set does not imply coverage of every service API.
 
@@ -263,30 +355,29 @@ service requests. Tests use synthetic responses; they do not prove live compatib
 The configured endpoint is `{endpoint}`. With an interactive terminal:
 
 ```sh
-poetry run {project.name} {example} --login
+{call}
 ```
 
-This opens `{project.login_url}`. Sign in, open the relevant application page and
-wait for it to load, then press Enter in the terminal. The command sends one read
-and prints JSON. Use `--output NEW_FILE` to save a private result. Existing files
-are refused. Each invocation opens a fresh login; the browser closes afterward.
+Add `--login` when executing an operation to open `{project.login_url}`. Sign in,
+open the relevant application page and wait for it to load, then press Enter in
+the terminal. {action} Use `--output NEW_FILE` to save a private result. Existing files
+are refused. Each --login invocation opens a fresh login; the browser closes afterward.
 
 Configured additional session-header names: {", ".join(project.session_headers) or "none"}.
 Their values are observed in memory at the API origin. Never put tokens in source
 files or command arguments. Missing required headers can cause HTTP 403. Inspect
 the application request and update `client-project.json` if its contract changes.
 
-For operations with variables, create a JSON object using the names/types in that
-operation's help and pass `--input FILE`. Mutation commands require
-`--confirm-write OPERATION` with the exact operation name. Python mutations require
-`Client(..., allow_writes=True)`. No automatic retries occur. Check the service before
+For operations with inputs, create a JSON object using the names/types in that
+operation's help and pass `--input FILE`. Write commands require
+`--confirm-write OPERATION` with the exact operation name. No automatic retries occur. Check the service before
 retrying an uncertain write. Receipt uploads, pagination and other multi-step
 workflows require their own captured operations and orchestration.
 
 ## Reproduce this project
 
-`inputs/manifest.json` contains the selected operation documents and request
-conventions. `client-project.json` supplies public endpoint/login configuration
+`inputs/manifest.json` contains the selected API definition or operation documents
+and request conventions. `client-project.json` supplies public endpoint/login configuration
 and header names. No saved login or account values are needed to build.
 Using an installed compatible generator, from this directory:
 
@@ -301,9 +392,7 @@ existing project. Reuse the same generator revision and lock for reproducibility
 
 ## Validation and ownership
 
-Generated method docstrings describe declared inputs, omission versus null, write
-permission, results and failures. Standard scalar types are validated; custom
-input fields and response shapes remain JSON without a complete server schema.
+{validation}
 The service remains authoritative for its records. Generation and
 synthetic tests do not verify submissions or payment. HTTP failures report status
 without response bodies. Authentication stays in browser/process memory.
@@ -326,16 +415,18 @@ def build_project(project, output):
             raise BrowserError("Project inputs exceed the 64 MiB aggregate limit.")
         inputs.append(document)
     normalized = normalize_manifest(merge_manifests(tuple(inputs)))
-    target = select_service(normalized, project.service)
-    if target.protocol is not Protocol.GRAPHQL or target.schema_artifact is not None:
-        raise BrowserError(
-            "Complete project builds currently support operation-document GraphQL clients."
-        )
+    target = select_service(
+        normalized, project.service, allow_inferred=project.allow_inferred
+    )
     package = package_name_for(project.name)
     with tempfile.TemporaryDirectory(prefix="website-client-project-") as directory:
         stage = Path(directory) / "project"
-        report = generate_operation_client(
-            normalized, target, stage, project.name, None
+        # Reuse the same backend selection as ordinary generation. Complete
+        # packaging must not substitute a protocol-specific request implementation.
+        manifest_path = Path(directory) / "input-manifest.json"
+        write_manifest(normalized, manifest_path)
+        report = generate_bundle(
+            manifest_path, stage, project.name, target.id, project.allow_inferred
         )
         metadata = json.loads((stage / package / "_operations.json").read_text())
         defaults = {
@@ -361,10 +452,10 @@ def build_project(project, output):
             ".venv/\n__pycache__/\n.pytest_cache/\ndist/\n.private/\n"
         )
         (stage / "README.md").write_text(
-            project_readme(project, target.endpoint, metadata)
+            project_readme(project, target.endpoint, metadata, stage, package)
         )
         (stage / "inputs").mkdir()
-        snapshot = portable_manifest(target, metadata, normalized.created_at)
+        snapshot = portable_manifest(target, metadata, normalized)
         write_manifest(snapshot, stage / "inputs" / "manifest.json")
         recipe = {
             "version": 1,
@@ -374,10 +465,11 @@ def build_project(project, output):
             "sessionHeaders": list(project.session_headers),
             "service": None,
             "lockfile": "poetry.lock" if project.lockfile else None,
+            "allowInferred": project.allow_inferred,
         }
         write_json(stage / "client-project.json", recipe)
         (stage / "tests").mkdir()
-        (stage / "tests" / "test_client.py").write_text(render_tests(package))
+        (stage / "tests" / "test_client.py").write_text(render_tests(package, metadata))
         if project.lockfile:
             # Reuse an explicit dependency input, then ask Poetry to verify its
             # content hash. Never silently relock against current registry state.
@@ -398,7 +490,7 @@ def build_project(project, output):
         return report
 
 
-def render_tests(package):
+def render_operation_tests(package):
     """Emit synthetic operation checks without embedding any source-account values."""
     return f'''"""Generated checks use synthetic responses and never call the service."""
 import inspect
@@ -442,4 +534,43 @@ def test_all_operation_requests_and_write_guards():
                         with pytest.raises(ValueError, match='allow_writes'):
                             client._execute(name, {{}})
                     assert len(calls) == before
+'''
+
+
+def render_tests(package, metadata):
+    """Emit backend-neutral command checks, plus operation-only transport checks.
+
+    CLI write guards apply to every backend. Operation-document transport tests
+    additionally exercise its runtime; typed backends retain their own model and
+    request implementations rather than a synthetic replacement runtime.
+    """
+    if all(item["kind"] == "graphql-operation" for item in metadata.values()):
+        return render_operation_tests(package)
+    return f'''"""Generated checks are local and make no service requests."""
+import inspect
+import json
+from importlib.resources import files
+import pytest
+from {package} import _cli
+
+OPERATIONS = json.loads(files('{package}').joinpath('_operations.json').read_text())
+
+@pytest.mark.parametrize('name', sorted(OPERATIONS))
+def test_operation_help_and_callable(name):
+    """Every packaged operation resolves to the backend's callable and local help."""
+    parser, functions = _cli.build_parser(OPERATIONS, {{'url': 'https://example.test'}})
+    assert callable(functions[name])
+    assert inspect.signature(functions[name])
+    with pytest.raises(SystemExit) as exited:
+        parser.parse_args([name, '--help'])
+    assert exited.value.code == 0
+
+@pytest.mark.parametrize('name', [name for name, item in OPERATIONS.items() if item['write']])
+def test_write_requires_confirmation_before_transport(name, monkeypatch, capsys):
+    """Unconfirmed CLI writes must fail before any generated endpoint method runs."""
+    def forbidden(*args, **kwargs):
+        raise AssertionError('An unconfirmed write reached the transport')
+    monkeypatch.setattr(_cli, 'execute_operation', forbidden)
+    assert _cli.main([name, '--url', 'https://example.test']) == 1
+    assert '--confirm-write ' + name in capsys.readouterr().err
 '''
