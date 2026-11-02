@@ -145,7 +145,7 @@ def verify_browser_pipeline(site, root, complete_login, assert_no_credentials):
         site.introspection_disabled = False
 
 
-def verify_complete_project(root):
+def verify_complete_project(root, kind="operations"):
     """Install and test untouched complete output, then reproduce it from shipped inputs."""
     from website_client.discovery_manifest import (
         artifact,
@@ -154,27 +154,52 @@ def verify_complete_project(root):
         write_bundle,
     )
 
-    document = artifact(
-        "operations.graphql",
-        "graphql-operations",
-        "query Read { value }\nmutation Change($input: Input!) { change(input: $input) }",
-        "external",
+    if kind == "operations":
+        document = artifact(
+            "operations.graphql",
+            "graphql-operations",
+            "query Read { value }\nmutation Change($input: Input!) { change(input: $input) }",
+            "external",
+        )
+        documents = [document]
+        selected = service(
+            "graphql", "https://example.test/graphql", operations=[document["id"]]
+        )
+        read = "Read"
+    elif kind == "openapi":
+        document = artifact(
+            "openapi.json",
+            "openapi",
+            Path("/work/tests/fixtures/openapi.json").read_text(),
+            "external",
+        )
+        documents = [document]
+        selected = service("openapi", "https://example.test", document["id"])
+        read = "get_item"
+    else:
+        schema = artifact(
+            "schema.graphql",
+            "graphql-schema",
+            Path("/work/tests/fixtures/schema.graphql").read_text(),
+            "external",
+        )
+        document = artifact(
+            "operations.graphql",
+            "graphql-operations",
+            Path("/work/tests/fixtures/operations.graphql").read_text(),
+            "external",
+        )
+        documents = [schema, document]
+        selected = service(
+            "graphql", "https://example.test/graphql", schema["id"], [document["id"]]
+        )
+        read = "GetItem"
+    source = root / ("project-source-" + kind + ".json")
+    write_bundle(new_bundle(documents, [selected]), source)
+    output, rebuilt = (
+        root / ("complete-project-" + kind),
+        root / ("rebuilt-project-" + kind),
     )
-    source = root / "project-source.json"
-    write_bundle(
-        new_bundle(
-            [document],
-            [
-                service(
-                    "graphql",
-                    "https://example.test/graphql",
-                    operations=[document["id"]],
-                )
-            ],
-        ),
-        source,
-    )
-    output, rebuilt = root / "complete-project", root / "rebuilt-project"
     subprocess.run(
         [
             "website-client",
@@ -211,7 +236,7 @@ def verify_complete_project(root):
         if path.is_file()
     }
     assert snapshot(output) == snapshot(rebuilt)
-    env = root / "project-env"
+    env = root / ("project-env-" + kind)
     subprocess.run([sys.executable, "-m", "venv", str(env)], check=True)
     python = str(env / "bin/python")
     environment = {
@@ -238,12 +263,14 @@ def verify_complete_project(root):
         capture_output=True,
     )
     subprocess.run(
-        [str(env / "bin/complete-project"), "Read", "--help"],
+        [str(env / "bin/complete-project"), read, "--help"],
         cwd=root,
         check=True,
         capture_output=True,
     )
     print(
-        "PASS complete project: untouched install, generated tests and byte-identical rebuild",
+        "PASS complete project ("
+        + kind
+        + "): untouched install, generated tests and byte-identical rebuild",
         flush=True,
     )

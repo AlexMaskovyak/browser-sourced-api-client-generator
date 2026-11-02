@@ -577,7 +577,8 @@ def main():
                 verify_complete_project,
             )
 
-            verify_complete_project(root)
+            for backend in ("openapi", "graphql", "operations"):
+                verify_complete_project(root, backend)
             verify_external_pipeline(root)
             verify_browser_pipeline(site, root, complete_login, assert_no_credentials)
         finally:
