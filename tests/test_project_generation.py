@@ -405,3 +405,28 @@ def test_frontend_write_without_explicit_api_stays_unassigned():
     discovery.graphql_endpoints = {"https://one.example.test/graphql", "https://two.example.test/graphql"}
     manifest = capture_manifest(discovery, discovery.files("browser"))
     assert all(not service.operation_artifacts for service in manifest.services)
+
+
+def test_captured_operation_owns_its_name_over_a_frontend_variant(tmp_path):
+    """Frontend variants must not make an otherwise usable captured client conflict."""
+    from website_client.bundle_capture import capture_manifest
+    from website_client.discovery import Discovery, operation
+    from website_client.discovery_manifest import sha256
+    from website_client.normalization import normalize_manifest
+
+    discovery = Discovery()
+    discovery.declared_graphql_endpoint = "https://api.example.test/graphql"
+    discovery.graphql_endpoints.add(discovery.declared_graphql_endpoint)
+    for source, query in [("captured", "query Read { item { id } }"),
+                          ("frontend", "query Read { item { id name } }")]:
+        text = operation({"query": query})["document"]
+        digest = sha256(text)
+        discovery.documents[digest] = text
+        if source == "captured":
+            discovery.document_sources[digest] = {discovery.declared_graphql_endpoint}
+        else:
+            discovery.document_declarations[digest] = {"https://assets.example.test/read.js"}
+    manifest = normalize_manifest(capture_manifest(discovery, discovery.files("browser")))
+    target = next(s for s in manifest.services if s.protocol.value == "graphql")
+    assert target.status.value == "ready"
+    assert target.operation_names == ("Read",)

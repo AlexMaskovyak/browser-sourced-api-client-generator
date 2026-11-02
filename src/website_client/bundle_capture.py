@@ -1,6 +1,8 @@
 """Build the portable handoff from discovery's evidence and exported files."""
 
 from dataclasses import replace
+
+from graphql import parse
 import json
 from urllib.parse import urljoin
 
@@ -27,6 +29,14 @@ def capture_manifest(discovery, files) -> Manifest:
     targets: dict[str, Service] = {}
     gql_endpoints = locations(discovery.graphql_endpoints)
     gql_schemas, operations = [], []
+    captured_names = {}
+    for digest, endpoints in discovery.document_sources.items():
+        text = discovery.documents.get(digest)
+        if text:
+            names = {node.name.value for node in parse(text).definitions
+                     if node.kind == "operation_definition" and node.name is not None}
+            for endpoint in locations(endpoints):
+                captured_names.setdefault(endpoint, set()).update(names)
     for name, content in files.items():
         source, sources, declarations = Source.REPORT, [], []
         if name.startswith("openapi-"):
@@ -95,9 +105,15 @@ def capture_manifest(discovery, files) -> Manifest:
             assigned = list(sources)
             declared_endpoint = discovery.declared_graphql_endpoint
             if not assigned and declarations and declared_endpoint:
-                assigned = locations([declared_endpoint])
-                if assigned[0] not in gql_endpoints:
-                    gql_endpoints.append(assigned[0])
+                endpoint = locations([declared_endpoint])[0]
+                names = {node.name.value for node in parse(item.content).definitions
+                         if node.kind == "operation_definition" and node.name is not None}
+                # Runtime requests own already captured operation names. A
+                # source variant remains evidence, not a replacement contract.
+                if not names.intersection(captured_names.get(endpoint, set())):
+                    assigned = [endpoint]
+                    if endpoint not in gql_endpoints:
+                        gql_endpoints.append(endpoint)
             operations.append((item, assigned))
     for endpoint in gql_endpoints:
         schemas = [item for item, sources in gql_schemas if endpoint in sources]
