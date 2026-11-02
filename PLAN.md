@@ -22,3 +22,26 @@ uncertainty without retrying. A successful expense creation is not payment.
 Completion requires a generated command and Python API that upload a file and
 associate it with the created record in the end-to-end test, plus reproducible
 Gusto output. Separate tested local behavior from live service verification.
+
+## Completed verification
+
+- Source declarations are normalized into versioned upload contracts; a matching
+  mutation gets generated CLI flags, Python helpers, documentation and tests.
+  `--require-upload` refuses incomplete builds. The initial protocol is Rails
+  Active Storage; no application-specific URLs or operation names are in the
+  generator's upload implementation.
+- All 247 tests pass locally and in Docker. All 29 browser scenarios pass. The
+  upload scenario uses the ordinary discovery/build commands and an independently
+  installed client. It verifies one login, one metadata POST, one exact-byte PUT,
+  one mutation and the stored receipt association. Storage carries no application
+  cookies or credentials. Failure tests verify no automatic retries.
+- The generated application client was rebuilt solely through generator commands
+  from saved discovery and portable inputs. All 18 generated tests pass; source
+  and wheel builds succeed; all 35 project files reproduce byte for byte.
+- Preview is local and makes no requests. Real files were not uploaded and real
+  expenses were not created or changed. Live service write compatibility remains
+  unverified and requires a separately reviewed real operation.
+
+Limits: source-field association is inferred from an unambiguous declaring module,
+not a complete server schema; custom input fields remain JSON. Other upload
+protocols and schema-backed composition require additional implementations.
