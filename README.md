@@ -555,3 +555,43 @@ are rejected. Its shipped input manifest retains only the selected API definitio
 and required operation documents or HTTP conventions. Original capture reports and private source
 locations are excluded. Review operation documents before publishing any client;
 their literal contents are preserved.
+
+## Upload a file before a mutation
+
+Generated operation clients can attach a local file when discovery identifies a
+supported upload protocol and the mutation's attachment input. The initial
+protocol is Rails Active Storage direct uploads. This is reusable protocol
+support: application URLs, operation names and attachment fields come from the
+manifest. Other upload protocols are not yet supported.
+
+Use `build --require-upload OPERATION_NAME` to refuse a project when its upload
+contract is missing. This is stronger than `--require-operation`, which only
+requires the mutation itself. The requirement is saved in `client-project.json`.
+
+The generated mutation's help includes `--receipt FILE` and `--preview` when an
+upload contract is available. Prepare the operation's normal JSON input using its
+help and the application's actual fields; omit the attachment field. Then run
+that command with `--input INPUT.json --receipt FILE --preview` to inspect its
+variables, file size/hash, metadata endpoint and API endpoint. Preview is local,
+sends no requests and requires no write confirmation.
+
+To execute the same flow, remove `--preview` and add `--login` and
+`--confirm-write OPERATION_NAME`. This writes remote data. One login covers the
+metadata POST, exact-byte storage PUT and mutation. The signed blob ID is inserted
+into the declared attachment field without changing the other input values.
+Python callers use the generated `<method>_with_file` helper, an authenticated
+metadata client when the application origin differs from the API, and explicit
+`allow_writes=True`. The generated README and docstrings explain those inputs.
+
+Storage receives no application cookies or authentication headers. Requests do
+not follow redirects or retry automatically. Errors identify metadata, storage or
+mutation as the failed stage. An upload can remain unattached if creation fails;
+check the application before retrying an uncertain expense submission. Successful
+creation does not establish reimbursement or payment.
+
+Source inference requires one literal metadata endpoint, recognizable protocol
+implementation, one attachment-like ID property in the operation's source module,
+and a mutation with one object input. This is declared evidence, not proof of the
+application's input schema. Multiple candidates are omitted. Custom input fields
+still require the application's schema or caller knowledge. The default client
+file cap is 15 MB; it is not a claim about the server's own limit.

@@ -185,3 +185,17 @@ and permitted headers. Both refuse redirects and automatic retries.
 The generated command validates local inputs and explicit confirmation before
 opening a browser or sending any write. It reports the failed stage after an
 uncertain outcome and never replays a completed upload or business write.
+
+`upload_discovery.py` recognizes protocol endpoints and candidate attachment
+properties. `upload_inference.py` requires an unambiguous declaring module and
+operation input; it emits the immutable versioned `UploadWorkflow` record from
+`upload_workflows.py`. Normalization can produce the same contract from saved
+source reports, so independent upstream producers do not need a separate assembly
+step. Its assignment preserves the original manifest hash before deriving data.
+
+`upload_generation.py` generates the Python helper, command metadata and portable
+rebuild contract. `upload_runtime.py` snapshots and validates local bytes, computes
+the protocol checksum and SHA-256, performs the three stages and reports failure
+uncertainty. The generated CLI validates a local preview without opening a browser.
+Only the operation-document GraphQL backend currently composes this protocol;
+other backends and upload protocols require additional implementations.
