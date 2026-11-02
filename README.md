@@ -23,7 +23,7 @@ discover: sign in and explore the website
    -> captures/walk/manifest.json
 normalize: validate definitions and report each API's status
    -> captures/walk/normalized.json
-generate: select a ready API and create its Python package and CLI
+build: select a ready API and create its complete Python project
    -> clients/site-client/
 ```
 
@@ -83,12 +83,13 @@ results so they can be completed later.
 ### 4. Generate the standalone client
 
 ```sh
-poetry run website-client generate --manifest ./captures/walk/normalized.json --name site-client --output ./clients/site-client
+poetry run website-client build --manifest ./captures/walk/normalized.json --name site-client --login-url https://app.example.com --output ./clients/site-client
 ```
 
-This also runs offline. It creates a standalone Python project, API methods,
-endpoint commands and `generation.json`, which records which definitions were
-used. Generation does not call the service's business operations. GraphQL operation
+This also runs offline. Use the website login URL from step 2. It creates a complete
+Python project with API methods, endpoint commands, README, tests, runtime defaults
+and portable rebuild inputs. `generation.json` records the definitions used. No
+service operation is executed during generation. GraphQL operation
 clients validate declared variables and return JSON dictionaries. Unknown custom
 input fields and response shapes remain untyped without an optional schema;
 `generation.json` records whether schema validation was available.
@@ -97,7 +98,7 @@ input fields and response shapes remain untyped without an optional schema;
 
 ```sh
 cd clients/site-client
-poetry install
+poetry install --with dev
 poetry run site-client --help
 ```
 
@@ -184,11 +185,35 @@ poetry run website-client discover --url https://app.example.com --explore --out
 
 The command inventories form actions, methods, upload types, named fields,
 constraints and submitter overrides. It also extracts GraphQL query and mutation
-documents from supported source literals in loaded same-origin frontend modules.
+documents from supported source literals in page HTML and scripts loaded by that
+page, including scripts served from asset origins.
 Forms and frontend documents are **declarations**, not verified backend contracts.
 They are marked as unexecuted. Mutations can be included in the generated operation
 documents without being called. Each declaration records whether its document
-could be exported; inline literals are excluded from exported documents.
+could be exported. Typed Boolean defaults and bounded pagination constants are
+preserved; opaque data literals are withheld with a document-omission reason.
+
+Initial-page inspection waits for application hydration and request activity.
+Visible, empty search fields are exercised to expose listing requests that may
+not run when rows are already rendered. The field is restored to empty. Existing
+search text is skipped, field values are not read, and forms are not submitted.
+Search counts against the configured control-action limit. Each page receives
+at most the larger of three actions or the total action budget divided by the
+page budget, bounded by the total budget. This prevents one page's pagination
+from consuming the whole graph walk.
+Creation screens are visited before global menus and pagination; hidden controls
+are excluded before applying the control-count limit. Explicit `type="button"`
+creation controls may be opened inside a form, but submit controls are excluded.
+
+Source strings may declare response fragments separately from their operations.
+Discovery joins uniquely declared fragment dependencies across loaded files.
+Missing, conflicting or cyclic fragments are reported and left unexported.
+
+Supply one `--graphql-endpoint HTTPS_URL` to assign unexecuted frontend operations
+to that API as well as probe its schema. No operation is called by that assignment.
+With multiple API endpoints, declarations remain unassigned until explicitly
+assigned through normalization. An observed request owns its operation name;
+a different source version is retained as evidence without replacing that request.
 
 During exploration, parsed GraphQL queries and GET/HEAD requests are permitted.
 API mutations, unknown POSTs and other write methods are blocked before sending;
@@ -197,7 +222,8 @@ submitted. The tool may open an Add, New, Edit, Create or Upload dialog, but it
 does not activate its submit controls. Input contents, selected values and hidden
 tokens are not collected. Off-site document navigation is blocked and routed
 WebSockets are not connected to their servers,
-service workers are disabled, and the login tab is replaced before exploration.
+service workers are disabled, and the authenticated tab is retained while its
+scripts are reset. Tab-scoped application state survives the reset.
 
 Defaults are 20 pages, 60 control actions, link depth 3 and 120 seconds of
 exploration. Change them with `--max-pages`, `--max-actions`, `--max-depth` and
@@ -216,15 +242,15 @@ OpenAPI definition. See [API coverage and architecture](ARCHITECTURE.md#http-dis
 
 This is a bounded traversal, not proof of whole-site coverage. Custom widgets,
 popups, cross-site pages, persisted GraphQL operations and unknown read-via-POST
-APIs may be skipped or blocked. Only loaded same-origin scripts and literal
-GraphQL tags or `body` strings are inspected; minified/computed operation formats
+APIs may be skipped or blocked. Loaded page-owned scripts, including asset-origin
+scripts, and GraphQL documents stored as literal strings are inspected; minified/computed operation formats
 may not be understood. GET endpoints can have server-side effects despite their
 method. A page visit or form declaration does not establish payment, submission
 or approval. Review declared contracts before using them for writes.
 
 Inspection also has fixed limits: 200 links or controls per state, 100 retained
-forms with up to 100 fields each, and 30 loaded frontend modules of up to 1 MiB
-each with an 8 MiB combined source budget. Truncation and pending work are reported.
+forms with up to 100 fields each, and 4096 page/script sources of up to 4 MiB
+each with a 32 MiB combined source budget. Truncation and pending work are reported.
 
 ## Find service definitions on the current page
 
@@ -325,8 +351,9 @@ Automatic discovery checks the definition locations described above. For manual
 capture, open the website's known schema or specification endpoint while recording,
 or import a HAR containing that response. Manual capture does not probe additional
 URLs. Neither mode manufactures a GraphQL schema from examples. Operations
-with inline literal values are omitted from exported GraphQL documents; comments
-and runtime variables are excluded. Authentication-related routes are omitted.
+with opaque data literals are omitted from exported GraphQL documents; typed
+Boolean defaults and bounded pagination constants remain part of the contract.
+Comments and runtime variable values are excluded. Authentication-related routes are omitted.
 
 The default maximum is 1,000 entries; use `--max-entries N` up to 10,000. HAR input
 is limited to 32 MiB, captured request/response bodies to 1 MiB, and browser
@@ -466,3 +493,105 @@ and verification-code fixture. The container has no host mounts or external
 network during execution. Playwright's bundled Node driver runs inside the
 container. No production credentials are used.
 These tests do not establish production service compatibility.
+
+## Generate a complete client project
+
+`build` produces a complete Poetry project from saved API manifests:
+Python methods and docstrings, CLI/help, runtime defaults, README, synthetic tests
+and portable inputs for rebuilding. No browser login or service calls occur during
+this command. It dispatches through the same backends as `generate`:
+
+| API input | Backend output |
+| --- | --- |
+| REST/HTTP OpenAPI definition, published or reviewed inference | Typed REST endpoint methods and models from openapi-python-client |
+| GraphQL schema with operation documents | Typed methods and models from Ariadne Codegen |
+| Captured GraphQL operation documents without a schema | Named methods with declared-variable checks and JSON responses |
+
+`generate` remains available for SDK generation without complete-project packaging.
+
+From this generator checkout, after `poetry sync --with dev`, use an existing
+manifest from `discover`, `import` or `normalize`:
+
+```sh
+poetry run website-client build \
+  --manifest ./capture/manifest.json \
+  --name example-client \
+  --login-url https://app.example.com \
+  --output ./example-client
+```
+
+This example requires your own capture at `./capture/manifest.json` and the actual
+website login URL. Repeat `--manifest` to merge inputs automatically. Use `--service`
+when the inputs contain multiple APIs. Add `--require-operation OPERATION_NAME`
+for each operation the client must contain; a missing operation prevents publication.
+These requirements are retained in `client-project.json`. An inferred HTTP definition requires review
+and explicit `--allow-inferred`; the project file preserves that permission for
+rebuilds. Add `--session-header HEADER_NAME` for each
+additional header required by the website, never its value. These settings become
+runtime defaults, so the generated CLI needs only `OPERATION --login` for reads
+without required variables. Other operations use the fields shown in their help.
+
+An existing compatible Poetry lock can be supplied with `--lockfile PATH`. The
+builder copies and validates it before publication; a mismatch leaves output
+absent. Without this input, `poetry install` resolves dependencies and creates a
+lock, so dependency versions are not yet pinned. No dependency update is implicit
+in rebuilding a locked project.
+
+The generated README contains installation, test and usage commands. All output
+files can be regenerated without edits using its version 1 project definition:
+
+```sh
+poetry run website-client build \
+  --project ./example-client/client-project.json \
+  --output ./example-client-rebuilt
+```
+
+Both output directories must be new, with existing parent directories. A saved
+project resolves paths relative to its own file and refuses command-line setting
+overrides. It contains `name`, `manifests`, `loginUrl`, `sessionHeaders`, optional
+`service`, optional `lockfile`, boolean `allowInferred` (default false), and
+`requiredOperations` (default empty). Unknown fields, including credential fields,
+are rejected. Its shipped input manifest retains only the selected API definition
+and required operation documents or HTTP conventions. Original capture reports and private source
+locations are excluded. Review operation documents before publishing any client;
+their literal contents are preserved.
+
+## Upload a file before a mutation
+
+Generated operation clients can attach a local file when discovery identifies a
+supported upload protocol and the mutation's attachment input. The initial
+protocol is Rails Active Storage direct uploads. This is reusable protocol
+support: application URLs, operation names and attachment fields come from the
+manifest. Other upload protocols are not yet supported.
+
+Use `build --require-upload OPERATION_NAME` to refuse a project when its upload
+contract is missing. This is stronger than `--require-operation`, which only
+requires the mutation itself. The requirement is saved in `client-project.json`.
+
+The generated mutation's help includes `--receipt FILE` and `--preview` when an
+upload contract is available. Prepare the operation's normal JSON input using its
+help and the application's actual fields; omit the attachment field. Then run
+that command with `--input INPUT.json --receipt FILE --preview` to inspect its
+variables, file size/hash, metadata endpoint and API endpoint. Preview is local,
+sends no requests and requires no write confirmation.
+
+To execute the same flow, remove `--preview` and add `--login` and
+`--confirm-write OPERATION_NAME`. This writes remote data. One login covers the
+metadata POST, exact-byte storage PUT and mutation. The signed blob ID is inserted
+into the declared attachment field without changing the other input values.
+Python callers use the generated `<method>_with_file` helper, an authenticated
+metadata client when the application origin differs from the API, and explicit
+`allow_writes=True`. The generated README and docstrings explain those inputs.
+
+Storage receives no application cookies or authentication headers. Requests do
+not follow redirects or retry automatically. Errors identify metadata, storage or
+mutation as the failed stage. An upload can remain unattached if creation fails;
+check the application before retrying an uncertain expense submission. Successful
+creation does not establish reimbursement or payment.
+
+Source inference requires one literal metadata endpoint, recognizable protocol
+implementation, one attachment-like ID property in the operation's source module,
+and a mutation with one object input. This is declared evidence, not proof of the
+application's input schema. Multiple candidates are omitted. Custom input fields
+still require the application's schema or caller knowledge. The default client
+file cap is 15 MB; it is not a claim about the server's own limit.

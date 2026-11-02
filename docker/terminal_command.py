@@ -134,12 +134,12 @@ class Command:
         for kind in ("mousePressed", "mouseReleased"):
             self.connection.call("Input.dispatchMouseEvent", {"type": kind, **position})
 
-    def wait(self):
+    def wait(self, timeout_seconds=DEFAULT_WAIT_TIMEOUT_SECONDS):
         def done():
             self.pump()
             return self.status is not None
 
-        eventually(done)
+        eventually(done, timeout_seconds=timeout_seconds)
         return self.status
 
     def cleanup_verified(self):

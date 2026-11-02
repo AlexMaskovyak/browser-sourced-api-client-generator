@@ -38,6 +38,7 @@ class GeneratedProject:
 
     Backends own generated request code; shared packaging adds browser transport,
     CLI entry points and reports after backend generation succeeds."""
+
     directory: Path
     package_name: str
     operations: dict
@@ -294,8 +295,99 @@ def generate_graphql_project(stage, name, package, source, operations_path):
     return GeneratedProject(project, package, operations, "ariadne-codegen")
 
 
+def document_backend_operations(project):
+    """Fill missing endpoint docstrings without replacing upstream documentation.
+
+    Use actual generated Python signatures so aliases and required parameters
+    match the callable. Do not invent business meaning for parameter names or
+    assert that backend Python methods implement the CLI's write-confirmation rule.
+    """
+    grouped = {}
+    for name, operation in project.operations.items():
+        if operation["kind"] == "graphql-operation":
+            continue  # This backend already emits its own complete operation docs.
+        if operation["kind"] == "openapi":
+            path = project.directory.joinpath(
+                *operation["module"].split(".")
+            ).with_suffix(".py")
+            method = "sync_detailed"
+        else:
+            path = project.directory / project.package_name / "client.py"
+            method = operation["method"]
+        grouped.setdefault(path, {})[method] = (name, operation)
+    for path, methods in grouped.items():
+        source = path.read_text()
+        lines, edits = source.splitlines(keepends=True), []
+        for node in ast.walk(ast.parse(source)):
+            if (
+                not isinstance(node, ast.FunctionDef)
+                or node.name not in methods
+                or ast.get_docstring(node)
+            ):
+                continue
+            name, operation = methods[node.name]
+            required = len(node.args.posonlyargs + node.args.args) - len(
+                node.args.defaults
+            )
+            arguments = [
+                (item, index < required)
+                for index, item in enumerate(node.args.posonlyargs + node.args.args)
+            ]
+            arguments += [
+                (item, default is None)
+                for item, default in zip(node.args.kwonlyargs, node.args.kw_defaults)
+            ]
+            text = [f"Execute API operation {name}.", "", "Args:"]
+            for argument, needed in arguments:
+                if argument.arg in {"self", "client"}:
+                    continue
+                annotation = (
+                    ast.unparse(argument.annotation) if argument.annotation else "Any"
+                )
+                text.append(
+                    f"    {argument.arg}: {annotation}; {'required' if needed else 'optional'}."
+                )
+            text.extend(
+                [
+                    "",
+                    "Returns:",
+                    "    The response/model declared by the API definition.",
+                    "",
+                    "Transport and response errors follow the generated backend's behavior.",
+                    "No automatic retry occurs.",
+                ]
+            )
+            if operation["write"]:
+                text.extend(
+                    [
+                        "",
+                        "The CLI requires explicit --confirm-write for this operation.",
+                        "This Python method does not enforce that CLI confirmation.",
+                    ]
+                )
+            # Escape the delimiter because schema-derived annotation strings may
+            # contain quotes. Documentation must never change executable syntax.
+            body = "\n".join(text).replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+            indent = " " * node.body[0].col_offset
+            edits.append(
+                (
+                    node.body[0].lineno - 1,
+                    indent
+                    + '"""'
+                    + body.replace("\n", "\n" + indent)
+                    + "\n"
+                    + indent
+                    + '"""\n',
+                )
+            )
+        for index, text in sorted(edits, reverse=True):
+            lines.insert(index, text)
+        path.write_text("".join(lines))
+
+
 def write_runtime_files(project):
     """Copy only the standalone runtime, never the generator implementation."""
+    document_backend_operations(project)
     target = project.directory / project.package_name
     for output_name, source_name in RUNTIME_SOURCES.items():
         target.joinpath(output_name).write_text(

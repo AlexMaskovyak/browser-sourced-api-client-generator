@@ -250,6 +250,8 @@ def normalize_manifest(manifest: Manifest, *, bind_schema=(), bind_operations=()
         sources = sources or ()
         if source not in sources:
             sources += (source,)
+    from .upload_generation import assign_upload_operations
+    manifest = assign_upload_operations(manifest)
     artifacts = ArtifactIndex({item.id: item for item in manifest.artifacts})
     targets = {item.id: item for item in manifest.services}
     apply_bindings(targets, artifacts, bind_schema, schema=True)

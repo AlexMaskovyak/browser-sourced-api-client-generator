@@ -253,3 +253,201 @@ def test_exploration_cli_validation_precedes_login(monkeypatch, tmp_path, argume
     monkeypatch.setattr("website_client.cli.BrowserSession", factory)
     assert main(["discover", "--output", str(tmp_path / "new"), *arguments]) == 1
     factory.assert_not_called()
+
+
+def test_frontend_inspects_scripts_loaded_from_asset_origins_for_owned_page():
+    connection = Mock()
+    connection.call.return_value = {
+        "body": 'const document={query: "query Expenses($first:Int) { expenses(first:$first) { id status } }"};'
+    }
+    discovery = Discovery()
+    frontend = FrontendContracts(connection, discovery, ("example.test", 443))
+    frontend.event(
+        "Network.requestWillBeSent",
+        {
+            "requestId": "asset",
+            "type": "Script",
+            "documentURL": "https://example.test/expenses",
+            "request": {"url": "https://assets.example.net/expenses.js"},
+        },
+    )
+    frontend.event(
+        "Network.responseReceived",
+        {
+            "requestId": "asset",
+            "type": "Script",
+            "response": {"url": "https://assets.example.net/expenses.js"},
+        },
+    )
+    frontend.event("Network.loadingFinished", {"requestId": "asset"})
+    frontend.drain()
+    assert frontend.modules[0]["sourceInspected"] is True
+    assert frontend.modules[0]["operations"][0]["name"] == "Expenses"
+    assert discovery.documents
+
+
+def test_unowned_cross_origin_scripts_are_not_inspected():
+    connection = Mock()
+    frontend = FrontendContracts(connection, Discovery(), ("example.test", 443))
+    frontend.event(
+        "Network.requestWillBeSent",
+        {
+            "requestId": "other",
+            "type": "Script",
+            "documentURL": "https://other.test/app",
+            "request": {"url": "https://assets.example.net/other.js"},
+        },
+    )
+    frontend.event(
+        "Network.responseReceived",
+        {
+            "requestId": "other",
+            "type": "Script",
+            "response": {"url": "https://assets.example.net/other.js"},
+        },
+    )
+    frontend.event("Network.loadingFinished", {"requestId": "other"})
+    frontend.drain()
+    connection.call.assert_not_called()
+    assert not frontend.modules
+
+
+def test_document_inline_operation_declarations_are_inspected_without_exporting_values():
+    connection = Mock()
+    connection.call.return_value = {
+        "body": '<script>window.secret="do-not-export";const doc={query:"query PageExpenses { expenses { id status } }"};</script>'
+    }
+    discovery = Discovery()
+    frontend = FrontendContracts(connection, discovery, ("example.test", 443))
+    frontend.event(
+        "Network.responseReceived",
+        {
+            "requestId": "doc",
+            "type": "Document",
+            "response": {"url": "https://example.test/expenses"},
+        },
+    )
+    frontend.event("Network.loadingFinished", {"requestId": "doc"})
+    frontend.drain()
+    assert frontend.modules[0]["sourceType"] == "Document"
+    assert "PageExpenses" in discovery.files("browser")["operations.graphql"]
+    assert "do-not-export" not in str(discovery.files("browser"))
+
+
+def test_prepare_retains_the_authenticated_tab_and_session_storage():
+    page = Mock()
+    connection = Mock()
+    browser = SimpleNamespace(
+        current_url=lambda: "https://example.test/expenses",
+        _origin=("example.test", 443),
+        _page=page,
+        _connection=connection,
+        _context=Mock(),
+        _block_service_workers=True,
+        connection_for=Mock(),
+    )
+    explorer = SiteExplorer(browser)
+    explorer.prepare()
+    assert browser._page is page
+    page.goto.assert_called_once_with("about:blank", wait_until="commit")
+    page.close.assert_not_called()
+    browser._context.new_page.assert_not_called()
+
+
+def test_page_creation_control_precedes_global_add_menu(monkeypatch):
+    """A global Add control must not consume the page's creation action budget."""
+    page = SimpleNamespace(url="https://example.test/expenses/team")
+    session = SimpleNamespace(current_url=lambda: page.url, _page=page)
+    explorer = SiteExplorer(session, max_actions=1)
+    explorer.deadline_seconds = time.monotonic() + 10
+    global_add, expense_add = Mock(), Mock()
+    for control in (global_add, expense_add):
+        control.locator.return_value.count.return_value = 0
+    monkeypatch.setattr(explorer, "_controls", lambda: iter([
+        (global_add, "Add shortcuts", "form_dialog", 0),
+        (expense_add, "Add expense", "form_dialog", 1),
+    ]))
+    monkeypatch.setattr(explorer, "_inspect", Mock())
+    monkeypatch.setattr(explorer, "_settle", Mock())
+    explorer._walk_controls(SimpleNamespace(discovery=SimpleNamespace(entries=[])), Mock(), 0,
+                            forms_only=True)
+    expense_add.click.assert_called_once()
+    global_add.click.assert_not_called()
+
+
+def test_source_budget_retains_feature_contract_after_shared_chunks():
+    """More than sixty shared chunks must not hide the feature declaration."""
+    connection = Mock()
+    connection.call.return_value = {"body": "export const utility = 1;"}
+    discovery = Discovery()
+    frontend = FrontendContracts(connection, discovery, ("example.test", 443))
+    for index in range(70):
+        frontend.event("Network.responseReceived", {
+            "requestId": str(index), "type": "Script",
+            "response": {"url": f"https://example.test/shared-{index}.js"},
+        })
+        frontend.event("Network.loadingFinished", {"requestId": str(index)})
+    frontend.drain()
+    connection.call.return_value = {"body": 'const operation={query:"mutation CreateRecord($input: RecordInput!) { createRecord(input:$input) { id } }"};'}
+    frontend.event("Network.responseReceived", {
+        "requestId": "feature", "type": "Script",
+        "response": {"url": "https://example.test/create.js"},
+    })
+    frontend.event("Network.loadingFinished", {"requestId": "feature"})
+    frontend.drain()
+    assert frontend.modules[-1]["operations"][0]["name"] == "CreateRecord"
+    assert frontend.modules[-1]["operations"][0]["executed"] is False
+
+
+def test_fragments_from_later_modules_complete_writes_without_execution():
+    """A separately bundled response fragment must be included in the write document."""
+    connection, discovery = Mock(), Discovery()
+    frontend = FrontendContracts(connection, discovery, ("example.test", 443))
+    def load(identifier, source):
+        connection.call.return_value = {"body": source}
+        frontend.event("Network.responseReceived", {
+            "requestId": identifier, "type": "Script",
+            "response": {"url": f"https://example.test/{identifier}.js"},
+        })
+        frontend.event("Network.loadingFinished", {"requestId": identifier})
+        frontend.drain()
+    load("create", 'const query="mutation Create($input: Input!) { create(input:$input) { ...Receipt } }";')
+    assert not discovery.documents
+    assert frontend.modules[0]["operations"][0]["unresolvedFragments"] == ["Receipt"]
+    load("fragment", 'const fields="fragment Receipt on Receipt { id ...Amount }"; const amount="fragment Amount on Receipt { amount }";')
+    assert len(discovery.documents) == 1
+    text = next(iter(discovery.documents.values()))
+    assert "fragment Receipt" in text and "fragment Amount" in text
+    assert frontend.modules[0]["operations"][0]["documentExported"]
+    load("conflict", 'const conflicting="fragment Receipt on Receipt { privateField }";')
+    assert not discovery.documents
+    assert frontend.modules[0]["operations"][0]["unresolvedFragments"] == ["Receipt"]
+
+
+def test_cyclic_source_fragments_cannot_be_exported():
+    connection, discovery = Mock(), Discovery()
+    frontend = FrontendContracts(connection, discovery, ("example.test", 443))
+    connection.call.return_value = {"body": 'const query="mutation Save { save { ...A } } fragment A on Item { ...B } fragment B on Item { ...A }";'}
+    frontend.event("Network.responseReceived", {"requestId": "cycle", "type": "Script",
+                   "response": {"url": "https://example.test/cycle.js"}})
+    frontend.event("Network.loadingFinished", {"requestId": "cycle"})
+    frontend.drain()
+    assert not discovery.documents
+    assert frontend.modules[0]["operations"][0]["unresolvedFragments"]
+
+
+def test_first_page_cannot_spend_the_whole_graph_walk_on_pagination(monkeypatch):
+    page = Mock()
+    page.url = "https://example.test/records"
+    browser = SimpleNamespace(current_url=lambda: page.url, _page=page)
+    explorer = SiteExplorer(browser, max_pages=20, max_actions=60)
+    explorer.deadline_seconds = time.monotonic() + 10
+    capture = SimpleNamespace(discovery=SimpleNamespace(entries=[]))
+    next_page = Mock()
+    next_page.click.side_effect = lambda **_: capture.discovery.entries.append({"response": {"status": 200}})
+    monkeypatch.setattr(explorer, "_controls", lambda: iter([(next_page, "Next", "pagination", 0)]))
+    monkeypatch.setattr(explorer, "_inspect", Mock())
+    monkeypatch.setattr(explorer, "_settle", Mock())
+    explorer._walk_controls(capture, Mock(), 0)
+    assert next_page.click.call_count == 3
+    assert len(explorer.actions) < explorer.max_actions
