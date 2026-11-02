@@ -87,9 +87,25 @@ def json_body(raw):
 
 
 class LiteralCheck(Visitor):
+    """Exclude opaque data literals while retaining typed query controls.
+
+    Boolean variable defaults and bounded pagination arguments are part of the
+    request contract. Treating them like account IDs made valid listing queries
+    disappear. Arbitrary strings, IDs, enums and data arguments remain omitted.
+    """
+
     found = False
 
-    def enter(self, node, *_args):
+    def enter(self, node, key, parent, path, ancestors):
+        if node.kind == "boolean_value" and getattr(parent, "kind", "") == "variable_definition":
+            declared = parent.type
+            while hasattr(declared, "type"):
+                declared = declared.type
+            if getattr(getattr(declared, "name", None), "value", None) == "Boolean":
+                return
+        if node.kind == "int_value" and getattr(parent, "kind", "") == "argument":
+            if parent.name.value in {"first", "last", "limit", "offset"} and 0 <= int(node.value) <= 10000:
+                return
         if node.kind in {"string_value", "int_value", "float_value", "enum_value", "boolean_value"}:
             self.found = True
 
@@ -109,7 +125,8 @@ def operation(payload):
         visit(document, checker)
         return {"name": selected.name.value, "kind": selected.operation.value,
                 "document": None if checker.found else print_ast(document),
-                "variables": {item.variable.name.value: print_ast(item.type) for item in selected.variable_definitions}}
+                "documentOmissionReason": "opaque_data_literal" if checker.found else None,
+                "variables": {item.variable.name.value: print_ast(item.type) for item in selected.variable_definitions or ()}}
     except Exception: return None
 
 

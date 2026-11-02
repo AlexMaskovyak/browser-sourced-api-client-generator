@@ -177,3 +177,22 @@ def test_actual_sdl_response_and_non_json_request_coverage():
     files = discovery.files("har")
     assert "private-unmodeled-form" not in json.dumps(files)
     assert any(item.get("requestBodyUnmodeled") for item in discovery.endpoints.values())
+
+
+def test_listing_contract_exports_boolean_defaults_and_bounded_pagination():
+    discovery = Discovery()
+    query = 'query Expenses($includeVendors: Boolean = false, $team: Boolean!) { member { expenses(team: $team) { vendors(first: 100) { nodes { id name } } } } }'
+    discovery.add(entry('https://example.test/graphql', {'operationName':'Expenses','query':query,'variables':{'team':True}}))
+    document = next(iter(discovery.endpoints.values()))['graphql']['document']
+    assert document is not None
+    assert 'Boolean = false' in document and 'first: 100' in document
+    assert 'query Expenses' in discovery.files('browser')['operations.graphql']
+
+
+@pytest.mark.parametrize('fragment',['vendor(id: 123)', 'vendors(first: 999999999)', 'vendors(first: -123)', 'vendors(name: "private-person")'])
+def test_data_literals_and_unbounded_controls_remain_omitted(fragment):
+    discovery=Discovery()
+    discovery.add(entry('https://example.test/graphql',{'operationName':'Expenses','query':'query Expenses { '+fragment+' { id } }'}))
+    metadata=next(iter(discovery.endpoints.values()))['graphql']
+    assert metadata['document'] is None
+    assert metadata['documentOmissionReason']=='opaque_data_literal'
