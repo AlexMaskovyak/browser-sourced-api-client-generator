@@ -434,3 +434,20 @@ def test_cyclic_source_fragments_cannot_be_exported():
     frontend.drain()
     assert not discovery.documents
     assert frontend.modules[0]["operations"][0]["unresolvedFragments"]
+
+
+def test_first_page_cannot_spend_the_whole_graph_walk_on_pagination(monkeypatch):
+    page = Mock()
+    page.url = "https://example.test/records"
+    browser = SimpleNamespace(current_url=lambda: page.url, _page=page)
+    explorer = SiteExplorer(browser, max_pages=20, max_actions=60)
+    explorer.deadline_seconds = time.monotonic() + 10
+    capture = SimpleNamespace(discovery=SimpleNamespace(entries=[]))
+    next_page = Mock()
+    next_page.click.side_effect = lambda **_: capture.discovery.entries.append({"response": {"status": 200}})
+    monkeypatch.setattr(explorer, "_controls", lambda: iter([(next_page, "Next", "pagination", 0)]))
+    monkeypatch.setattr(explorer, "_inspect", Mock())
+    monkeypatch.setattr(explorer, "_settle", Mock())
+    explorer._walk_controls(capture, Mock(), 0)
+    assert next_page.click.call_count == 3
+    assert len(explorer.actions) < explorer.max_actions

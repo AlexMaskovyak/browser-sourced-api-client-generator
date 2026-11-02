@@ -7,7 +7,8 @@ from types import SimpleNamespace
 from urllib.parse import urljoin, urlsplit
 
 from .browser import BrowserError, NAVIGATION_TIMEOUT_MILLISECONDS
-from .contracts import inspect_forms, FrontendContracts
+from .contracts import (inspect_forms, FrontendContracts, MAX_MODULES,
+                        MAX_MODULE_BYTES, MAX_SOURCE_BYTES)
 from .discovery import MAX_BODY, json_body, shape, operation
 from .exploration_policy import (
     clean_navigation,
@@ -61,6 +62,10 @@ class SiteExplorer:
         self.max_pages = max_pages
         self.max_actions = max_actions
         self.max_depth = max_depth
+        # Share the action budget across pages instead of spending it entirely
+        # on pagination or global menus of the first page.
+        self.max_actions_per_page = min(max_actions, max(3, max_actions // max_pages))
+        self.page_action_start = 0
         self.duration_seconds = duration_seconds
         self.frontend = None
         self.queue = deque([(self.start_url, 0)])
@@ -379,24 +384,25 @@ class SiteExplorer:
     def _controls(self):
         page = self.session._page
         controls = page.locator(
-            'summary, [role="tab"], button[aria-expanded], button[aria-haspopup], button, [role="button"]'
-        )
+            'summary, [role="tab"], button[aria-expanded], button[aria-haspopup], button, [role="button"], a[href]'
+        ).filter(visible=True)
         if controls.count() > MAX_ELEMENTS:
             self.omitted += controls.count() - MAX_ELEMENTS
         for index in range(min(controls.count(), MAX_ELEMENTS)):
             control = controls.nth(index)
             if not control.is_visible() or not control.is_enabled():
                 continue
-            # Even a menu-labelled button can be a submitter. Never click it
-            # inside a form; the form inventory supplies its declaration.
-            if (
-                control.locator('xpath=ancestor::*[self::form or @role="form"]').count()
-                or control.get_attribute("form") is not None
-            ):
-                continue
             text = control.inner_text(timeout=ACTION_TIMEOUT_MILLISECONDS)
             text = control.get_attribute("aria-label") or text
             opens_form = bool(OPEN_FORM.match(text.strip()))
+            # Explicit non-submitting form buttons may open another screen.
+            # All implicit/native submitters remain excluded; the request guard
+            # still blocks writes regardless of a button's label or type.
+            if control.get_attribute("form") is not None or (
+                control.locator('xpath=ancestor::*[self::form or @role="form"]').count()
+                and not (control.get_attribute("type") == "button" and opens_form)
+            ):
+                continue
             href = control.get_attribute("href")
             if href and not clean_navigation(page.url, href, self.session._origin):
                 continue
@@ -527,6 +533,7 @@ class SiteExplorer:
     def _walk_controls(self, capture, observer, depth, *, forms_only=False):
         while (
             len(self.actions) < self.max_actions
+            and len(self.actions) - self.page_action_start < self.max_actions_per_page
             and time.monotonic() < self.deadline_seconds
         ):
             self._inspect(observer, depth)
@@ -588,6 +595,9 @@ class SiteExplorer:
                         )
                     self._inspect(observer, depth + 1)
                     return
+                if forms_only:
+                    self._inspect(observer, depth)
+                    return
             except Exception:
                 action["outcome"] = "unavailable"
             finally:
@@ -611,6 +621,7 @@ class SiteExplorer:
                 continue
             self.visited.add(url)
             self.current_depth = depth
+            self.page_action_start = len(self.actions)
             record = {"url": safe_address(url), "depth": depth, "outcome": "failed"}
             self.pages.append(record)
             try:
@@ -653,6 +664,9 @@ class SiteExplorer:
             "actions": self.actions,
             "forms": self.forms,
             "frontendModules": self.frontend.modules,
+            "sourceInspectionLimits": {"sources": MAX_MODULES, "bytesPerSource": MAX_MODULE_BYTES,
+                                       "totalBytes": MAX_SOURCE_BYTES},
+            "sourceBytesInspected": self.frontend.bytes_read,
             "blockedRequests": self.blocked,
             "skippedControls": self.skipped,
             "queuedPagesNotVisited": len(self.queue),
