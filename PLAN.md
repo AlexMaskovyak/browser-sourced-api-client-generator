@@ -1,25 +1,17 @@
 # Current work
 
-Produce a complete installable Python client from one repeatable project command.
+Build complete Python client projects for every supported API backend through the
+same command: REST/OpenAPI, GraphQL with a schema, and captured GraphQL operations.
 
-1. Add a versioned project file referencing portable input manifests, runtime
-   defaults and an optional existing Poetry lock. A build command merges and
-   normalizes the inputs, invokes generation and publishes one complete project.
-2. Generate runtime defaults, source inputs, README, synthetic checks and Poetry
-   development configuration. Keep capture lineage private and publish only hashes.
-   Never execute live operations during a build or embed credential values.
-3. Add a public Gusto project definition with its reviewed operation/request inputs
-   and header names. Build twice, compare every output file, install/test/build the
-   untouched result and document exact commands. Run full tests and Docker checks.
+1. Dispatch complete builds through the existing generation pipeline. Preserve
+   selected definitions, inferred-contract review permission and runtime defaults
+   in portable rebuild inputs. Keep protocol-specific request code in its backend.
+2. Generate accurate README examples and synthetic tests for each backend, without
+   inventing response/input models or treating writes as reads.
+3. Verify complete output, exact rebuilding, CLI defaults and generated checks for
+   all three backend paths. Run shared tests and clean-container scenarios, then
+   update the PR around the complete behavior.
 
-The project file is the reproducible source of configuration. The generator owns
-all output files; no post-generation copying, source edits or metadata cleanup.
-Coverage is the captured operation set, not an assertion of every service endpoint.
-
-## Result
-
-The complete builder now owns every output file. Gusto was generated from two
-saved manifests through the build command, then rebuilt from its shipped project
-file. All 34 files match byte for byte. Its untouched Poetry installation,
-17 generated checks, wheel/source builds and endpoint help passed. Shared checks:
-210 tests and 26 Docker scenarios. No live operation was sent by this build.
+Complete means one build command owns each installable project. It does not imply
+complete website coverage or permission to execute live writes. Failure preserves
+existing output and publishes no partially enriched project.
