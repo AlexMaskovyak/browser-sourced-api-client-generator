@@ -136,13 +136,19 @@ def main(args=None):
     from .pipeline import add_commands, run_offline, generate_bundle
 
     add_commands(commands, generate_command, definition)
-    from .project_generation import add_build_command, project_from_options, build_project
+    from .project_generation import (
+        add_build_command,
+        project_from_options,
+        build_project,
+    )
 
     add_build_command(commands)
     options = parser.parse_args(args)
     try:
         if options.command == "build":
-            print(json.dumps(build_project(project_from_options(options), options.output)))
+            print(
+                json.dumps(build_project(project_from_options(options), options.output))
+            )
             return 0
         if options.command in {"normalize", "import"}:
             run_offline(options)
@@ -352,9 +358,24 @@ def main(args=None):
     except BrowserError as error:
         print(str(error), file=sys.stderr)
         return 1
-    except Exception:
+    except Exception as error:
+        from traceback import extract_tb
+
+        locations = [
+            frame
+            for frame in extract_tb(error.__traceback__)
+            if "/website_client/" in frame.filename
+        ]
+        location = locations[-1] if locations else None
+        detail = (
+            f"{type(error).__name__} at {location.filename.rsplit('/', 1)[-1]}:{location.lineno}"
+            if location
+            else type(error).__name__
+        )
         print(
-            "Command failed. Check the inputs and use a new output directory before retrying.",
+            "Command failed ("
+            + detail
+            + "). Check the inputs and use a new output directory before retrying.",
             file=sys.stderr,
         )
         return 1

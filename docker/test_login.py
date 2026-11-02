@@ -393,7 +393,7 @@ def verify_exploration(site, root, *, limited=False):
         command.connect()
         complete_login(command, site)
         os.write(command.terminal, b"\n")
-        assert command.wait() == 0, command.output
+        assert command.wait(timeout_seconds=60) == 0, command.output
         command.cleanup_verified()
         report = json.loads((output / "exploration.json").read_text())
         assert len(report["pages"]) <= (1 if limited else 8)
@@ -575,10 +575,12 @@ def main():
                 verify_external_pipeline,
                 verify_browser_pipeline,
                 verify_complete_project,
+                verify_page_record_discovery,
             )
 
             for backend in ("openapi", "graphql", "operations"):
                 verify_complete_project(root, backend)
+            verify_page_record_discovery(site, root, complete_login, assert_no_credentials)
             verify_external_pipeline(root)
             verify_browser_pipeline(site, root, complete_login, assert_no_credentials)
         finally:

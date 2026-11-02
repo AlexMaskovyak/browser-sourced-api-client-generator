@@ -185,11 +185,19 @@ poetry run website-client discover --url https://app.example.com --explore --out
 
 The command inventories form actions, methods, upload types, named fields,
 constraints and submitter overrides. It also extracts GraphQL query and mutation
-documents from supported source literals in loaded same-origin frontend modules.
+documents from supported source literals in page HTML and scripts loaded by that
+page, including scripts served from asset origins.
 Forms and frontend documents are **declarations**, not verified backend contracts.
 They are marked as unexecuted. Mutations can be included in the generated operation
 documents without being called. Each declaration records whether its document
-could be exported; inline literals are excluded from exported documents.
+could be exported. Typed Boolean defaults and bounded pagination constants are
+preserved; opaque data literals are withheld with a document-omission reason.
+
+Initial-page inspection waits for application hydration and request activity.
+Visible, empty search fields are exercised to expose listing requests that may
+not run when rows are already rendered. The field is restored to empty. Existing
+search text is skipped, field values are not read, and forms are not submitted.
+Search counts against the configured control-action limit.
 
 During exploration, parsed GraphQL queries and GET/HEAD requests are permitted.
 API mutations, unknown POSTs and other write methods are blocked before sending;
@@ -198,7 +206,8 @@ submitted. The tool may open an Add, New, Edit, Create or Upload dialog, but it
 does not activate its submit controls. Input contents, selected values and hidden
 tokens are not collected. Off-site document navigation is blocked and routed
 WebSockets are not connected to their servers,
-service workers are disabled, and the login tab is replaced before exploration.
+service workers are disabled, and the authenticated tab is retained while its
+scripts are reset. Tab-scoped application state survives the reset.
 
 Defaults are 20 pages, 60 control actions, link depth 3 and 120 seconds of
 exploration. Change them with `--max-pages`, `--max-actions`, `--max-depth` and
@@ -217,15 +226,15 @@ OpenAPI definition. See [API coverage and architecture](ARCHITECTURE.md#http-dis
 
 This is a bounded traversal, not proof of whole-site coverage. Custom widgets,
 popups, cross-site pages, persisted GraphQL operations and unknown read-via-POST
-APIs may be skipped or blocked. Only loaded same-origin scripts and literal
-GraphQL tags or `body` strings are inspected; minified/computed operation formats
+APIs may be skipped or blocked. Loaded page-owned scripts, including asset-origin
+scripts, and supported GraphQL tags or `body`/`query` strings are inspected; minified/computed operation formats
 may not be understood. GET endpoints can have server-side effects despite their
 method. A page visit or form declaration does not establish payment, submission
 or approval. Review declared contracts before using them for writes.
 
 Inspection also has fixed limits: 200 links or controls per state, 100 retained
-forms with up to 100 fields each, and 30 loaded frontend modules of up to 1 MiB
-each with an 8 MiB combined source budget. Truncation and pending work are reported.
+forms with up to 100 fields each, and 60 page/script sources of up to 4 MiB
+each with a 32 MiB combined source budget. Truncation and pending work are reported.
 
 ## Find service definitions on the current page
 
@@ -326,8 +335,9 @@ Automatic discovery checks the definition locations described above. For manual
 capture, open the website's known schema or specification endpoint while recording,
 or import a HAR containing that response. Manual capture does not probe additional
 URLs. Neither mode manufactures a GraphQL schema from examples. Operations
-with inline literal values are omitted from exported GraphQL documents; comments
-and runtime variables are excluded. Authentication-related routes are omitted.
+with opaque data literals are omitted from exported GraphQL documents; typed
+Boolean defaults and bounded pagination constants remain part of the contract.
+Comments and runtime variable values are excluded. Authentication-related routes are omitted.
 
 The default maximum is 1,000 entries; use `--max-entries N` up to 10,000. HAR input
 is limited to 32 MiB, captured request/response bodies to 1 MiB, and browser

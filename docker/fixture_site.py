@@ -178,6 +178,18 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         target = urlsplit(self.path)
+        if self.site.page_records and target.path == "/records-data.js":
+            query = "query ListRecords($includeDetails: Boolean = false, $search: String) { records(first: 100, includeDetails: $includeDetails, search: $search) { nodes { id status } pageInfo { endCursor hasNextPage } } }"
+            script = (
+                "const contract={query:"
+                + json.dumps(query)
+                + "};document.querySelector('input[type=search]').addEventListener('input',event=>{const search=event.target.value;if(sessionStorage.getItem('record-scope')==='selected')setTimeout(()=>fetch('/graphql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operationName:'ListRecords',query:contract.query,variables:{search}})}).then(r=>r.json()).then(data=>document.getElementById('records').textContent=JSON.stringify(data)),800);});"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.end_headers()
+            self.wfile.write(script.encode())
+            return
         if self.authenticated and self.site.exploration:
             if target.path == "/logout":
                 self.site.logout_hits += 1
@@ -209,6 +221,15 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
         elif self.authenticated:
             self.site.counts["app"] += 1
             content = "<h1>Signed in</h1>"
+            if self.site.page_records:
+                asset_base = self.site.url.rsplit("/", 1)[0].replace(
+                    "127.0.0.1", "localhost"
+                )
+                content += (
+                    '<input type="search" placeholder="Search records"><table><tbody><tr><td>record-7</td><td>SUBMITTED</td></tr></tbody></table><div id="records"></div><script src="'
+                    + asset_base
+                    + '/records-data.js"></script>'
+                )
             if self.site.self_discovery:
                 # The fixture page makes an ordinary GraphQL read without
                 # project JavaScript. Discovery must observe it, not replay it.
@@ -247,6 +268,10 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
                 root_value={
                     "item": lambda _info, id: {"id": id, "name": "Example"},
                     "createItem": lambda _info, name: {"id": "2", "name": name},
+                    "records": lambda _info, **kwargs: {
+                        "nodes": [{"id": "record-7", "status": "SUBMITTED"}],
+                        "pageInfo": {"endCursor": None, "hasNextPage": False},
+                    },
                 },
             )
             self.send_json(result.formatted)
@@ -305,6 +330,7 @@ class Site:
         self.introspection_disabled = False
         self.introspection_reads = 0
         self.exploration = False
+        self.page_records = False
         self.logout_hits = 0
         self.schema = build_schema((FIXTURES_DIRECTORY / "schema.graphql").read_text())
         self.openapi = json.loads((FIXTURES_DIRECTORY / "openapi.json").read_text())
