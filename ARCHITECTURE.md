@@ -144,8 +144,9 @@ scripts remain excluded. Per-source, aggregate and source-count limits are fixed
 
 `Discovery` preserves typed Boolean defaults and bounded pagination literals while
 withholding opaque data literals. Withheld documents carry an explicit reason.
-Captured request/response evidence, rather than a declared frontend operation alone,
-assigns a document to its API endpoint. Client generation remains a separate stage.
+Captured requests assign operations to their observed API endpoint. A single
+explicit `--graphql-endpoint` also assigns frontend declarations to that API,
+while preserving their unexecuted provenance. Client generation remains a separate stage.
 
 The page-data container scenario starts with rendered records, a tab-scoped view
 selection and a script on an asset origin. Only exercising search produces the
@@ -154,13 +155,19 @@ capture, calls the generated list method and checks the returned record/status.
 
 ## Discovering creation screens
 
-The explorer opens creation screens before global menus and pagination. Opening
+The explorer opens creation screens before global menus and pagination, including
+links that open creation pages. Hidden controls do not consume the scan limit.
+Per-page action budgets preserve time for queued graph edges. Opening
 is separate from submitting: form submitters remain excluded and network write
 requests remain blocked. Loaded source declarations are retained even when they
 have never been executed. Source limits apply across the walk and omissions are
 reported so a successful listing capture cannot imply submission coverage.
 
 Frontend declarations do not prove an API destination. An unobserved declaration
-must receive an explicit API assignment before generation. Discovery must retain
-that evidence and the normal command must expose how to make the assignment;
-it must not silently discard write operations or send them to a guessed service.
+receives its API assignment from a single explicitly supplied GraphQL endpoint.
+Multiple endpoints leave the declaration unassigned. Captured operation names take
+precedence over unexecuted source variants, which remain as unassigned evidence.
+Within source declarations, fragment definitions are resolved locally first and
+then against unique loaded definitions. Missing, conflicting or cyclic fragments
+prevent export. More source arrivals recompute declarations; observed request
+documents are preserved.
