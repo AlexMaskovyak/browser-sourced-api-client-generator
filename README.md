@@ -197,7 +197,23 @@ Initial-page inspection waits for application hydration and request activity.
 Visible, empty search fields are exercised to expose listing requests that may
 not run when rows are already rendered. The field is restored to empty. Existing
 search text is skipped, field values are not read, and forms are not submitted.
-Search counts against the configured control-action limit.
+Search counts against the configured control-action limit. Each page receives
+at most the larger of three actions or the total action budget divided by the
+page budget, bounded by the total budget. This prevents one page's pagination
+from consuming the whole graph walk.
+Creation screens are visited before global menus and pagination; hidden controls
+are excluded before applying the control-count limit. Explicit `type="button"`
+creation controls may be opened inside a form, but submit controls are excluded.
+
+Source strings may declare response fragments separately from their operations.
+Discovery joins uniquely declared fragment dependencies across loaded files.
+Missing, conflicting or cyclic fragments are reported and left unexported.
+
+Supply one `--graphql-endpoint HTTPS_URL` to assign unexecuted frontend operations
+to that API as well as probe its schema. No operation is called by that assignment.
+With multiple API endpoints, declarations remain unassigned until explicitly
+assigned through normalization. An observed request owns its operation name;
+a different source version is retained as evidence without replacing that request.
 
 During exploration, parsed GraphQL queries and GET/HEAD requests are permitted.
 API mutations, unknown POSTs and other write methods are blocked before sending;
@@ -227,13 +243,13 @@ OpenAPI definition. See [API coverage and architecture](ARCHITECTURE.md#http-dis
 This is a bounded traversal, not proof of whole-site coverage. Custom widgets,
 popups, cross-site pages, persisted GraphQL operations and unknown read-via-POST
 APIs may be skipped or blocked. Loaded page-owned scripts, including asset-origin
-scripts, and supported GraphQL tags or `body`/`query` strings are inspected; minified/computed operation formats
+scripts, and GraphQL documents stored as literal strings are inspected; minified/computed operation formats
 may not be understood. GET endpoints can have server-side effects despite their
 method. A page visit or form declaration does not establish payment, submission
 or approval. Review declared contracts before using them for writes.
 
 Inspection also has fixed limits: 200 links or controls per state, 100 retained
-forms with up to 100 fields each, and 60 page/script sources of up to 4 MiB
+forms with up to 100 fields each, and 4096 page/script sources of up to 4 MiB
 each with a 32 MiB combined source budget. Truncation and pending work are reported.
 
 ## Find service definitions on the current page
