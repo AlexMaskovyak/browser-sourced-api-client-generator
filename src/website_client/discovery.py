@@ -143,6 +143,8 @@ class Discovery:
         self.document_sources = {}
         self.document_declarations = {}
         self.graphql_endpoints = set()
+        # A single explicitly supplied API can own unexecuted frontend contracts.
+        self.declared_graphql_endpoint = None
         self.omitted = 0
         self.failures = 0
         self.capture_failures = 0

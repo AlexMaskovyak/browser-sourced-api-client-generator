@@ -362,3 +362,46 @@ def test_missing_required_operation_does_not_publish_startup_only_client(tmp_pat
     assert Project.read(output / "client-project.json").required_operations == (
         "Options",
     )
+
+
+def test_frontend_write_assignment_survives_complete_build(tmp_path):
+    """An explicitly assigned source mutation must become a guarded CLI command."""
+    from website_client.bundle_capture import capture_manifest
+    from website_client.discovery import Discovery, operation
+    from website_client.discovery_manifest import write_manifest, sha256
+
+    discovery = Discovery()
+    declaration = operation({"query": "mutation CreateRecord($input: RecordInput!) { createRecord(input:$input) { id } }"})["document"]
+    digest = sha256(declaration)
+    discovery.documents[digest] = declaration
+    discovery.document_declarations[digest] = {"https://assets.example.test/create.js"}
+    discovery.declared_graphql_endpoint = "https://api.example.test/graphql"
+    manifest = capture_manifest(discovery, discovery.files("browser"))
+    path = tmp_path / "manifest.json"
+    write_manifest(manifest, path)
+    output = tmp_path / "client"
+    build_project(Project("declared-client", (path,), "https://example.test/records",
+                          required_operations=("CreateRecord",)), output)
+    result = subprocess.run([sys.executable, "-m", "declared_client._cli", "CreateRecord", "--help"],
+                            cwd=output, capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "--confirm-write" in result.stdout
+    metadata = json.loads((output / "declared_client/_operations.json").read_text())
+    assert metadata["CreateRecord"]["write"] is True
+    assert any(item.provenance.source.value == "frontend" for item in manifest.artifacts)
+
+
+def test_frontend_write_without_explicit_api_stays_unassigned():
+    """A source's host does not prove the mutation's API destination."""
+    from website_client.bundle_capture import capture_manifest
+    from website_client.discovery import Discovery, operation
+    from website_client.discovery_manifest import sha256
+
+    discovery = Discovery()
+    declaration = operation({"query": "mutation Save { save }"})["document"]
+    digest = sha256(declaration)
+    discovery.documents[digest] = declaration
+    discovery.document_declarations[digest] = {"https://assets.example.test/create.js"}
+    discovery.graphql_endpoints = {"https://one.example.test/graphql", "https://two.example.test/graphql"}
+    manifest = capture_manifest(discovery, discovery.files("browser"))
+    assert all(not service.operation_artifacts for service in manifest.services)
