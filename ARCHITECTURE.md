@@ -118,7 +118,10 @@ own verification.
 
 `project_generation.py` owns the version 1 project definition and complete build.
 It reads and merges bounded portable manifests, normalizes them, selects one
-operation-document GraphQL API and invokes the existing SDK backend in staging.
+API and invokes the existing generation dispatcher in staging. REST/OpenAPI,
+schema-backed GraphQL and operation-document GraphQL keep their existing request
+builders and model ownership. An inferred HTTP contract requires explicit review
+permission, which is retained in the versioned project definition.
 It then generates documentation, synthetic tests, runtime defaults and portable
 rebuild inputs. An explicit Poetry lock is verified before the tree is published.
 Failure leaves the requested output absent; existing output is never replaced.

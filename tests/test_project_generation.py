@@ -191,3 +191,144 @@ def test_cli_builds_complete_project_without_post_processing(tmp_path):
         )
         == 1
     )
+
+
+def schema_source(tmp_path, kind, *, inferred=False):
+    """Represent both schema protocols through the same portable input contract."""
+    fixtures = Path(__file__).parent / "fixtures"
+    if kind == "openapi":
+        spec = json.loads((fixtures / "openapi.json").read_text())
+        if inferred:
+            spec["x-discovery-inferred"] = True
+        definition = artifact("api.json", "openapi", json.dumps(spec), "external")
+        documents = [definition]
+        target = service("openapi", "https://api.example.test", definition["id"])
+    else:
+        definition = artifact(
+            "schema.graphql",
+            "graphql-schema",
+            (fixtures / "schema.graphql").read_text(),
+            "external",
+        )
+        operations = artifact(
+            "operations.graphql",
+            "graphql-operations",
+            (fixtures / "operations.graphql").read_text(),
+            "external",
+        )
+        documents = [definition, operations]
+        target = service(
+            "graphql",
+            "https://api.example.test/graphql",
+            definition["id"],
+            [operations["id"]],
+        )
+    path = tmp_path / (kind + ".json")
+    write_bundle(new_bundle(documents, [target]), path)
+    return path
+
+
+@pytest.mark.parametrize("kind", ["openapi", "graphql"])
+def test_schema_backends_build_and_reproduce_complete_projects(tmp_path, kind):
+    first, second = tmp_path / "first", tmp_path / "second"
+    project = Project(
+        "schema-" + kind, (schema_source(tmp_path, kind),), "https://app.example.test"
+    )
+    report = build_project(project, first)
+    build_project(Project.read(first / "client-project.json"), second)
+    assert tree(first) == tree(second)
+    assert report["generationMode"] == (
+        "openapi" if kind == "openapi" else "graphql-schema"
+    )
+    readme = (first / "README.md").read_text()
+    assert "API operations" in readme
+    assert "The command sends one read" not in readme  # Fixture reads need inputs.
+    assert "allow_writes=True" not in readme  # Not part of these backend libraries.
+    assert "schema-backed generation continues" not in readme
+    environment = {**__import__("os").environ, "PYTHONPATH": str(first)}
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(first / "tests")],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_inferred_openapi_requires_review_and_keeps_permission_on_rebuild(tmp_path):
+    source = schema_source(tmp_path, "openapi", inferred=True)
+    with pytest.raises(BrowserError, match="Select one service|Review inferred"):
+        build_project(
+            Project("reviewed-api", (source,), "https://app.example.test"),
+            tmp_path / "blocked",
+        )
+    first, second = tmp_path / "first", tmp_path / "second"
+    build_project(
+        Project(
+            "reviewed-api", (source,), "https://app.example.test", allow_inferred=True
+        ),
+        first,
+    )
+    recipe = Project.read(first / "client-project.json")
+    assert recipe.allow_inferred is True
+    build_project(recipe, second)
+    assert tree(first) == tree(second)
+
+
+@pytest.mark.parametrize("kind", ["openapi", "graphql"])
+def test_schema_cli_uses_defaults_and_real_backend_request_builder(
+    tmp_path, kind, monkeypatch, capsys
+):
+    """Exercise the complete CLI through backend input conversion and response models."""
+    output = tmp_path / "client"
+    name = "wire-" + kind
+    build_project(
+        Project(
+            name,
+            (schema_source(tmp_path, kind),),
+            "https://app.example.test",
+            ("x-context",),
+        ),
+        output,
+    )
+    package = name.replace("-", "_")
+    monkeypatch.syspath_prepend(str(output))
+    cli = importlib.import_module(package + "._cli")
+    session = importlib.import_module(package + ".session_http")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    import httpx
+
+    requests, settings = [], []
+
+    class BrowserTransport(httpx.MockTransport):
+        """Stand in for browser login while leaving the generated request builder intact."""
+
+        def __init__(self, *args):
+            settings.append(args)
+
+            def respond(request):
+                requests.append(request)
+                payload = (
+                    {"id": 7, "name": "sample"}
+                    if kind == "openapi"
+                    else {"data": {"item": {"id": "7", "name": "sample"}}}
+                )
+                return httpx.Response(200, json=payload)
+
+            super().__init__(respond)
+
+    monkeypatch.setattr(session, "BrowserLoginTransport", BrowserTransport)
+    inputs = tmp_path / "arguments.json"
+    inputs.write_text(json.dumps({"item_id": 7} if kind == "openapi" else {"id": "7"}))
+    operation = "get_item" if kind == "openapi" else "GetItem"
+    assert cli.main([operation, "--login", "--input", str(inputs)]) == 0
+    assert "sample" in capsys.readouterr().out
+    assert settings[0][2] == "https://app.example.test"
+    assert settings[0][5] == ["x-context"]
+    assert len(requests) == 1
+    if kind == "openapi":
+        assert requests[0].method == "GET"
+        assert requests[0].url.path == "/items/7"
+    else:
+        assert json.loads(requests[0].content)["variables"] == {"id": "7"}

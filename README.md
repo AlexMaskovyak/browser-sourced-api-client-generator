@@ -23,7 +23,7 @@ discover: sign in and explore the website
    -> captures/walk/manifest.json
 normalize: validate definitions and report each API's status
    -> captures/walk/normalized.json
-generate: select a ready API and create its Python package and CLI
+build: select a ready API and create its complete Python project
    -> clients/site-client/
 ```
 
@@ -83,12 +83,13 @@ results so they can be completed later.
 ### 4. Generate the standalone client
 
 ```sh
-poetry run website-client generate --manifest ./captures/walk/normalized.json --name site-client --output ./clients/site-client
+poetry run website-client build --manifest ./captures/walk/normalized.json --name site-client --login-url https://app.example.com --output ./clients/site-client
 ```
 
-This also runs offline. It creates a standalone Python project, API methods,
-endpoint commands and `generation.json`, which records which definitions were
-used. Generation does not call the service's business operations. GraphQL operation
+This also runs offline. Use the website login URL from step 2. It creates a complete
+Python project with API methods, endpoint commands, README, tests, runtime defaults
+and portable rebuild inputs. `generation.json` records the definitions used. No
+service operation is executed during generation. GraphQL operation
 clients validate declared variables and return JSON dictionaries. Unknown custom
 input fields and response shapes remain untyped without an optional schema;
 `generation.json` records whether schema validation was available.
@@ -97,7 +98,7 @@ input fields and response shapes remain untyped without an optional schema;
 
 ```sh
 cd clients/site-client
-poetry install
+poetry install --with dev
 poetry run site-client --help
 ```
 
@@ -469,11 +470,18 @@ These tests do not establish production service compatibility.
 
 ## Generate a complete client project
 
-`build` produces a complete Poetry project from saved GraphQL operation manifests:
+`build` produces a complete Poetry project from saved API manifests:
 Python methods and docstrings, CLI/help, runtime defaults, README, synthetic tests
 and portable inputs for rebuilding. No browser login or service calls occur during
-this command. The current complete-project builder supports operation-document
-GraphQL clients; schema-backed generation continues to use `generate`.
+this command. It dispatches through the same backends as `generate`:
+
+| API input | Backend output |
+| --- | --- |
+| REST/HTTP OpenAPI definition, published or reviewed inference | Typed REST endpoint methods and models from openapi-python-client |
+| GraphQL schema with operation documents | Typed methods and models from Ariadne Codegen |
+| Captured GraphQL operation documents without a schema | Named methods with declared-variable checks and JSON responses |
+
+`generate` remains available for SDK generation without complete-project packaging.
 
 From this generator checkout, after `poetry sync --with dev`, use an existing
 manifest from `discover`, `import` or `normalize`:
@@ -488,7 +496,9 @@ poetry run website-client build \
 
 This example requires your own capture at `./capture/manifest.json` and the actual
 website login URL. Repeat `--manifest` to merge inputs automatically. Use `--service`
-when the inputs contain multiple APIs. Add `--session-header HEADER_NAME` for each
+when the inputs contain multiple APIs. An inferred HTTP definition requires review
+and explicit `--allow-inferred`; the project file preserves that permission for
+rebuilds. Add `--session-header HEADER_NAME` for each
 additional header required by the website, never its value. These settings become
 runtime defaults, so the generated CLI needs only `OPERATION --login` for reads
 without required variables. Other operations use the fields shown in their help.
@@ -511,8 +521,8 @@ poetry run website-client build \
 Both output directories must be new, with existing parent directories. A saved
 project resolves paths relative to its own file and refuses command-line setting
 overrides. It contains `name`, `manifests`, `loginUrl`, `sessionHeaders`, optional
-`service` and optional `lockfile`. Unknown fields, including credential fields,
-are rejected. Its shipped input manifest retains only the selected operation
-contracts and HTTP conventions. Original capture reports and private source
+`service`, optional `lockfile` and boolean `allowInferred` (default false). Unknown fields, including credential fields,
+are rejected. Its shipped input manifest retains only the selected API definition
+and required operation documents or HTTP conventions. Original capture reports and private source
 locations are excluded. Review operation documents before publishing any client;
 their literal contents are preserved.
