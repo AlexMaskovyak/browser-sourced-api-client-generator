@@ -13,14 +13,16 @@ from .exploration_policy import safe_address
 
 MAX_FORMS = 30
 MAX_FIELDS = 100
-MAX_MODULES = 30
-MAX_MODULE_BYTES = MAX_BODY
-MAX_SOURCE_BYTES = 8 * MAX_BODY
+MAX_MODULES = 60
+MAX_MODULE_BYTES = 4 * MAX_BODY
+MAX_SOURCE_BYTES = 32 * MAX_BODY
 MAX_DOCUMENTS_PER_MODULE = 100
 # Only literal source strings are decoded. Interpolated templates and executable
 # expressions are not evaluated or guessed.
 LITERAL = r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`)'
-GRAPHQL_LITERAL = re.compile(r"(?:\bbody\s*:\s*|\b(?:gql|graphql)\s*)" + LITERAL, re.S)
+GRAPHQL_LITERAL = re.compile(
+    r"(?:\b(?:body|query)\s*:\s*|\b(?:gql|graphql)\s*)" + LITERAL, re.S
+)
 
 
 def inspect_forms(page):
@@ -143,31 +145,56 @@ class FrontendContracts:
         self.modules = []
         self.bytes_read = 0
         self.omitted = 0
+        self.owned_requests = {}
+        self.resource_types = {}
+        self.activity = 0
+        self.source_slots = 0
 
     def event(self, method, params):
         from .browser import origin
 
         identifier = params.get("requestId")
+        if method == "Network.requestWillBeSent":
+            # Asset origins need not match the application origin. Only inspect
+            # responses for scripts actually requested by the owned application.
+            try:
+                request = params.get("request", {})
+                if (
+                    params.get("type") in {"Script", "Document"}
+                    and origin(params.get("documentURL", "")) == self.allowed_origin
+                ):
+                    origin(request["url"])
+                    self.activity += 1
+                    if len(self.owned_requests) < MAX_MODULES * 4:
+                        self.owned_requests[identifier] = request["url"]
+            except Exception:
+                pass
+            return
+        if method in {"Network.loadingFinished", "Network.loadingFailed"}:
+            self.owned_requests.pop(identifier, None)
         if method == "Network.responseReceived":
             response = params.get("response", {})
             try:
-                if (
-                    params.get("type") != "Script"
-                    or origin(response["url"]) != self.allowed_origin
+                resource_type = params.get("type")
+                same_origin = origin(response["url"]) == self.allowed_origin
+                owned = self.owned_requests.get(identifier) == response["url"]
+                if resource_type not in {"Script", "Document"} or not (
+                    same_origin or owned and resource_type == "Script"
                 ):
                     return
-                if (
-                    len(self.modules) + len(self.pending) + len(self.ready)
-                    >= MAX_MODULES
-                ):
+                if self.source_slots >= MAX_MODULES:
                     self.omitted += 1
                     return
+                self.source_slots += 1
                 self.pending[identifier] = response["url"]
+                self.resource_types[identifier] = resource_type
             except Exception:
                 return
         elif method == "Network.loadingFinished" and identifier in self.pending:
             self.ready.append((identifier, self.pending.pop(identifier)))
+            self.owned_requests.pop(identifier, None)
         elif method == "Network.loadingFailed":
+            self.owned_requests.pop(identifier, None)
             if self.pending.pop(identifier, None) is not None:
                 self.omitted += 1
 
@@ -176,6 +203,13 @@ class FrontendContracts:
         # script execution can pause new requests while that command is pending.
         completed, self.ready = self.ready, []
         for identifier, url in completed:
+            record = {
+                "url": safe_address(url),
+                "sourceType": self.resource_types.pop(identifier, "Script"),
+                "operations": [],
+                "sourceInspected": False,
+            }
+            self.modules.append(record)
             try:
                 body = self.connection.call(
                     "Network.getResponseBody", {"requestId": identifier}
@@ -219,8 +253,20 @@ class FrontendContracts:
                                         item["document"].encode()
                                     ).hexdigest()
                                 ] = item["document"]
-                                digest = hashlib.sha256(item["document"].encode()).hexdigest()
-                                self.discovery.document_declarations.setdefault(digest, set()).add(url)
-                self.modules.append({"url": safe_address(url), "operations": names})
+                                digest = hashlib.sha256(
+                                    item["document"].encode()
+                                ).hexdigest()
+                                self.discovery.document_declarations.setdefault(
+                                    digest, set()
+                                ).add(url)
+                record.update(
+                    operations=names,
+                    sourceInspected=True,
+                    sourceBytes=len(source.encode()),
+                    documentAstCandidates=len(
+                        re.findall(r'kind\s*:\s*["\']Document["\']', source)
+                    ),
+                )
             except Exception:
+                record["reason"] = "source_unavailable_or_size_limit"
                 self.omitted += 1

@@ -29,6 +29,8 @@ MAX_REPORT_ITEMS = 1000
 MAX_FORMS_TOTAL = 100
 MAX_ELEMENTS = 200
 SETTLE_SECONDS = 0.3
+INITIAL_SETTLE_SECONDS = 5.0
+NAVIGATION_SETTLE_SECONDS = 1.0
 ACTION_TIMEOUT_MILLISECONDS = 3000
 
 
@@ -76,6 +78,7 @@ class SiteExplorer:
         self._context_guard_installed = False
         self._control_phase = False
         self.current_depth = 0
+        self._resetting = False
 
     def _record(self, collection, item):
         if len(collection) < MAX_REPORT_ITEMS:
@@ -84,6 +87,13 @@ class SiteExplorer:
             self.omitted += 1
 
     def _guard(self, route):
+        if (
+            self._resetting
+            and route.request.url == "about:blank"
+            and route.request.is_navigation_request()
+        ):
+            route.continue_()
+            return
         reason = request_allowed(route.request, self.session._origin)
         if (
             reason is None
@@ -142,13 +152,21 @@ class SiteExplorer:
         context.route("**/*", self._http_guard)
         self._context_guard_installed = True
         context.route_web_socket("**/*", self._websocket)
-        # End connections opened before interception, then capture a fresh tab.
-        old_page = self.session._page
-        self.session._page = context.new_page()
+        # End existing scripts/connections without destroying tab-scoped login
+        # and application state. A new tab does not inherit sessionStorage.
+        context.on("page", self._popup)
+        self._reset_document(self.session._page)
         self.session._connection.close()
         self.session._connection = self.session.connection_for(self.session._page)
-        old_page.close()
-        context.on("page", self._popup)
+
+    def _reset_document(self, page):
+        """End page execution without losing tab storage or allowing external navigation."""
+        self._resetting = True
+        try:
+            self.session._connection.call("Page.stopLoading")
+            page.goto("about:blank", wait_until="commit")
+        finally:
+            self._resetting = False
 
     def _popup(self, page):
         self._record(self.skipped, {"kind": "popup", "reason": "popup_not_explored"})
@@ -164,7 +182,7 @@ class SiteExplorer:
             )
         except Exception:
             document_in_tab = False
-        if document_in_tab:
+        if document_in_tab and self._guard_installed:
             route.continue_()
         else:
             self._guard(route)
@@ -203,11 +221,14 @@ class SiteExplorer:
         self._guard(paused)
 
     def _replace_tab(self, *, exploring):
-        """Recover with a new tab instead of reusing a detached error target."""
+        """Reset execution while preserving the authenticated tab whenever it is alive."""
         context = self.session._context
         context.remove_listener("page", self._popup)
         old_page, old_connection = self.session._page, self.session._connection
         callback = old_connection.on_event
+        if self._guard_installed:
+            old_connection.call("Fetch.disable")
+            self._guard_installed = False
         old_connection.on_event = None
         self._capture.discovery.omitted += len(self._capture.pending)
         self._capture.pending.clear()
@@ -216,7 +237,13 @@ class SiteExplorer:
         self.frontend.omitted += len(self.frontend.pending)
         self.frontend.pending.clear()
         self.frontend.ready.clear()
-        self.session._page = context.new_page()
+        if exploring or old_page.is_closed():
+            # A failed navigation can leave a detached error target. Recreate
+            # that target during recovery; a healthy freeze keeps tab state.
+            self.session._page = context.new_page()
+        else:
+            self._reset_document(old_page)
+            self.session._page = old_page
         self.session._connection = self.session.connection_for(self.session._page)
         connection = self.session._connection
         connection.on_event = callback
@@ -225,15 +252,16 @@ class SiteExplorer:
             old_connection.close()
         except Exception:
             pass
-        try:
-            old_page.close()
-        except Exception:
-            pass
+        if self.session._page is not old_page:
+            try:
+                old_page.close()
+            except Exception:
+                pass
         connection.call(
             "Network.enable",
             {
-                "maxTotalBufferSize": 8 * MAX_BODY,
-                "maxResourceBufferSize": MAX_BODY,
+                "maxTotalBufferSize": 32 * MAX_BODY,
+                "maxResourceBufferSize": 4 * MAX_BODY,
                 "maxPostDataSize": MAX_BODY,
             },
         )
@@ -264,12 +292,40 @@ class SiteExplorer:
         )
         self._guard_installed = True
 
-    def _settle(self, capture):
-        deadline = min(self.deadline_seconds, time.monotonic() + SETTLE_SECONDS)
+    def _settle(self, capture, *, initial=False, navigation=False):
+        """Allow hydration and its dependent reads to finish within the page budget.
+
+        DOMContentLoaded does not mean an asynchronously loaded application has
+        fetched its records. Wait through script/request activity rather than
+        starting navigation after a fixed 300 ms pause.
+        """
+        started = time.monotonic()
+        minimum = (
+            INITIAL_SETTLE_SECONDS
+            if initial
+            else NAVIGATION_SETTLE_SECONDS
+            if navigation
+            else SETTLE_SECONDS
+        )
+        maximum = minimum + 10 if initial else minimum + 5 if navigation else minimum
+        deadline = min(self.deadline_seconds, started + maximum)
+        quiet_since = started
+        activity = None
         while time.monotonic() < deadline:
             self.session._check()
             capture.drain()
             self.frontend.drain()
+            current = (capture.discovery.seen, self.frontend.activity)
+            if current != activity or capture.pending or self.frontend.owned_requests:
+                quiet_since = time.monotonic()
+                activity = current
+            if (
+                (initial or navigation)
+                and time.monotonic() - started >= minimum
+                and time.monotonic() - quiet_since >= 0.5
+            ):
+                return "network_quiet"
+        return "settle_budget" if initial or navigation else "control_pause"
 
     def _inspect(self, observer, depth):
         page = self.session._page
@@ -389,6 +445,69 @@ class SiteExplorer:
                 index,
             )
 
+    def _exercise_search(self, capture):
+        """Trigger a page-local read without submitting a form or reading its values.
+
+        Listing pages can hydrate their first rows without an API request. Empty,
+        visible search boxes provide a read-only way to expose the data request.
+        :placeholder-shown selects empty fields without returning their contents.
+        Restore the field to empty afterward and retain no entered values.
+        """
+        if len(self.actions) >= self.max_actions:
+            return
+        candidates = self.session._page.locator(
+            'input:placeholder-shown[placeholder*="search" i]'
+        )
+        selected = []
+        for index in range(min(candidates.count(), MAX_ELEMENTS)):
+            control = candidates.nth(index)
+            if not control.is_visible() or not control.is_enabled():
+                continue
+            if control.get_attribute("type") not in {None, "text", "search"}:
+                continue
+            # A search in an explicit non-GET form may have write semantics.
+            if control.locator(
+                'xpath=ancestor::form[@method and not(@method="get") and not(@method="GET")]'
+            ).count():
+                continue
+            text = control.get_attribute("placeholder") or "Search"
+            primary = bool(
+                control.locator('xpath=ancestor::*[self::main or @role="main"]').count()
+            )
+            selected.append((primary, len(text.split()), index, control, text))
+        if not selected:
+            return
+        _primary, _words, _index, control, text = max(
+            selected, key=lambda item: item[:3]
+        )
+        action = {
+            "page": safe_address(self.session._page.url),
+            "kind": "search",
+            "label": label(text),
+            "outcome": "failed",
+            "valuesRetained": False,
+        }
+        self.actions.append(action)
+        # Keep the element, not the empty-field selector: that selector stops
+        # matching immediately after the first fill.
+        control = control.element_handle()
+        if control is None:
+            action["outcome"] = "unavailable"
+            return
+        try:
+            control.fill("__discovery_probe__", timeout=ACTION_TIMEOUT_MILLISECONDS)
+            self._settle(capture, navigation=True)
+            action["outcome"] = "read_triggered"
+        except Exception:
+            action["outcome"] = "unavailable"
+        finally:
+            try:
+                control.fill("", timeout=ACTION_TIMEOUT_MILLISECONDS)
+                self._settle(capture, navigation=True)
+                action["restoredEmpty"] = True
+            except Exception:
+                action["restoredEmpty"] = False
+
     def _walk_controls(self, capture, observer, depth):
         while (
             len(self.actions) < self.max_actions
@@ -482,8 +601,17 @@ class SiteExplorer:
                     wait_until="domcontentloaded",
                     timeout=min(NAVIGATION_TIMEOUT_MILLISECONDS, remaining_ms),
                 )
-                self._settle(capture)
+                record["settleOutcome"] = self._settle(
+                    capture, initial=len(self.pages) == 1, navigation=True
+                )
+                record["renderedRows"] = self.session._page.locator(
+                    'tbody tr, [role="row"]'
+                ).count()
+                record["visibility"] = self.session._page.evaluate(
+                    "document.visibilityState"
+                )
                 record["outcome"] = "visited"
+                self._exercise_search(capture)
                 self._walk_controls(capture, observer, depth)
             except BrowserError:
                 raise
@@ -522,13 +650,13 @@ class SiteExplorer:
                 "Declared forms and frontend operations are unverified contracts.",
                 "Persisted GraphQL and unknown POST requests are blocked.",
                 "Read-only GET semantics depend on the server.",
-                "Only supported navigation controls and loaded same-origin modules are inspected.",
+                "Only supported navigation controls and scripts loaded for the owned page are inspected.",
             ],
         }
 
     def freeze(self):
-        # Closing the explored tab ends scripts and pending navigations before
-        # schema probes run in separate tabs of the same authenticated context.
+        # Destroy the page's scripts before probing definitions, while retaining
+        # the tab's origin-scoped sessionStorage for subsequent application reads.
         self._replace_tab(exploring=False)
 
     def close(self):
