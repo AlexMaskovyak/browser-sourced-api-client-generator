@@ -1,6 +1,6 @@
 """Run admitted linear Arazzo jobs through native builders and scoped HTTP contexts."""
 
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager
 import email.parser
 import email.policy
 import io
@@ -17,14 +17,14 @@ from urllib.parse import parse_qs, urlsplit
 from jsonpointer import JsonPointer, JsonPointerException
 
 from .authenticated_http import (
-    AuthenticatedDispatch,
     AuthenticationRequired,
     TransportFailure,
     workflow_session,
+    profile_dispatches,
     LIMIT,
 )
 from .capabilities import resolved
-from .runtime_profile import ProfileStore, ProfileError, service_origin
+from .runtime_profile import ProfileError, service_origin
 from .workflow_admission import (
     OperationBinding,
     check_workflow,
@@ -37,68 +37,10 @@ from .workflow_schema import WorkflowRejected, strict_json, validate_value
 
 
 @contextmanager
-def job_dispatches(endpoints):
-    """Hold sorted profile locks and one request driver for the whole multi-origin job."""
-    from playwright.sync_api import sync_playwright
-
-    with ExitStack() as locks:
-        loaded = {}
-        association = {}
-        for endpoint, identifier in endpoints.items():
-            selected = service_origin(endpoint)
-            if selected in association and association[selected] != identifier:
-                raise WorkflowRejected("profile_origin_mismatch")
-            association[selected] = identifier
-        used_profiles = [
-            identifier for identifier in association.values() if identifier is not None
-        ]
-        if len(used_profiles) != len(set(used_profiles)):
-            raise WorkflowRejected("profile_origin_mismatch")
-        for selected, identifier in sorted(
-            association.items(), key=lambda item: (item[1] or "", item[0])
-        ):
-            if identifier is not None:
-                store = locks.enter_context(ProfileStore(identifier, selected).locked())
-                loaded[selected] = (store, store.load())
-        with sync_playwright() as playwright:
-            contexts = {}
-            try:
-                dispatches = {}
-                for selected in sorted(association):
-                    profile = loaded[selected][1] if selected in loaded else None
-                    context = playwright.request.new_context(
-                        ignore_https_errors=False,
-                        **(
-                            {"storage_state": profile["storage_state"]}
-                            if profile
-                            else {}
-                        ),
-                    )
-                    contexts[selected] = context
-                    dispatches[selected] = AuthenticatedDispatch(
-                        context, selected, profile["headers"] if profile else {}
-                    )
-                yield dispatches
-            finally:
-                failures = []
-                for selected, context in reversed(list(contexts.items())):
-                    try:
-                        if selected in loaded:
-                            store, profile = loaded[selected]
-                            store.save(
-                                context.storage_state(),
-                                profile["headers"],
-                                profile.get("header_names", ()),
-                            )
-                    except Exception:
-                        failures.append(True)
-                    finally:
-                        try:
-                            context.dispose()
-                        except Exception:
-                            failures.append(True)
-                if failures:
-                    raise WorkflowRejected("profile_save_failed") from None
+def job_dispatches(endpoints: Mapping[str, str | None]):
+    """Use the same locked profile lifecycle as generated SDK clients."""
+    with profile_dispatches(endpoints) as dispatches:
+        yield dispatches
 
 
 class _Discard(io.TextIOBase):
