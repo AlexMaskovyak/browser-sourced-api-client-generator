@@ -16,7 +16,7 @@ requires-poetry = ">=2.2,<3.0"
 packages = [{ include = "website_client", from = "src" }]
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "pdm-backend (==2.5.0)"]
+dev = ["pytest>=8,<10", "pdm-backend (==2.5.0)", "ruff (==0.15.22)"]
 
 [project.scripts]
 website-client = "website_client.cli:entrypoint"
@@ -26,3 +26,18 @@ testpaths = ["tests"]
 
 [tool.poetry.dependencies]
 arazzo-runner = { path = "src/website_client/native_dependencies/arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl" }
+
+# These commands check only the integration modules introduced or refactored here:
+# poetry run ruff check
+# poetry run ruff format --check
+[tool.ruff]
+target-version = "py311"
+include = [
+    "src/website_client/autonomous.py",
+    "src/website_client/authenticated_http.py",
+    "src/website_client/capabilities.py",
+    "src/website_client/native_files.py",
+    "src/website_client/runtime_profile.py",
+    "src/website_client/workflow_*.py",
+    "src/website_client/native_dependencies/rebuild.py",
+]

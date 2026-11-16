@@ -25,12 +25,21 @@ class TransportFailure(RuntimeError):
 
 
 class AuthenticatedDispatch:
-    def __init__(self, api, endpoint, headers=None):
+    def __init__(
+        self, api: Any, endpoint: str, headers: Mapping[str, str] | None = None
+    ) -> None:
         self.api = api
         self.origin = service_origin(endpoint)
         self.headers = dict(headers or {})
 
-    def send(self, method, url, headers, body):
+    def send(
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        body: bytes | str | None,
+    ) -> tuple[int, list[tuple[str, str]], bytes]:
+        """Send native prepared bytes once, with bounded errors and exact-origin credentials."""
         if service_origin(url) != self.origin:
             raise ProfileError("undeclared_destination")
         if body is None:
@@ -95,7 +104,7 @@ class SDKTransport(httpx.BaseTransport):
     def __init__(self, dispatch):
         self.dispatch = dispatch
 
-    def handle_request(self, request):
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
         # Bound stream consumption before allocating the complete request body.
         chunks, size = [], 0
         for chunk in request.stream:

@@ -72,7 +72,8 @@ def quiet_runner():
                 logger.handlers, logger.propagate = handlers, propagate
 
 
-def bounded_values(value, depth=0):
+def bounded_values(value: Any, depth: int = 0) -> None:
+    """Reject arbitrary objects and bound binary inputs before native coercion."""
     if depth > 40:
         raise WorkflowRejected("input_depth_exceeded")
     if isinstance(value, bytes):
@@ -94,7 +95,8 @@ def bounded_values(value, depth=0):
         raise WorkflowRejected("unsupported_input_object")
 
 
-def referenced_inputs(value):
+def referenced_inputs(value: Any) -> set[str]:
+    """List admitted whole input references without evaluating their values."""
     if isinstance(value, dict):
         return (
             set().union(*(referenced_inputs(item) for item in value.values()))
@@ -121,7 +123,12 @@ def _scalar(value, schema):
 class WorkflowGuard:
     """Validate native prepared bytes and producing responses before the next step."""
 
-    def __init__(self, workflow, operations, dispatches):
+    def __init__(
+        self,
+        workflow: dict,
+        operations: dict[str, OperationBinding],
+        dispatches: Mapping[str, Any],
+    ) -> None:
         self.workflow, self.operations, self.dispatches = (
             workflow,
             operations,
@@ -137,7 +144,8 @@ class WorkflowGuard:
         self.sources = None
         self.expected_payload = None
 
-    def start(self, execution_id, workflow_id, step_id):
+    def start(self, execution_id: str, workflow_id: str, step_id: str) -> None:
+        """Prepare checks at the native callback boundary; dispatch owns failure propagation."""
         self.active = next(
             step for step in self.workflow["steps"] if step["stepId"] == step_id
         )
@@ -153,10 +161,32 @@ class WorkflowGuard:
                 else WorkflowRejected("invalid_request")
             )
 
-    def _before_coercion(self, state):
-        from arazzo_runner.evaluator import ExpressionEvaluator
-
+    def _before_coercion(self, state: Any) -> None:
         info = self.operations[self.active["stepId"]]
+        self._native_parameters(state, info)
+        step_body = self.active.get("requestBody")
+        if step_body is None or "payload" not in step_body:
+            self.expected_payload = None
+            return
+        payload = self._native_payload(step_body, state)
+        bounded_values(payload)
+        self.expected_payload = deepcopy(payload)
+        body_definition = resolved(info.document, info.operation.get("requestBody", {}))
+        media = step_body["contentType"]
+        contract = body_definition.get("content", {}).get(media, {})
+        schema = resolved(info.document, contract.get("schema", {}))
+        if media == "multipart/form-data":
+            self._multipart_values(payload, schema, info)
+        elif "json" in media:
+            self._validate(payload, schema, info, "invalid_request")
+            try:
+                json.dumps(payload, allow_nan=False)
+            except (TypeError, ValueError):
+                raise WorkflowRejected("invalid_request") from None
+        elif not isinstance(payload, bytes):
+            raise WorkflowRejected("invalid_binary_input")
+
+    def _native_parameters(self, state: Any, info: OperationBinding) -> None:
         from arazzo_runner.executor.parameter_processor import ParameterProcessor
 
         parameter_values = ParameterProcessor(self.sources).prepare_parameters(
@@ -174,10 +204,12 @@ class WorkflowGuard:
                 self._validate(
                     value, definition.get("schema", {}), info, "invalid_request"
                 )
-        step_body = self.active.get("requestBody")
-        if step_body is None or "payload" not in step_body:
-            self.expected_payload = None
-            return
+
+    def _native_payload(self, step_body: dict, state: Any) -> Any:
+        # Reuse upstream expression resolution before native builders coerce scalar
+        # multipart values to text. This guard never evaluates expressions itself.
+        from arazzo_runner.evaluator import ExpressionEvaluator
+
         payload = step_body["payload"]
         if isinstance(payload, dict):
             payload = ExpressionEvaluator.process_object_expressions(
@@ -191,47 +223,35 @@ class WorkflowGuard:
             payload = ExpressionEvaluator.evaluate_expression(
                 payload, state, self.sources
             )
-        bounded_values(payload)
-        self.expected_payload = deepcopy(payload)
-        body_definition = resolved(info.document, info.operation.get("requestBody", {}))
-        media = step_body["contentType"]
-        contract = body_definition.get("content", {}).get(media, {})
-        schema = resolved(info.document, contract.get("schema", {}))
-        if media == "multipart/form-data":
-            if not isinstance(payload, dict):
-                raise WorkflowRejected("unsupported_multipart")
-            values = {}
-            for name, value in payload.items():
-                field = resolved(
-                    info.document, schema.get("properties", {}).get(name, {})
-                )
-                if field.get("format") == "binary":
-                    content = value.get("content") if isinstance(value, dict) else value
-                    if not isinstance(content, bytes):
-                        raise WorkflowRejected("invalid_multipart_file")
-                    if isinstance(value, dict) and (
-                        set(value) - {"content", "file_name", "contentType"}
-                        or not isinstance(value.get("file_name"), str)
-                        or not isinstance(
-                            value.get("contentType", "application/octet-stream"), str
-                        )
-                    ):
-                        raise WorkflowRejected("invalid_multipart_file")
-                    values[name] = ""
-                else:
-                    if value is not None and type(value) not in {str, int, float, bool}:
-                        raise WorkflowRejected("invalid_request")
-                    self._validate(value, field, info, "invalid_request")
-                    values[name] = value
-            self._validate(values, schema, info, "invalid_request")
-        elif "json" in media:
-            self._validate(payload, schema, info, "invalid_request")
-            try:
-                json.dumps(payload, allow_nan=False)
-            except (TypeError, ValueError):
-                raise WorkflowRejected("invalid_request") from None
-        elif not isinstance(payload, bytes):
-            raise WorkflowRejected("invalid_binary_input")
+        return payload
+
+    def _multipart_values(
+        self, payload: Any, schema: dict, info: OperationBinding
+    ) -> None:
+        if not isinstance(payload, dict):
+            raise WorkflowRejected("unsupported_multipart")
+        values = {}
+        for name, value in payload.items():
+            field = resolved(info.document, schema.get("properties", {}).get(name, {}))
+            if field.get("format") == "binary":
+                content = value.get("content") if isinstance(value, dict) else value
+                if not isinstance(content, bytes):
+                    raise WorkflowRejected("invalid_multipart_file")
+                if isinstance(value, dict) and (
+                    set(value) - {"content", "file_name", "contentType"}
+                    or not isinstance(value.get("file_name"), str)
+                    or not isinstance(
+                        value.get("contentType", "application/octet-stream"), str
+                    )
+                ):
+                    raise WorkflowRejected("invalid_multipart_file")
+                values[name] = ""
+            else:
+                if value is not None and type(value) not in {str, int, float, bool}:
+                    raise WorkflowRejected("invalid_request")
+                self._validate(value, field, info, "invalid_request")
+                values[name] = value
+        self._validate(values, schema, info, "invalid_request")
 
     def _parameters(self, info):
         return info.parameters()
@@ -408,7 +428,8 @@ class WorkflowGuard:
                     raise WorkflowRejected("invalid_multipart") from None
         self._validate(values, schema, info, "invalid_request")
 
-    def response(self, status, headers, raw):
+    def response(self, status: int, headers: list[tuple[str, str]], raw: bytes) -> None:
+        """Validate producing outputs and assertions before dependent steps advance."""
         self.responses += 1
         info = self.operations[self.active["stepId"]]
         definitions = info.operation.get("responses", {})
@@ -465,7 +486,14 @@ class WorkflowGuard:
             raise WorkflowRejected("http_status_failure")
         self.completed.append(self.active["stepId"])
 
-    def send(self, method, url, headers, body):
+    def send(
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        body: bytes | str | None,
+    ) -> tuple[int, list[tuple[str, str]], bytes]:
+        """Dispatch once after validation, retaining any failure for native callbacks."""
         try:
             if self.failure is not None:
                 raise self.failure
