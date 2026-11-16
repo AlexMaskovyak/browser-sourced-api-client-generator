@@ -6,6 +6,7 @@ import pytest
 
 from website_client.autonomous import RunRequest
 from website_client.browser import BrowserError
+from website_client.client_runtime import RuntimeConfig
 from website_client.native_files import FileDescriptor
 from website_client.workflow_admission import OperationBinding
 from website_client.workflow_runtime import ExecutionSummary, WorkflowPlan
@@ -23,6 +24,7 @@ def test_private_integration_records_hide_native_values_and_locations(tmp_path):
         RunRequest(CANARY, tmp_path / 'output', inputs=(CANARY,), endpoint=CANARY),
         WorkflowPlan(native, {'read': operation}, native, {CANARY: CANARY}),
         ExecutionSummary(CANARY, outputs=native),
+        RuntimeConfig('openapi', 'https://fixture.invalid/' + CANARY, CANARY),
     ]
     assert all(CANARY not in repr(record) for record in records)
 
@@ -35,3 +37,16 @@ def test_generation_options_reuse_exploration_bounds_before_any_login(tmp_path):
 def test_file_descriptor_rejects_unsafe_metadata_before_opening_any_file():
     with pytest.raises(ValueError, match='metadata'):
         FileDescriptor.parse({'path': 'does-not-exist', 'filename': 'bad\r\nname'})
+
+
+@pytest.mark.parametrize('value', [
+    {'kind': []},
+    {'kind': 'unknown'},
+    {'kind': 'openapi', 'endpoint': 'https://user:secret@fixture.invalid'},
+    {'kind': 'openapi', 'profileId': 'outside/profile'},
+    {'kind': 'openapi', 'token': CANARY},
+])
+def test_runtime_configuration_rejects_invalid_defaults_without_opening_state(value):
+    with pytest.raises(ValueError) as failure:
+        RuntimeConfig.from_mapping(value)
+    assert CANARY not in str(failure.value)
