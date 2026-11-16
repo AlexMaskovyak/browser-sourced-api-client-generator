@@ -109,7 +109,7 @@ class OperationBinding:
     They are hidden from representations because examples can contain user data.
     """
 
-    source: str
+    source: str = field(repr=False)
     document: dict[str, Any] = field(repr=False)
     path: str = field(repr=False)
     path_item: dict[str, Any] = field(repr=False)
