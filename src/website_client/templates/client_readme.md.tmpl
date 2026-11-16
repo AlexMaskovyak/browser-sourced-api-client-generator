@@ -66,3 +66,17 @@ Results print as JSON. `--output NEW_FILE` creates a private file instead. A fai
 output write does not mean the remote request failed. After an uncertain request,
 check the service before explicitly retrying. No rollback is implied.
 
+
+## Offline package checks
+
+Optional developer checks require pytest 8 or 9 in the same Python environment:
+
+```sh
+python -m pip install 'pytest>=8,<10'
+python -m pytest -q tests
+```
+
+These checks read installed command metadata, native signatures and component notices.
+They send no service requests and do not establish live compatibility. Verify intended
+operations against your service separately. Installed notice files are under the
+package's `_notices` directory; the source project also includes `NOTICE.md`.

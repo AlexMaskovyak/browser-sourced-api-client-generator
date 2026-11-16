@@ -1,0 +1,67 @@
+"""Offline installed-package checks; live effects need independent service acceptance."""
+
+import importlib.metadata
+from importlib.resources import files
+from io import BytesIO
+
+import pytest
+
+from $package import execute_workflow
+from $package import runtime, workflow_runtime
+from $package.workflow_admission import check_workflow
+
+
+def test_every_workflow_has_complete_validated_bundled_source_bindings() -> None:
+    index = runtime.workflow_index()
+    assert index
+    inventory = runtime.workflow_inputs()
+    assert inventory.keys() == index.keys()
+    for public_id, entry in index.items():
+        document = runtime._resource_json(entry["document"])
+        sources = {
+            name: runtime._resource_json(path)
+            for name, path in entry["sources"].items()
+        }
+        workflow = next(
+            item
+            for item in document["workflows"]
+            if item["workflowId"] == entry["nativeId"]
+        )
+        assert check_workflow(document, workflow, sources)
+        assert isinstance(inventory[public_id], list)
+
+
+def test_python_file_objects_are_rejected_without_opening_any_request_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*_args, **_kwargs) -> None:
+        raise AssertionError("Rejected input opened a profile or request context")
+
+    monkeypatch.setattr(workflow_runtime, "job_dispatches", forbidden)
+    workflow = next(iter(runtime.workflow_index()))
+    with BytesIO(b"not sent") as stream:
+        summary = execute_workflow(workflow, {"_unsupported_object": stream})
+    assert summary["status"] == "rejected"
+    assert summary["reason"] == "unsupported_input_object"
+    assert summary["requests"] == 0 and summary["effects"] == "none"
+
+
+def test_native_dependency_console_entry_and_notices_are_portable() -> None:
+    assert importlib.metadata.version("arazzo-runner") == "0.9.6+websiteclient.1"
+    distribution = importlib.metadata.distribution("$name")
+    assert all(
+        "file://" not in requirement for requirement in distribution.requires or ()
+    )
+    assert any(
+        entry.group == "console_scripts"
+        and entry.name == "$name"
+        and entry.value == "$package._cli:entrypoint"
+        for entry in distribution.entry_points
+    )
+    notices = files("$package").joinpath("_notices")
+    assert "MIT License" in notices.joinpath("LICENSE.website-client").read_text()
+    assert "Apache License" in notices.joinpath("LICENSE.arazzo-runner").read_text()
+    assert (
+        "Modified by browser-sourced-api-client-generator"
+        in notices.joinpath("NOTICE.arazzo-runner").read_text()
+    )
