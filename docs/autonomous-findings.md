@@ -49,3 +49,29 @@ review is complete before application changes. D1-D7 remain implementation and t
 obligations. Required probes include two-process profile rotation, no replay on
 request/profile-save failure, public Python default-profile use and mixed-operation
 partial coverage. No product acceptance has yet been claimed.
+
+## Milestone 1 review at 35dc531
+
+Implementation commits: `ba5d94a` (profiles/dispatch) and `35dc531` (native files and
+standalone Python/CLI integration). Author focused checks: profile/browser/session
+43 passed in 0.46s; native/generated checks 27 passed in 18.20s. Full
+`work/poetry-env/bin/poetry run pytest -q`: 221 passed in 21.39s.
+Independent reviewer reran the six focused files: 70 passed in 17.85s.
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F1 | `authenticated_http.AuthenticatedDispatch.send` | Independent local disconnect-after-commit probe exposed cookie and bearer canaries in raw Playwright exception string and formatted traceback. Journal still showed one request/effect, no replay. | Sanitize driver failures at shared dispatch boundary, raise bounded unknown-effect error without exception chaining. | Pending correction and canary probe. |
+| F2 | `client_cli.show_failure` | `ProfileError('authentication_required')` before call enters ValueError branch and emits generic input error rather than reason JSON. Reviewer direct reproduction. | Handle bounded profile errors before generic input validation. | Pending missing-profile CLI regression. |
+| F3 | `native_files.convert` | Ordinary generated JSON model named File is mistaken for native upload; convert of its valid name field fails. Same class-name hazard applies to Upload. Reviewer generated OpenAPI reproduction. | Match actual upstream file type identity, retain native JSON model handling. | Pending both collision regressions plus real uploads. |
+
+Independent adversary verified full two-request job serialization across processes,
+profile/origin rejection, single committed effect after disconnect, and no replay on
+profile-save failure. A generated wheel installed into an isolated target executed
+public `client_context()` twice through fresh closed-stdin `python -I` processes,
+renewing cookies and importing no generator module. This shared dependency environment
+is useful installed-wheel evidence, not milestone 4 clean-container acceptance.
+
+Scratch probe results remain under the chat workspace's `work/adversary-m1`:
+`results-35dc531.json` and `public-results-35dc531.json`. Required installed console
+commands, autonomous URL wiring, workflow guards and clean-container acceptance
+remain incomplete. Milestone 1 is not closed while F1-F3 remain unresolved.
