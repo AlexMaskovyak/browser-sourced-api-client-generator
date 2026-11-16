@@ -1,0 +1,734 @@
+{
+  "source": {
+    "revision": "2b9c0625fbb3dc54aa58fe688412f1fdafe5e56c",
+    "dirty_files": [],
+    "dirty_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tree_sha256": "376f018aa79b383435eac3784085d2471c5a591e0c96442592d769fb8285a01e"
+  },
+  "source_unchanged_during_run": true,
+  "command": "scripts/test-docker.sh",
+  "compatibility_tests_and_https": "passed",
+  "generation": {
+    "projects": [
+      {
+        "project": "generated/services/neutral-client-565903604a74",
+        "package": "neutral_client_565903604a74",
+        "console": "neutral-client-565903604a74"
+      },
+      {
+        "project": "generated/services/neutral-client-8d91ce5be987",
+        "package": "neutral_client_8d91ce5be987",
+        "console": "neutral-client-8d91ce5be987"
+      },
+      {
+        "project": "generated/workflows/neutral-client-workflows",
+        "package": "neutral_client_workflows",
+        "console": "neutral-client-workflows"
+      }
+    ],
+    "commands": [
+      {
+        "command": [
+          "website-client",
+          "run",
+          "/artifacts/generated/manifest.json",
+          "--name",
+          "neutral-client",
+          "--output",
+          "/artifacts/regenerated"
+        ],
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "poetry",
+          "--directory",
+          "/artifacts/generated/services/neutral-client-565903604a74",
+          "build",
+          "--format",
+          "wheel"
+        ],
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "poetry",
+          "--directory",
+          "/artifacts/generated/services/neutral-client-8d91ce5be987",
+          "build",
+          "--format",
+          "wheel"
+        ],
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "poetry",
+          "--directory",
+          "/artifacts/generated/workflows/neutral-client-workflows",
+          "build",
+          "--format",
+          "wheel"
+        ],
+        "exit_code": 0
+      },
+      {
+        "command": [
+          "node",
+          "--version"
+        ],
+        "exit_code": 0
+      }
+    ],
+    "versions": {
+      "browser-sourced-api-client-generator": "0.1.0",
+      "arazzo-runner": "0.9.6+websiteclient.1",
+      "openapi-python-client": "0.29.1",
+      "ariadne-codegen": "0.19.0",
+      "playwright": "1.64.1"
+    },
+    "node_version": "v22.16.0",
+    "har2sdk_version": "0.6.15",
+    "stdin_physically_closed_after_login": true,
+    "ordinary_generator_console": true,
+    "wheel_sha256": {
+      "python_dotenv-1.2.4-py3-none-any.whl": "42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc",
+      "filelock-3.32.7-py3-none-any.whl": "65ff0d0190ea42038b32bda4b77834fb05be2cad4c5b9b01aa4dfb3614536e52",
+      "neutral_client_8d91ce5be987-0.1.0-py3-none-any.whl": "eef7aabefcccb4463a49c6fe3cbcd5e6ed803e8dcab4742d77d7bed7395b393b",
+      "openapi_schema_validator-0.8.1-py3-none-any.whl": "0f5859794c5bfa433d478dc5ac5e5768d50adc56b14380c8a6fd3a8113e89c9b",
+      "greenlet-3.5.6-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl": "e85880b538e59a59f55117b81f208a6660ad5ac328aad9305f812d9b8bc67a0f",
+      "typing_inspection-0.4.4-py3-none-any.whl": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
+      "playwright-1.64.1-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl": "a29fda44725e11b0b625c4bff6458a1f6dbee97b88c9788d12e18a8344458c2d",
+      "annotated_types-0.8.0-py3-none-any.whl": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+      "jsonschema_specifications-2025.9.1-py3-none-any.whl": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
+      "pyyaml-6.0.3-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl": "9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28",
+      "arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl": "8a04b4df1593ea7ae549b1f526fe94ec070cb991c3501432bdacba19bd1bf78c",
+      "pydantic_core-2.50.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl": "43a8fd56f3c681f3cda2d5c842ad28e88241df742dfcbe8fd1dd437a3056e1f6",
+      "charset_normalizer-3.5.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl": "b91363207bd9dc966a691e959bb47f64b30f7ac4b072be9968b366982f7db77c",
+      "six-1.17.0-py2.py3-none-any.whl": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+      "platformdirs-4.14.5-py3-none-any.whl": "8e778c6fa421516f4d3369449f8df3b0e1b72c0e0005fe88e3ec772d0a14e750",
+      "attrs-26.1.0-py3-none-any.whl": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+      "pygments-2.21.0-py3-none-any.whl": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+      "requests-2.34.2-py3-none-any.whl": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+      "pluggy-1.7.0-py3-none-any.whl": "7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec",
+      "httpcore-1.0.9-py3-none-any.whl": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+      "h11-0.16.0-py3-none-any.whl": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "pydantic-2.14.2-py3-none-any.whl": "7efbf7507b937931cd32a5755acb00ea1cf5ccb1d4e8067a5850d5069e382118",
+      "poetry_core-2.5.0-py3-none-any.whl": "98ee465b66f7e14bb9fbe68fb5e00d0cff184f036993ec94610ae4b5612f3add",
+      "anyio-4.15.1-py3-none-any.whl": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+      "pytest-9.2.0-py3-none-any.whl": "07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588",
+      "httpx-0.28.1-py3-none-any.whl": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+      "urllib3-2.8.0-py3-none-any.whl": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+      "idna-3.20-py3-none-any.whl": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "pdm_backend-2.5.0-py3-none-any.whl": "5b8746b567a16a1fd506ce66ee28e89d46374526f52238aa1b96cc2c08245c63",
+      "iniconfig-2.3.1-py3-none-any.whl": "9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7",
+      "jsonpath_ng-1.16.0-py3-none-any.whl": "c5e28ddd70ebcaeba9af3c2b880933fbfeb108b5e68c9edb84e1b57803091218",
+      "graphql_core-3.2.13-py3-none-any.whl": "b0eb04f2c31556b2310a77c8fb53c74e8b56570f8fea594d89c6ef7827dbb497",
+      "jsonschema-4.26.0-py3-none-any.whl": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
+      "neutral_client_workflows-0.1.0-py3-none-any.whl": "af0c57206100547fa3be4f2301a8dcc0165642220b6f000383e0eb96942ef09e",
+      "typing_extensions-4.16.0-py3-none-any.whl": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "referencing-0.37.0-py3-none-any.whl": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
+      "jsonpointer-3.12-py3-none-any.whl": "89f391335ee2719ae72149e1bf30a4d4c7c5d92f15a3f53faa8d20cc7c6c7f19",
+      "rfc3339_validator-0.1.4-py2.py3-none-any.whl": "24f6ec1eda14ef823da9e36ec7113124b39c04d50a4d3d3a3c2859577e7791fa",
+      "pyee-13.0.1-py3-none-any.whl": "af2f8fede4171ef667dfded53f96e2ed0d6e6bd7ee3bb46437f77e3b57689228",
+      "neutral_client_565903604a74-1.0.0-py3-none-any.whl": "d700694c76f98610e41b60cd397028e26162d66ccde5ebc75d5709589e78f166",
+      "pydantic_settings-2.16.2-py3-none-any.whl": "8d523e5c129b097686bde019bd6109bff53f4c8c3f63f1ddf9933ffa42e5ab4f",
+      "certifi-2026.10.23-py3-none-any.whl": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+      "packaging-26.3-py3-none-any.whl": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "rpds_py-2026.9.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl": "2693b2728bbcc48d09a981a356954b0c47c53ff25b545856f28a889ea619f69a"
+    },
+    "login_count": 2,
+    "deterministic_files": [
+      "services/neutral-client-565903604a74/source-openapi.json",
+      "services/neutral-client-565903604a74/pyproject.toml",
+      "services/neutral-client-565903604a74/openapi.json",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/browser.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/result_output.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/runtime.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/authenticated_http.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/runtime_profile.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/client.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/errors.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/native_files.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/_cli.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/__init__.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/_operations.json",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/types.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/session_http.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/_runtime.json",
+      "services/neutral-client-565903604a74/tests/test_packaged_contract.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/__init__.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/models/nested_body.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/models/finish_body.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/models/__init__.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/models/receipt.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/models/upload_file_body.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/models/prepare_body.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/default/finish.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/default/nested.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/default/prepare.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/default/upload_file.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/default/put_binary.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/default/__init__.py",
+      "services/neutral-client-565903604a74/neutral_client_565903604a74/api/default/nonnull.py",
+      "services/neutral-client-8d91ce5be987/schema.graphql",
+      "services/neutral-client-8d91ce5be987/pyproject.toml",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/browser.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/result_output.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/custom_mutations.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/custom_fields.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/runtime.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/custom_queries.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/custom_typing_fields.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/authenticated_http.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/runtime_profile.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/client.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/base_operation.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/exceptions.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/base_client.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/native_files.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/_cli.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/__init__.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/base_model.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/_operations.json",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/input_types.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/session_http.py",
+      "services/neutral-client-8d91ce5be987/neutral_client_8d91ce5be987/_runtime.json",
+      "services/neutral-client-8d91ce5be987/tests/test_packaged_contract.py",
+      "workflows/neutral-client-workflows/pyproject.toml",
+      "workflows/neutral-client-workflows/native_dependencies/provenance.json",
+      "workflows/neutral-client-workflows/native_dependencies/source.json",
+      "workflows/neutral-client-workflows/native_dependencies/rebuild.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/_workflows.json",
+      "workflows/neutral-client-workflows/neutral_client_workflows/workflow_admission.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/result_output.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/runtime.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/authenticated_http.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/runtime_profile.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/capabilities.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/workflow_runtime.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/_cli.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/__init__.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/workflow_schema.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/_inputs.json",
+      "workflows/neutral-client-workflows/tests/test_packaged_contract.py",
+      "workflows/neutral-client-workflows/neutral_client_workflows/definitions/workflow-ff20741b81bf8ecce50800dff24ac51ea593a9498b432db27691b94fe406a8d4.json",
+      "workflows/neutral-client-workflows/neutral_client_workflows/definitions/source-175f8d17a361f80a33b77a45a39cb2dd0a4ba384e76815979458a72d502e832c.json"
+    ],
+    "volatile_exclusions": [
+      "generation.json lineage/report metadata",
+      "build/dist archives",
+      "__pycache__"
+    ],
+    "tls": "HTTP loopback fixture; TLS trust is covered only by compatibility checks"
+  },
+  "runtime": {
+    "status": "passed",
+    "commands": [
+      {
+        "command": [
+          "neutral-client-565903604a74",
+          "upload_file",
+          "--input",
+          "/tmp/upload_file.json",
+          "--confirm-write",
+          "upload_file"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"note\": \"rest\", \"sha256\": \"e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3\", \"size\": 274}\n"
+      },
+      {
+        "command": [
+          "neutral-client-565903604a74",
+          "put_binary",
+          "--input",
+          "/tmp/put_binary.json",
+          "--confirm-write",
+          "put_binary"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"note\": \"\", \"sha256\": \"e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3\", \"size\": 274}\n"
+      },
+      {
+        "command": [
+          "neutral-client-8d91ce5be987",
+          "mutation_upload",
+          "--input",
+          "/tmp/mutation_upload.json",
+          "--confirm-write",
+          "mutation_upload"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"upload\": {\"sha256\": \"e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3\", \"size\": 274, \"note\": \"graphql\"}}\n"
+      },
+      {
+        "command": [
+          "neutral-client-8d91ce5be987",
+          "mutation_submit",
+          "--input",
+          "/tmp/mutation_submit.json",
+          "--confirm-write",
+          "mutation_submit"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"submit\": {\"sha256\": \"e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3\", \"size\": 274, \"note\": \"graphql\"}}\n"
+      },
+      {
+        "command": [
+          "neutral-client-workflows",
+          "upload",
+          "--file",
+          "file=/acceptance/payload.bin"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"status\": \"success\", \"reason\": \"workflow_completed\", \"workflow\": \"upload\", \"requests\": 3, \"responses\": 3, \"assertions\": 4, \"effects\": \"possible\", \"outputs\": {\"complete\": true}}\n"
+      },
+      {
+        "command": [
+          "neutral-client-workflows",
+          "null"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"status\": \"success\", \"reason\": \"workflow_completed\", \"workflow\": \"null\", \"requests\": 1, \"responses\": 1, \"assertions\": 1, \"effects\": \"possible\", \"outputs\": {}}\n"
+      },
+      {
+        "command": [
+          "neutral-client-workflows",
+          "omitted"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"status\": \"success\", \"reason\": \"workflow_completed\", \"workflow\": \"omitted\", \"requests\": 1, \"responses\": 1, \"assertions\": 1, \"effects\": \"possible\", \"outputs\": {}}\n"
+      },
+      {
+        "command": [
+          "neutral-client-workflows",
+          "nested"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"status\": \"success\", \"reason\": \"workflow_completed\", \"workflow\": \"nested\", \"requests\": 1, \"responses\": 1, \"assertions\": 1, \"effects\": \"possible\", \"outputs\": {}}\n"
+      },
+      {
+        "command": [
+          "neutral-client-workflows",
+          "disallowed",
+          "--input",
+          "/tmp/disallowed.json"
+        ],
+        "exit_code": 2,
+        "stdout": "{\"status\": \"rejected\", \"reason\": \"invalid_request\", \"workflow\": \"disallowed\", \"requests\": 0, \"responses\": 0, \"assertions\": 0, \"effects\": \"none\", \"outputs\": {}}\n"
+      },
+      {
+        "command": [
+          "neutral-client-565903604a74",
+          "excluded_form"
+        ],
+        "exit_code": 2,
+        "stdout": ""
+      },
+      {
+        "command": [
+          "neutral-client-565903604a74",
+          "put_binary",
+          "--input",
+          "/tmp/put_binary.json",
+          "--confirm-write",
+          "put_binary"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"note\": \"\", \"sha256\": \"e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3\", \"size\": 274}\n"
+      },
+      {
+        "command": [
+          "neutral-client-565903604a74",
+          "put_binary",
+          "--input",
+          "/tmp/put_binary.json",
+          "--confirm-write",
+          "put_binary"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"note\": \"\", \"sha256\": \"e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3\", \"size\": 274}\n"
+      },
+      {
+        "command": [
+          "neutral-client-565903604a74",
+          "put_binary",
+          "--input",
+          "/tmp/put_binary.json",
+          "--confirm-write",
+          "put_binary"
+        ],
+        "exit_code": 1,
+        "stdout": ""
+      },
+      {
+        "command": [
+          "/usr/local/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "/artifacts/generated/services/neutral-client-565903604a74/tests"
+        ],
+        "exit_code": 0,
+        "stdout": "...                                                                      [100%]\n3 passed in 0.04s\n"
+      },
+      {
+        "command": [
+          "/usr/local/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "/artifacts/generated/services/neutral-client-8d91ce5be987/tests"
+        ],
+        "exit_code": 0,
+        "stdout": "...                                                                      [100%]\n3 passed in 0.09s\n"
+      },
+      {
+        "command": [
+          "/usr/local/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "/artifacts/generated/workflows/neutral-client-workflows/tests"
+        ],
+        "exit_code": 0,
+        "stdout": "...                                                                      [100%]\n3 passed in 0.17s\n"
+      }
+    ],
+    "versions": {
+      "arazzo-runner": "0.9.6+websiteclient.1",
+      "playwright": "1.64.1",
+      "httpx": "0.28.1",
+      "requests": "2.34.2"
+    },
+    "native_upload_forms": 4,
+    "python_uploads": 4,
+    "console_uploads": 4,
+    "workflow_python_and_console": true,
+    "guarded_missing_output_no_dependent_dispatch": true,
+    "captured_bearer_and_cookie": true,
+    "native_multipart_metadata": true,
+    "native_null_omitted_nested": true,
+    "rotation": true,
+    "expiration_closed_stdin": true,
+    "excluded_no_dispatch": true,
+    "journal_count": 29,
+    "request_journal": [
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 20,
+        "body_sha256": "a27c556df73cb20fbcfaa0a3c364b8f153ebd3f1db3062d6bedf751f7138a7fe"
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 20,
+        "body_sha256": "a27c556df73cb20fbcfaa0a3c364b8f153ebd3f1db3062d6bedf751f7138a7fe"
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 1636,
+        "body_sha256": "8895a1d424d19cda71e33104a47bcac7d7836e3f506f234c91d0bc452af9f454"
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 20,
+        "body_sha256": "a27c556df73cb20fbcfaa0a3c364b8f153ebd3f1db3062d6bedf751f7138a7fe"
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 20,
+        "body_sha256": "a27c556df73cb20fbcfaa0a3c364b8f153ebd3f1db3062d6bedf751f7138a7fe"
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 1636,
+        "body_sha256": "8895a1d424d19cda71e33104a47bcac7d7836e3f506f234c91d0bc452af9f454"
+      },
+      {
+        "path": "/upload",
+        "method": "POST",
+        "size": 489,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "multipart": [
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          }
+        ]
+      },
+      {
+        "path": "/binary",
+        "method": "PUT",
+        "size": 274,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "body_sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 895,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "multipart": [
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          }
+        ]
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 1357,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          },
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "multipart": [
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          },
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          }
+        ]
+      },
+      {
+        "path": "/upload",
+        "method": "POST",
+        "size": 489,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "multipart": [
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          }
+        ]
+      },
+      {
+        "path": "/binary",
+        "method": "PUT",
+        "size": 274,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "body_sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 905,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "multipart": [
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          }
+        ]
+      },
+      {
+        "path": "/graphql",
+        "method": "POST",
+        "size": 1363,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          },
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "multipart": [
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          },
+          {
+            "filename": "fixture.bin",
+            "content_type": "application/octet-stream"
+          }
+        ]
+      },
+      {
+        "path": "/prepare",
+        "method": "POST",
+        "size": 27,
+        "body_sha256": "fa5528dd0a0aa66958d365cbe72c72947bcdafc5d14833d635a51c295579752a"
+      },
+      {
+        "path": "/binary",
+        "method": "PUT",
+        "size": 274,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "body_sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+      },
+      {
+        "path": "/finish",
+        "method": "POST",
+        "size": 28,
+        "body_sha256": "88ec05d43ae8acda5a496b74af9920fa77dc6730d96ac8bf293cc8ed14cffa74"
+      },
+      {
+        "path": "/prepare",
+        "method": "POST",
+        "size": 27,
+        "body_sha256": "fa5528dd0a0aa66958d365cbe72c72947bcdafc5d14833d635a51c295579752a"
+      },
+      {
+        "path": "/binary",
+        "method": "PUT",
+        "size": 274,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "body_sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+      },
+      {
+        "path": "/finish",
+        "method": "POST",
+        "size": 28,
+        "body_sha256": "88ec05d43ae8acda5a496b74af9920fa77dc6730d96ac8bf293cc8ed14cffa74"
+      },
+      {
+        "path": "/prepare",
+        "method": "POST",
+        "size": 27,
+        "body_sha256": "fa5528dd0a0aa66958d365cbe72c72947bcdafc5d14833d635a51c295579752a"
+      },
+      {
+        "path": "/nullable",
+        "method": "POST",
+        "size": 4,
+        "body_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "body_hex": "6e756c6c"
+      },
+      {
+        "path": "/nullable",
+        "method": "POST",
+        "size": 4,
+        "body_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "body_hex": "6e756c6c"
+      },
+      {
+        "path": "/nullable",
+        "method": "POST",
+        "size": 0,
+        "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "body_hex": ""
+      },
+      {
+        "path": "/nullable",
+        "method": "POST",
+        "size": 0,
+        "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "body_hex": ""
+      },
+      {
+        "path": "/nested",
+        "method": "POST",
+        "size": 15,
+        "body_sha256": "3ce4f556abe44dc7f73709a62467ba7cf40db8c46bb6408363ce05874204b98e",
+        "body_hex": "7b2276616c7565223a206e756c6c7d"
+      },
+      {
+        "path": "/nested",
+        "method": "POST",
+        "size": 15,
+        "body_sha256": "3ce4f556abe44dc7f73709a62467ba7cf40db8c46bb6408363ce05874204b98e",
+        "body_hex": "7b2276616c7565223a206e756c6c7d"
+      },
+      {
+        "path": "/binary",
+        "method": "PUT",
+        "size": 274,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "body_sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+      },
+      {
+        "path": "/binary",
+        "method": "PUT",
+        "size": 274,
+        "files": [
+          {
+            "size": 274,
+            "sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+          }
+        ],
+        "body_sha256": "e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3"
+      }
+    ],
+    "api_attempt_count": 30,
+    "generated_tests": [
+      "neutral-client-565903604a74",
+      "neutral-client-8d91ce5be987",
+      "neutral-client-workflows"
+    ],
+    "no_generator_browser_node": true
+  },
+  "images": {
+    "website-client-acceptance-41842-generation": "sha256:90d6c1be76e1ff5863af737f9f7f85f17dd5c2f4196c145bec0569f4d9333973",
+    "website-client-acceptance-41842-runtime": "sha256:770133a59676999223c080cd881992fd8a2473419e34c681895d7259afdd2f3f"
+  }
+}
