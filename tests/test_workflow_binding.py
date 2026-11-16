@@ -104,3 +104,49 @@ def test_conflicting_saved_associations_stay_excluded_even_with_initial_file_reg
     reports = tuple(Artifact.create('binding-' + name + '.json', Kind.REPORT, json.dumps({'workflowBindings': {first.artifacts[0].id: {'api': {'artifact': source_id, 'endpoint': 'https://' + name + '.invalid'}}}}), Source.REPORT) for name in ['first', 'second'])
     combined = Manifest.create(first.artifacts + second.artifacts + reports, second.services)
     assert report_bindings(bind_sources(combined, registry)) == {}
+
+
+def test_saved_report_cannot_override_contradictory_exact_initial_source(tmp_path):
+    from website_client.autonomous import _merge_inputs
+    from website_client.discovery_manifest.records import Artifact, Kind, Source
+    from website_client.workflow_generation import collect_workflows
+    workflow, definition, different = (tmp_path / name for name in ['workflow.json', 'openapi.json', 'different.json'])
+    workflow.write_bytes((FIXTURES / 'workflow.json').read_bytes())
+    definition.write_bytes((FIXTURES / 'openapi.json').read_bytes())
+    other = json.loads(definition.read_text())
+    other['servers'] = [{'url': 'https://different.invalid'}]
+    different.write_text(json.dumps(other))
+    registry = input_registry()
+    first = _saved_input(workflow, bindings=registry)
+    exact = _saved_input(definition, bindings=registry)
+    other = _saved_input(different, bindings=registry)
+    wrong = next(iter(registry.documents[different.as_uri()])).artifact_id
+    report = Artifact.create('prior.json', Kind.REPORT, json.dumps({'workflowBindings': {first.artifacts[0].id: {'api': {'artifact': wrong}}}}), Source.REPORT)
+    combined, _ = _merge_inputs([first, exact, other, Manifest.create((report,), ())])
+    bound = bind_sources(combined, registry)
+    assert report_bindings(bound) == {}
+    entries, exclusions = collect_workflows(bound, {})
+    assert not entries and any(item['reason'] == 'ambiguous_source' for item in exclusions)
+    saved = sanitized_manifest(bound)
+    rebound = bind_sources(saved)
+    assert report_bindings(rebound) == {}
+    assert not collect_workflows(rebound, {})[0]
+
+
+def test_plain_provenance_and_same_artifact_endpoint_override_are_compatible(tmp_path):
+    from dataclasses import replace
+    from website_client.discovery_manifest.records import Artifact, Kind, Source
+    from website_client.workflow_binding import SourceBinding
+    workflow, definition = tmp_path / 'workflow.json', tmp_path / 'openapi.json'
+    workflow.write_bytes((FIXTURES / 'workflow.json').read_bytes())
+    definition.write_bytes((FIXTURES / 'openapi.json').read_bytes())
+    registry = input_registry()
+    first = _saved_input(workflow, bindings=registry)
+    second = _saved_input(definition, endpoint='https://selected.invalid', bindings=registry)
+    identifier = next(iter(registry.documents[definition.as_uri()])).artifact_id
+    # The same exact source location carries native provenance without a caller override.
+    registry.documents[definition.as_uri()].add(SourceBinding(identifier))
+    report = Artifact.create('prior.json', Kind.REPORT, json.dumps({'workflowBindings': {first.artifacts[0].id: {'api': {'artifact': identifier}}}}), Source.REPORT)
+    combined = Manifest.create(first.artifacts + second.artifacts + (report,), second.services)
+    bound = bind_sources(combined, registry)
+    assert next(iter(report_bindings(bound).values()))['api'].endpoint == 'https://selected.invalid'

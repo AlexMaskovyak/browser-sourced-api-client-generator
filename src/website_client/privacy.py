@@ -365,12 +365,21 @@ def safe_report(text: str) -> str:
         return encoded_json(admit_openapi(value)[0])
     if isinstance(value, dict) and "runtimeProfiles" in value:
         return encoded_json({"runtimeProfiles": _report_profiles(value)})
-    if isinstance(value, dict) and "workflowBindings" in value:
-        from .workflow_binding import clean_binding_report
+    if isinstance(value, dict) and any(
+        key in value for key in ("workflowBindings", "workflowBindingConflicts")
+    ):
+        from .workflow_binding import clean_binding_report, clean_binding_conflicts
 
-        return encoded_json(
-            {"workflowBindings": clean_binding_report(value["workflowBindings"])}
-        )
+        associations = {}
+        if "workflowBindings" in value:
+            associations["workflowBindings"] = clean_binding_report(
+                value["workflowBindings"]
+            )
+        if "workflowBindingConflicts" in value:
+            associations["workflowBindingConflicts"] = clean_binding_conflicts(
+                value["workflowBindingConflicts"]
+            )
+        return encoded_json(associations)
     cleaned = _clean_report_fields(value)
     if isinstance(value, dict) and isinstance(value.get("endpoints"), list):
         cleaned["endpoints"] = _report_graphql_endpoints(value["endpoints"])
