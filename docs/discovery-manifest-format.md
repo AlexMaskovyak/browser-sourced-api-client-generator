@@ -86,6 +86,25 @@ and explicit source associations are handled by the workflow owner, not inferred
 manifest document proximity. Form declarations and blocked request shapes remain
 evidence; they do not manufacture executable dependencies.
 
+A `workflow-bindings.json` report preserves exact source associations for offline
+generation. Its `workflowBindings` object maps a workflow document ID to source
+names declared in that document. Each source name maps to an object with `artifact`
+and an optional explicit `endpoint`. The artifact must identify an admitted OpenAPI
+document in the same manifest. The endpoint, when present, overrides that source's
+server URL. These are contract references and public destinations, not credentials.
+
+For example, the following is a field-shape illustration, not a complete manifest:
+
+```json
+{"workflowBindings":{"WORKFLOW_DOCUMENT_ID":{"service":{"artifact":"OPENAPI_DOCUMENT_ID","endpoint":"https://api.example.com/"}}}}
+```
+
+Normal URL/file generation creates these references from exact advertised URLs or
+declared local source files. Producers should preserve them when exporting a saved
+manifest. Contradictory associations, unknown document IDs or the wrong document
+kind exclude the affected workflow. Offline generation does not fetch missing
+sources or choose a nearby document by filename, matching values or request order.
+
 ## Integrity and limits
 
 Manifest digests use `website-client-canonical-json-v1`: sorted keys, two-space
