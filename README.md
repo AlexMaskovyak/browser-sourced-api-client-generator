@@ -6,10 +6,10 @@ selects supported operations and packages every usable service without more prom
 Installed clients run from Python, their console commands or a scheduler. No agent
 or model API is required.
 
-This branch is under active implementation in [draft PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12).
-The authenticated runtime, autonomous service generation and packaged workflow
-execution pass local tests and independent review. Clean-container distribution
-acceptance remains in progress.
+Implementation and verification are recorded in [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12).
+The authenticated runtime, autonomous generation, packaged workflows and separate
+runtime-container acceptance pass independent review. See the
+[verification record](docs/autonomous-findings.md) for exact revisions and checks.
 
 ## Install
 
@@ -168,5 +168,6 @@ report path. Any failed assertion exits nonzero; correct the reported failure an
 rerun the command. `scripts/test-docker.sh --help` explains prerequisites without
 building images.
 
-The complete standalone run is still being verified on this branch. Unit or fixture
-success does not establish compatibility with an arbitrary production website.
+The complete command passed at `2b9c062`: 351 tests, HTTPS compatibility and separate
+runtime acceptance, including nine generated-package checks. Unit or fixture success
+does not establish compatibility with an arbitrary production website.

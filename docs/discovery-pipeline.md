@@ -146,7 +146,9 @@ Only the initial browser login reads terminal input; saved-input stages do not.
 
 Non-exploded form array queries, unsupported complex encodings, unresolved remote
 references, ambiguous contracts and essential sensitive structure are excluded
-without schema rewriting. Workflows require explicit supported documents and value
+without schema rewriting. A native backend failure excludes the affected SDK
+operation and regenerates usable siblings; an independently supported workflow can
+retain its original source contract. Workflows require explicit supported documents and value
 mappings. No dependency is inferred from source proximity, request order or matching
 values. Privacy filtering is conservative and cannot detect every unknown secret.
 

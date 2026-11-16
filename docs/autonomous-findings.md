@@ -1,11 +1,9 @@
 # Autonomous integration verification and findings
 
-The authenticated runtime and autonomous discovery/generation are complete. The
-restricted workflow engine and its native JSON-null correction pass local and
-independent probes. Workflow source association and generated workflow distribution
-are implemented and under independent review. Clean-container acceptance remains
-unfinished. Draft [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12)
-shows the committed work; it is not ready to merge.
+The authenticated runtime, autonomous discovery/generation, restricted workflow
+distribution and clean-container acceptance are complete and independently reviewed.
+All material findings below are resolved. [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12)
+contains the implementation; it has not been merged or applied to a real service.
 
 ## Current verification
 
@@ -30,11 +28,18 @@ installation described in the README.
 | `f6072a1` | Author package tests; Poetry check; Ruff lint/format | 12 package tests passed, including installed Python/CLI and separate origins. Poetry and Ruff checks passed for 23 integration files. |
 | `a2037ab` | Fixed-archive full pytest | Corrected workflow integration: 347 passed in 87.57s. |
 | `a2037ab` | Independent correction checks | Reviewer: 30 passed in 24.36s; adversary: 5 passed in 3.07s; Ruff lint/format passed for 24 files. |
+| `d27827c` | Fixed-archive host full pytest | 351 passed in 93.98s. |
+| `d27827c` | Independent package support review | Two installed-wheel tests and six generated checks passed; actual input help, notices and portable metadata verified; Ruff passed for 27 files. |
+| `2b9c062` | `scripts/test-docker.sh` | Exit 0: 351 tests in 114.73s, original HTTPS compatibility and standalone acceptance. Clean working tree; source unchanged throughout. |
+| `2b9c062` | Independent final container evidence/image inspection | Accepted: 29 authorized requests plus one expired attempt; 14 file instances all match the 274-byte fixture/hash; 44 wheel hashes and nine generated checks verified. |
 
 The independent review accepted the implemented code's reusable components,
 validated dataclasses, private-safe representations, comments, spacing and function
 responsibilities. No static type checker is configured or claimed. No GitHub checks
-are reported for this branch. Installed clean-container acceptance has not run.
+are reported for this branch. Installed clean-container acceptance passed. Its JSON
+records exact commands, versions, image IDs, wheel hashes and a credential-free
+request journal. The standalone fixture uses explicit loopback HTTP; HTTPS trust
+is tested separately by the preserved compatibility program.
 
 ## Resolved findings
 
@@ -105,7 +110,7 @@ probe confirmed that the SDK keeps its usable read, the workflow retains its nul
 operation/source, and supplied source bytes remain unchanged. Diagnostics contain
 only bounded reason/type/level fields. Ruff passed for 24 integration files. The
 subsequent standalone container iteration completed ordinary generator CLI and
-persistent-EOF public API generation; final complete acceptance remains pending.
+persistent-EOF public API generation. Final complete acceptance passed at `2b9c062`.
 
 ## Acceptance environment correction
 
@@ -121,7 +126,10 @@ The correction moves full generator tests into the prepared generation image and
 adds a test-only Chrome-name wrapper for its installed disposable Chromium. The
 HTTPS compatibility program keeps its separate base image. The minimal installed
 runtime must still contain neither a browser executable nor separate Node/npm.
-Focused rechecks and the corrected fixed full command are pending.
+All 12 focused rechecks passed in 33.87s. The corrected full command at `2b9c062`
+then passed all 351 tests, HTTPS compatibility and standalone acceptance with clean,
+unchanged source. Independent adversarial review accepted the correction; no checks
+were skipped and the runtime image is unchanged by this test-environment fix.
 
 ## Quality review
 
@@ -135,8 +143,10 @@ Autonomous collection, merge/quarantine, generation, coverage and persistence no
 have focused helpers. SDK/workflow profile lifecycle code is shared. Native model
 adapters, privacy handlers, admission checks and CLI parsing/handlers are separated
 by responsibility. Sensitive fields are excluded from repr. The independent review
-accepted the initial scope at `32ad5ea` and corrected binding/package components at
-`a2037ab`. New distribution code must meet the same criteria before delivery.
+accepted the initial scope at `32ad5ea`, corrected binding/package components at
+`a2037ab`, and distribution support at `d27827c`. Container helpers were separately
+formatted, checked and independently reviewed. Generated tests also use conventional
+spacing and comments; no formatter is required at client runtime.
 
 ## Native dependency provenance
 
@@ -156,17 +166,29 @@ serializer in the dispatch adapter.
 The independent reviewer built the generator from a fixed archive and inspected
 actual METADATA: exact version dependency, no workstation file URL, companion
 resource present. The rebuild reproduced the wheel hash. Clean sibling-wheel
-installation and runtime-container verification remain required in milestone 4.
+installation and runtime-container verification passed in milestone 4 at `2b9c062`.
 
-## Remaining completion criteria
+## Completed standalone acceptance
 
-1. Include generated-package tests, useful help, notices and the companion artifact
-   with a portable documented installation command.
-2. Run the checked-in clean acceptance command: initial fixture login only, stdin
-   closed, browser closure, automatic generation/build/install, separate runtime
-   container, actual Python/console calls, expiry, privacy and deterministic source.
-3. Complete full relevant checks and independent final review. Unrun acceptance is
-   incomplete, not an accepted risk.
+The checked-in command exercises ordinary installed generator CLI and public API
+URL generation with only initial login/MFA. The API driver physically closes stdin
+after login. Both finish without subsequent driver navigation or contract selection.
+Saved regeneration makes no target requests. The browser closes before installation
+and execution in a separate non-root runtime image.
+
+Four native upload forms run through public Python and actual console commands.
+The service independently verifies exact file bytes, filename/media metadata and
+cookie/bearer authentication. Workflows exercise happy sequences, immediate required
+output rejection, literal null/omitted/nested bodies and schema-disallowed null.
+Rotation succeeds; expired authentication terminates with stdin closed, one attempt
+and no write. Excluded query encoding cannot dispatch.
+
+The runtime image contains no generator, code generators, browser executable/cache,
+separate Node/npm, checkout or research PYTHONPATH. Private profiles are separately
+mounted and writable for atomic renewal. Nine generated installed-package tests pass.
+Privacy scans inspect uncompressed wheel members and final reports; 75 source/config
+files compare identically apart from declared report/build/cache exclusions. Privacy
+heuristics still cannot guarantee universal anonymization of arbitrary input.
 
 Only local neutral services have received mutation probes. Existing reviewed
 worktrees remain preserved. The user authorized this implementation and later
