@@ -87,6 +87,21 @@ Authentication rejection terminates with `authentication_required`, without aski
 for headers, MFA or agent help. To recover, rerun the original URL command with a new output directory and sign in.
 The stable origin profile refreshes credentials for existing installed clients.
 
+Profiles use the operating system's private user-state directory. To print the
+selected directory without reading credentials, run from the generator checkout:
+
+```sh
+poetry run python -c 'from website_client.runtime_profile import profile_directory; print(profile_directory())'
+```
+
+For a container on the same provisioned machine, mount that entire directory
+separately and set `WEBSITE_CLIENT_PROFILE_DIR` to its in-container path. Keep the
+mount writable so cookie renewal can atomically replace files. The container user
+must own it; directories require mode `700` and files mode `600`. A permission
+failure stops execution before dispatch. Never place this directory inside source
+projects, distributions or the public output mount. A different machine requires
+its own login rather than copying this credential state.
+
 ## Use individual stages when integrating another producer
 
 These are advanced compatibility commands. They read saved inputs and write local
