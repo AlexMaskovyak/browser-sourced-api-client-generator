@@ -70,16 +70,6 @@
       ],
       "outputs": {
         "complete": "$steps.finish.complete"
-      },
-      "inputs": {
-        "type": "object",
-        "properties": {
-          "file": {}
-        },
-        "required": [
-          "file"
-        ],
-        "additionalProperties": false
       }
     }
   ]

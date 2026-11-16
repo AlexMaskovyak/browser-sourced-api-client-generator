@@ -60,7 +60,6 @@ PROFILE_SCHEMA = {
 def operation_index(sources):
     index, duplicates = {}, set()
     for source_name, document in sources.items():
-        local_schema(document)
         servers = document.get('servers', [])
         if not servers or not isinstance(servers[0], dict):
             raise WorkflowRejected('unsupported_destination')
@@ -92,7 +91,7 @@ def check_reference(value, inputs, previous, *, response=False):
             check_reference(item, inputs, previous, response=response)
     elif isinstance(value, str) and '$' in value:
         if match := INPUT.fullmatch(value):
-            if match[1] not in inputs:
+            if inputs is not None and match[1] not in inputs:
                 raise WorkflowRejected('unknown_input_reference')
         elif match := STEP_OUTPUT.fullmatch(value):
             if match[1] not in previous or match[2] not in previous[match[1]]:
@@ -116,13 +115,13 @@ def check_workflow(document, workflow, sources):
     names = [item['name'] for item in document['sourceDescriptions']]
     if len(names) != len(set(names)) or set(names) != set(sources):
         raise WorkflowRejected('unresolved_source')
-    schema = workflow.get('inputs', {'type': 'object', 'properties': {}, 'additionalProperties': False})
+    schema = workflow.get('inputs', {})
     local_schema(schema)
     try:
         Draft202012Validator.check_schema(schema)
     except Exception:
         raise WorkflowRejected('invalid_input_schema') from None
-    inputs = set(schema.get('properties', {}))
+    inputs = set(schema.get('properties', {})) if schema.get('additionalProperties') is False else None
     operations, duplicates = operation_index(sources)
     previous, selected = {}, {}
     for step in workflow['steps']:
@@ -155,6 +154,8 @@ def check_workflow(document, workflow, sources):
             if not IDENTIFIER.fullmatch(name) or not expression.startswith(POINTER_PREFIX):
                 raise WorkflowRejected('unsupported_output')
             check_reference(expression, inputs, previous, response=True)
+        local_schema({key: info["operation"][key] for key in ("requestBody", "responses", "parameters") if key in info["operation"]}, document=info["document"])
+        local_schema(info["path_item"].get("parameters", []), document=info["document"])
         body = step.get('requestBody')
         if body:
             definition = resolved(info['document'], info['operation'].get('requestBody', {}))
@@ -174,8 +175,8 @@ def check_workflow(document, workflow, sources):
             elif 'json' not in media:
                 if body_schema.get('type') != 'string' or body_schema.get('format') != 'binary':
                     raise WorkflowRejected('unsupported_content_type')
-            if body['payload'] is None:
-                raise WorkflowRejected('unsupported_null_body')
+            if body['payload'] is None and not CAPABILITIES['workflow']['json_null_body']:
+                raise WorkflowRejected('unsupported_serialization')
         previous[identifier] = set(step.get('outputs', {}))
         selected[identifier] = info
     for name, expression in workflow.get('outputs', {}).items():
