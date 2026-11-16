@@ -54,6 +54,8 @@ subprocess.run(
         "-m",
         "pip",
         "download",
+        "--constraint",
+        str(constraints),
         "--dest",
         "/opt/client-wheels",
         "src/website_client/native_dependencies/arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl",

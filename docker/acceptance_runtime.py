@@ -375,6 +375,7 @@ def main() -> None:
         "no_generator_browser_node": True,
     }
     (ARTIFACTS / "runtime-summary.json").write_text(json.dumps(summary, indent=2))
+    verify_final_privacy()
     print(
         "PASS installed standalone Python methods, console commands, guarded workflows, credentials and native bytes"
     )
