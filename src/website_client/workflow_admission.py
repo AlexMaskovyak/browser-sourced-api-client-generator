@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 
 from .capabilities import METHODS, CAPABILITIES, request_features, resolved
 from .runtime_profile import service_origin
-from .workflow_schema import WorkflowRejected, local_schema
+from .workflow_schema import WorkflowRejected, local_schema, validate_value
 
 NAME = r'[A-Za-z][A-Za-z0-9_]*'
 IDENTIFIER = re.compile(NAME + r'\Z')
@@ -30,7 +30,7 @@ STEP_SCHEMA = {
     'properties': {
         'stepId': {'type': 'string', 'pattern': '^' + NAME + '$'}, 'operationId': {'type': 'string'},
         'parameters': {'type': 'array', 'items': PARAMETER_SCHEMA},
-        'requestBody': {'type': 'object', 'required': ['contentType', 'payload'], 'additionalProperties': False,
+        'requestBody': {'type': 'object', 'required': ['contentType'], 'additionalProperties': False,
                         'properties': {'contentType': {'type': 'string'}, 'payload': {}}},
         'outputs': {'type': 'object', 'additionalProperties': {'type': 'string'}},
         'successCriteria': {'type': 'array', 'items': {'type': 'object', 'required': ['condition'], 'additionalProperties': False,
@@ -175,8 +175,8 @@ def check_workflow(document, workflow, sources):
             elif 'json' not in media:
                 if body_schema.get('type') != 'string' or body_schema.get('format') != 'binary':
                     raise WorkflowRejected('unsupported_content_type')
-            if body['payload'] is None and not CAPABILITIES['workflow']['json_null_body']:
-                raise WorkflowRejected('unsupported_serialization')
+            if 'payload' in body and body['payload'] is None:
+                validate_value(None, body_schema, document=info['document'], dialect=info['document']['openapi'], reason='invalid_request')
         previous[identifier] = set(step.get('outputs', {}))
         selected[identifier] = info
     for name, expression in workflow.get('outputs', {}).items():

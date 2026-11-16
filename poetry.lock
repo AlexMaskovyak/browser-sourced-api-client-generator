@@ -44,15 +44,14 @@ typing_extensions = {version = ">=4.16.0", markers = "python_version < \"3.15\""
 trio = ["trio (>=0.32.0)"]
 
 [[package]]
-name = "arazzo-runner"
-version = "0.9.6"
+name = "arazzo_runner"
+version = "0.9.6+websiteclient.1"
 description = "Execution libraries and test tools for Arazzo workflows and Open API operations"
 optional = false
 python-versions = "<4.0,>=3.11"
 groups = ["main"]
 files = [
-    {file = "arazzo_runner-0.9.6-py3-none-any.whl", hash = "sha256:6db1a33da2290a41e2dc3990302a387421508e1884bc1db085428d06e5f8be28"},
-    {file = "arazzo_runner-0.9.6.tar.gz", hash = "sha256:5491c9facc1a552ad278657315d527889a63353185f6c93456d8af01180f9102"},
+    {file = "arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl", hash = "sha256:8a04b4df1593ea7ae549b1f526fe94ec070cb991c3501432bdacba19bd1bf78c"},
 ]
 
 [package.dependencies]
@@ -61,6 +60,10 @@ jsonpointer = ">=3.0.0"
 pydantic = ">=2.0.0"
 pyyaml = ">=6.0"
 requests = ">=2.28.0"
+
+[package.source]
+type = "file"
+url = "src/website_client/native_dependencies/arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl"
 
 [[package]]
 name = "ariadne-codegen"
@@ -984,6 +987,18 @@ files = [
 ]
 
 [[package]]
+name = "pdm-backend"
+version = "2.5.0"
+description = "The build backend used by PDM that supports latest packaging standards"
+optional = false
+python-versions = ">=3.9"
+groups = ["dev"]
+files = [
+    {file = "pdm_backend-2.5.0-py3-none-any.whl", hash = "sha256:5b8746b567a16a1fd506ce66ee28e89d46374526f52238aa1b96cc2c08245c63"},
+    {file = "pdm_backend-2.5.0.tar.gz", hash = "sha256:7953b994563d3151755e3364b9d0cfe817ed0eaecdf27c8f777f412d26bcd98a"},
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.14.5"
 description = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
@@ -1742,4 +1757,4 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "3a925479b6215f98f6a72e6c582c5e7b149ca993f668e698b921c1d14c833f9f"
+content-hash = "f55210b16163a0a9454406a44fc7b66fb421f2b8b2d2fc851dbd2ee47500fb33"

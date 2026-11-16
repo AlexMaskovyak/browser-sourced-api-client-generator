@@ -8,7 +8,7 @@ CAPABILITIES = {
             'graphql_nested_files': True, 'nonexploded_query_array': False},
     'workflow': {'json': True, 'flat_multipart': True, 'raw_binary': True,
                  'nonexploded_query_array': False, 'complex_parameters': False,
-                 'dynamic_destinations': False, 'file_objects': False, 'json_null_body': False},
+                 'dynamic_destinations': False, 'file_objects': False, 'json_null_body': True},
 }
 
 

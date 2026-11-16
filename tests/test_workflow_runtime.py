@@ -54,7 +54,7 @@ def service(tmp_path, monkeypatch):
             body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
             server.calls.append((self.command, self.path, self.headers.get('Cookie'), body))
             if self.path == '/nullable':
-                expected = b'null' if server.mode == 'whole-null' else b'{"value": null}'
+                expected = b'null' if server.mode == 'whole-null' else b'' if server.mode == 'omitted' else b'{"value": null}'
                 return self.send({'ok': body == expected}, 200 if body == expected else 422)
             if self.headers.get('Cookie') != 'sid=' + server.sid or self.headers.get('Authorization') != 'Bearer SYNTHETIC_TOKEN':
                 return self.send({'error': 'expired'}, 401)
@@ -147,9 +147,11 @@ def test_unknown_file_objects_and_missing_inputs_rejected_before_dispatch(servic
     assert not server.calls
 
 
-def test_native_whole_json_null_incompatibility_and_nested_null_wire(service):
+def test_versioned_native_json_null_omitted_nested_and_schema_rejection(service):
     import requests
+    import importlib.metadata
     from arazzo_runner import ArazzoRunner
+    assert importlib.metadata.version('arazzo-runner') == '0.9.6+websiteclient.1'
     url, server = service
     server.mode = 'whole-null'
     source = {'openapi': '3.0.3', 'info': {'title': 'Nullable', 'version': '1'}, 'servers': [{'url': url}], 'paths': {'/nullable': {'post': {'operationId': 'nullable', 'requestBody': {'required': True, 'content': {'application/json': {'schema': {'type': 'string', 'nullable': True}}}}, 'responses': {'200': {'description': 'ok'}}}}}}
@@ -160,11 +162,23 @@ def test_native_whole_json_null_incompatibility_and_nested_null_wire(service):
         runner = ArazzoRunner(arazzo_doc=document, source_descriptions={'api': source}, http_client=session)
         execution = runner.start_workflow('nullable', {})
         event = runner.execute_next_step(execution)
-    assert server.calls[-1][3] == b''  # The pinned native builder sends absence, not JSON null.
-    assert event.get('success') is False or str(event['status']) in {'error', 'step_error'}
+    assert server.calls[-1][3] == b'null'
+    assert event.get('success') is True
     server.calls.clear()
     result = execute_document(document, {'api': source}, 'nullable')
-    assert result['reason'] == 'unsupported_serialization' and not server.calls
+    assert result['status'] == 'success', result
+    assert server.calls[-1][3] == b'null'
+    source['paths']['/nullable']['post']['requestBody']['content']['application/json']['schema'] = {'type': 'string'}
+    before = len(server.calls)
+    result = execute_document(document, {'api': source}, 'nullable')
+    assert result['reason'] == 'invalid_request' and len(server.calls) == before
+    source['paths']['/nullable']['post']['requestBody']['required'] = False
+    document['workflows'][0]['steps'][0]['requestBody'] = {'contentType': 'application/json'}
+    server.mode = 'omitted'
+    result = execute_document(document, {'api': source}, 'nullable')
+    assert result['status'] == 'success', result
+    assert server.calls[-1][3] == b''
+    source['paths']['/nullable']['post']['requestBody']['required'] = True
     server.mode = 'nested-null'
     source['paths']['/nullable']['post']['requestBody']['content']['application/json']['schema'] = {'type': 'object', 'required': ['value'], 'properties': {'value': {'type': 'string', 'nullable': True}}}
     document['workflows'][0]['steps'][0]['requestBody']['payload'] = {'value': None}
