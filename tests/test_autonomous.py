@@ -1,0 +1,283 @@
+"""Ordinary URL and offline routes finish without post-login decisions."""
+
+from copy import deepcopy
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import importlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import threading
+
+from graphql import build_schema, graphql_sync, get_introspection_query
+import pytest
+import yaml
+
+from website_client.autonomous import run
+from website_client.cli import main
+from website_client.discovery_manifest import write_manifest
+from website_client.discovery_manifest.records import Artifact, Kind, Manifest, Protocol, Service, Source
+from website_client.pipeline import import_definition
+
+
+def spec(endpoint='https://neutral.invalid'):
+    return {'openapi': '3.0.3', 'info': {'title': 'Contract', 'version': '1'}, 'servers': [{'url': endpoint}],
+            'paths': {'/read': {'get': {'operationId': 'read', 'responses': {'200': {'description': 'ok', 'content': {'application/json': {'schema': {'type': 'object', 'required': ['value'], 'properties': {'value': {'type': 'integer'}}}}}}}}}}}
+
+
+def test_saved_openapi_json_yaml_and_converted_definitions_need_no_node(tmp_path, monkeypatch):
+    monkeypatch.setattr('website_client.har_inference.backend_module', lambda: pytest.fail('definition route invoked Node'))
+    for index, suffix in enumerate(('json', 'yaml')):
+        source = tmp_path / ('input.' + suffix)
+        value = spec()
+        source.write_text(json.dumps(value) if suffix == 'json' else yaml.safe_dump(value))
+        coverage = run(source, tmp_path / ('output-' + str(index)))
+        assert coverage['coverage'] == 'complete'
+        assert len(coverage['services']) == 1 and coverage['services'][0]['operations'] == ['read']
+        assert coverage['services'][0]['provenance'] == 'definition'
+
+
+def test_saved_sdl_introspection_named_and_schema_less_operations_routes(tmp_path):
+    schema = 'type Query { status: String! }'
+    operations = tmp_path / 'operations.graphql'
+    operations.write_text('query Status { status }')
+    for index, (content, operations_path) in enumerate([
+        (schema, None), (schema, operations),
+        (json.dumps(graphql_sync(build_schema(schema), get_introspection_query()).formatted), None),
+        (operations.read_text(), None),
+    ]):
+        source = tmp_path / ('input-' + str(index))
+        source.write_text(content)
+        coverage = run(source, tmp_path / ('output-' + str(index)), endpoint='https://neutral.invalid/graphql', operations=operations_path)
+        assert len(coverage['services']) == 1
+        assert coverage['services'][0]['operations'] == (['Status'] if index in {1, 3} else ['query_status'])
+        assert coverage['services'][0]['provenance'] == ('schema-less-operations' if index == 3 else 'definition')
+
+
+def test_saved_and_merged_manifests_package_all_services_and_are_deterministic(tmp_path):
+    sources = []
+    for index in range(2):
+        item = Artifact.create('definition.json', Kind.OPENAPI, json.dumps(spec('https://api' + str(index) + '.invalid')), Source.EXTERNAL)
+        service = Service.create(Protocol.OPENAPI, 'https://api' + str(index) + '.invalid', item.id)
+        manifest = Manifest.create((item,), (service,), created_at='2026-01-01T00:00:00Z')
+        source = tmp_path / ('manifest-' + str(index) + '.json')
+        write_manifest(manifest, source)
+        sources.append(source)
+    reports = [run(sources[0], tmp_path / ('output-' + str(index)), inputs=[sources[1]]) for index in range(2)]
+    assert len(reports[0]['services']) == 2
+    assert reports[0] == reports[1]
+    for service in reports[0]['services']:
+        first = tmp_path / 'output-0' / service['directory']
+        second = tmp_path / 'output-1' / service['directory']
+        for path in first.rglob('*'):
+            if path.is_file():
+                assert path.read_bytes() == (second / path.relative_to(first)).read_bytes()
+
+
+def test_unknown_file_backed_har_upload_bodies_are_not_executable(tmp_path):
+    entries = []
+    for path, request in [('/missing-upload', {'postData': {'mimeType': 'multipart/form-data', 'params': [{'name': 'file', 'fileName': 'CANARY_FILE'}]}}),
+                          ('/missing-binary', {'hasPostData': True, 'bodySize': 274}),
+                          ('/bodyless', {'bodySize': 0})]:
+        entries.append({'request': {'method': 'POST', 'url': 'https://neutral.invalid' + path, **request}, 'response': {'status': 200, 'content': {'mimeType': 'application/json', 'text': '{"value":7}'}}})
+    source = tmp_path / 'capture.har'
+    source.write_text(json.dumps({'log': {'version': '1.2', 'entries': entries}}))
+    output = tmp_path / 'output'
+    report = run(source, output)
+    assert report['coverage'] == 'partial'
+    assert len(report['services']) == 1
+    assert len(report['services'][0]['operations']) == 1
+    generated = output / report['services'][0]['directory'] / 'openapi.json'
+    assert set(json.loads(generated.read_text())['paths']) == {'/bodyless'}
+    assert sum(item.get('reason') == 'unknown_request_body' for item in report['exclusions']) == 2
+    assert b'CANARY_FILE' not in (output / 'manifest.json').read_bytes()
+
+
+def test_zero_executable_and_malformed_inputs_have_nonzero_machine_reasons(tmp_path, capsys):
+    source = tmp_path / 'invalid.yaml'
+    source.write_text('openapi: [ CANARY_SECRET: invalid')
+    assert main(['run', str(source), '--output', str(tmp_path / 'output')]) == 1
+    result = json.loads(capsys.readouterr().err)
+    assert result == {'coverage': 'unsupported', 'reason': 'invalid_or_unsupported_input'}
+    source.write_text(json.dumps({'log': {'version': '1.2', 'entries': []}}))
+    assert main(['run', str(source), '--output', str(tmp_path / 'empty')]) == 1
+    result = capsys.readouterr()
+    assert json.loads(result.out)['coverage'] == 'unsupported'
+
+
+def test_workflow_json_literal_metadata_names_remain_unchanged(tmp_path):
+    from website_client.privacy import safe_workflow
+    workflow = {'arazzo': '1.0.0', 'info': {'title': 'Neutral', 'version': '1'}, 'sourceDescriptions': [],
+                'workflows': [{'workflowId': 'simple', 'steps': [{'stepId': 'create', 'operationId': 'create', 'requestBody': {'payload': {'description': 'Neutral', 'default': True, 'example': 3}}}]}]}
+    assert safe_workflow(workflow)['workflows'][0]['steps'][0]['requestBody']['payload'] == {'description': 'Neutral', 'default': True, 'example': 3}
+    source = tmp_path / 'workflow.yaml'
+    source.write_text(yaml.safe_dump(workflow))
+    definition = tmp_path / 'definition.json'
+    definition.write_text(json.dumps(spec()))
+    result = run(source, tmp_path / 'output', inputs=[definition])
+    assert len(result['services']) == 1
+    assert result['workflows'][0]['status'] == 'retained_for_runner'
+
+
+def test_real_url_traversal_collects_definitions_traffic_and_profile(tmp_path, monkeypatch):
+    monkeypatch.setenv('WEBSITE_CLIENT_PROFILE_DIR', str(tmp_path / 'profiles'))
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+        def send(self, body, content_type='text/html', status=200):
+            if not isinstance(body, bytes):
+                body = body.encode()
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def do_POST(self):
+            if self.path == '/login':
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(303)
+                self.send_header('Location', '/')
+                self.send_header('Set-Cookie', 'sid=LOCAL_INITIAL; HttpOnly; Path=/')
+                self.end_headers()
+            else:
+                server.writes += 1
+                self.send('{}', 'application/json')
+        def do_GET(self):
+            server.calls.append(self.path)
+            if self.path == '/login':
+                return self.send('<form method="post"><input name="username"><button type="submit">Sign in</button></form>')
+            if self.path == '/':
+                return self.send('<link rel="service-desc" href="/definitions/main.yaml"><a href="/page-two">More</a><button role="tab" onclick="fetch(\'/observed\',{headers:{Authorization:\'Bearer LOCAL_BEARER\'}})">Records</button><button role="tab" onclick="fetch(\'/write\',{method:\'POST\'})">Actions</button>')
+            if self.path == '/page-two':
+                return self.send('<details><summary>Details</summary>Neutral</details>')
+            if self.path == '/definitions/main.yaml':
+                return self.send(yaml.safe_dump(spec(url)), 'application/yaml')
+            if self.path in {'/read', '/observed'}:
+                assert self.headers.get('Cookie') == 'sid=LOCAL_INITIAL'
+                if self.path == '/observed':
+                    assert self.headers.get('Authorization') == 'Bearer LOCAL_BEARER'
+                return self.send('{"value":7}', 'application/json')
+            self.send('{}', 'application/json', 404)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.calls, server.writes = [], 0
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f'http://127.0.0.1:{server.server_port}'
+    def initial_login(session):
+        session._page.locator('input').fill('neutral')
+        session._page.locator('button').click()
+        session._page.wait_for_url(url + '/')
+    try:
+        output = tmp_path / 'output'
+        report = run(url + '/login', output, login_handler=initial_login, headless=True, max_pages=3, max_actions=5, duration_seconds=10)
+        assert report['coverage'] == 'partial'
+        assert {item['provenance'] for item in report['services']} == {'definition', 'traffic-har2sdk'}
+        exploration = report['discovery']['exploration']
+        assert len(exploration['pages']) == 2
+        assert len(exploration['actions']) >= 2
+        assert exploration['blockedRequests']
+        assert server.writes == 0
+        service = next(item for item in report['services'] if item['provenance'] == 'definition')
+        project = output / service['directory']
+        package = service['package'].replace('-', '_')
+        result = subprocess.run([sys.executable, '-m', package + '._cli', 'read'], cwd=project, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {'value': 7}
+        profile_files = list((tmp_path / 'profiles').glob('*.json'))
+        assert len(profile_files) == 1 and 'LOCAL_BEARER' in profile_files[0].read_text()
+        for path in output.rglob('*'):
+            if path.is_file() and '__pycache__' not in path.parts:
+                assert b'LOCAL_BEARER' not in path.read_bytes()
+                assert b'LOCAL_INITIAL' not in path.read_bytes()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_metadata_filter_preserves_wire_fields_and_legacy_outputs_are_private(tmp_path, capsys):
+    from website_client.admission import admit_openapi
+    value = spec()
+    value['paths']['/write'] = {'post': {'operationId': 'write', 'requestBody': {'required': True, 'content': {'application/json': {'schema': {'type': 'object', 'required': ['description'], 'properties': {'description': {'type': 'string', 'description': 'CANARY_PROSE'}, 'default': {'type': 'boolean'}, 'example': {'type': 'integer'}}}}}}, 'responses': {'204': {'description': 'CANARY_RESPONSE_DESCRIPTION'}}}}
+    value['info']['description'] = 'CANARY_INFO'
+    safe, executable, excluded = admit_openapi(value)
+    properties = executable['paths']['/write']['post']['requestBody']['content']['application/json']['schema']['properties']
+    assert set(properties) == {'description', 'default', 'example'}
+    assert properties['description']['type'] == 'string'
+    assert not excluded
+    source = tmp_path / 'source.json'
+    source.write_text(json.dumps(value))
+    imported = tmp_path / 'manifest.json'
+    assert main(['import', '--openapi', str(source), '--output', str(imported)]) == 0
+    output = tmp_path / 'legacy-client'
+    assert main(['generate', '--openapi', str(source), '--name', 'legacy-client', '--output', str(output)]) == 0
+    assert 'CANARY' not in imported.read_text()
+    for path in output.rglob('*'):
+        if path.is_file():
+            assert b'CANARY' not in path.read_bytes()
+    source.write_text('openapi: [CANARY_PARSER_SECRET: broken')
+    assert main(['generate', '--openapi', str(source), '--output', str(tmp_path / 'broken')]) == 1
+    assert 'CANARY' not in capsys.readouterr().err
+
+
+def test_saved_manifest_sensitive_report_provenance_and_sha_privacy(tmp_path):
+    from website_client.privacy import sanitized_manifest
+    item = Artifact.create('CANARY_FILENAME.json', Kind.OPENAPI, json.dumps(spec()), Source.EXTERNAL,
+                           locations=('https://neutral.invalid/spec?token=CANARY_LOCATION',))
+    report = Artifact.create('evidence.json', Kind.REPORT, '{"private":"CANARY_PAYLOAD"}', Source.REPORT)
+    target = Service.create(Protocol.OPENAPI, 'https://neutral.invalid', item.id, identifier='CANARY_SERVICE')
+    supplied = Manifest.create((item, report), (target,))
+    safe = sanitized_manifest(supplied)
+    text = json.dumps(safe.to_dict())
+    assert 'CANARY' not in text
+    assert item.sha256 in text and report.sha256 in text
+    source = tmp_path / 'manifest.json'
+    write_manifest(supplied, source)
+    output = tmp_path / 'output'
+    result = run(source, output)
+    assert len(result['services']) == 1
+    assert b'CANARY' not in (output / 'manifest.json').read_bytes()
+
+
+def test_missing_node_run_reports_dependency_reason(tmp_path, monkeypatch, capsys):
+    source = tmp_path / 'capture.har'
+    source.write_text(json.dumps({'log': {'version': '1.2', 'entries': [{'request': {'method': 'GET', 'url': 'https://neutral.invalid/read'}, 'response': {'status': 200, 'content': {'mimeType': 'application/json', 'text': '{"value":7}'}}}]}}))
+    monkeypatch.setattr('website_client.har_inference.shutil.which', lambda _: None)
+    assert main(['run', str(source), '--output', str(tmp_path / 'output')]) == 1
+    assert json.loads(capsys.readouterr().err) == {'coverage': 'unsupported', 'reason': 'har_dependency_required'}
+
+
+def test_conflicting_artifact_identity_quarantines_affected_service_only(tmp_path):
+    from dataclasses import replace
+    first = Artifact.create('first.json', Kind.OPENAPI, json.dumps(spec('https://first.invalid')), Source.EXTERNAL)
+    second_value = spec('https://second.invalid')
+    second = replace(Artifact.create('second.json', Kind.OPENAPI, json.dumps(second_value), Source.EXTERNAL), id=first.id)
+    unrelated = Artifact.create('unrelated.json', Kind.OPENAPI, json.dumps(spec('https://unrelated.invalid')), Source.EXTERNAL)
+    manifests = [Manifest.create((first, unrelated), (Service.create(Protocol.OPENAPI, 'https://first.invalid', first.id), Service.create(Protocol.OPENAPI, 'https://unrelated.invalid', unrelated.id))),
+                 Manifest.create((second,), (Service.create(Protocol.OPENAPI, 'https://second.invalid', second.id),))]
+    sources = []
+    for index, manifest in enumerate(manifests):
+        path = tmp_path / ('manifest-' + str(index) + '.json')
+        write_manifest(manifest, path)
+        sources.append(path)
+    result = run(sources[0], tmp_path / 'output', inputs=sources[1:])
+    assert len(result['services']) == 1
+    assert result['coverage'] == 'partial'
+    assert sum(item['reason'] == 'conflicting_artifact_identity' for item in result['exclusions']) == 2
+    project = tmp_path / 'output' / result['services'][0]['directory']
+    assert json.loads((project / 'openapi.json').read_text())['servers'][0]['url'] == 'https://unrelated.invalid'
+
+
+def test_historical_short_secret_path_and_sensitive_shapes_are_excluded(tmp_path):
+    value = spec()
+    value['paths']['/resource/SECRET123'] = {'get': {'operationId': 'capability_read', 'responses': {'200': {'description': 'ok'}}}}
+    source = tmp_path / 'definition.json'
+    source.write_text(json.dumps(value))
+    output = tmp_path / 'output'
+    result = run(source, output)
+    assert result['coverage'] == 'partial'
+    assert result['services'][0]['operations'] == ['read']
+    assert any(item['reason'] == 'sensitive_structure' for item in result['exclusions'])
+    for path in output.rglob('*'):
+        if path.is_file():
+            assert b'SECRET123' not in path.read_bytes()

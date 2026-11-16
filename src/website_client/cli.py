@@ -136,8 +136,29 @@ def main(args=None):
     from .pipeline import add_commands, run_offline, generate_bundle
 
     add_commands(commands, generate_command, definition)
+    automatic = commands.add_parser('run', help='Generate all eligible clients from a URL or saved input after initial login.')
+    automatic.add_argument('source', help='Website URL or saved HAR, definition, operations, workflow or manifest file.')
+    automatic.add_argument('--input', action='append', default=[], help='Additional initially supplied manifest or bundled definition; repeat to combine.')
+    automatic.add_argument('--output', required=True, help='New output directory. Writes sanitized evidence, coverage and generated packages.')
+    automatic.add_argument('--name', default='service-client', help='Base package name; stable service suffixes keep namespaces distinct.')
+    automatic.add_argument('--endpoint', help='Initial service address when a saved definition does not contain one.')
+    automatic.add_argument('--operations', help='Initially supplied named GraphQL operations. A schema also works without this option.')
+    automatic.add_argument('--browser', choices=['chrome', 'chromium'], default='chrome')
+    automatic.add_argument('--browser-path')
+    automatic.add_argument('--max-pages', type=int, default=20)
+    automatic.add_argument('--max-actions', type=int, default=60)
+    automatic.add_argument('--max-depth', type=int, default=3)
+    automatic.add_argument('--explore-seconds', type=int, default=120)
     options = parser.parse_args(args)
     try:
+        if options.command == 'run':
+            from .autonomous import run
+            result = run(options.source, options.output, name=options.name, inputs=options.input, endpoint=options.endpoint,
+                         operations=options.operations, browser=options.browser, browser_path=options.browser_path,
+                         max_pages=options.max_pages, max_actions=options.max_actions, max_depth=options.max_depth,
+                         duration_seconds=options.explore_seconds)
+            print(json.dumps(result))
+            return 0 if result['services'] else 1
         if options.command in {"normalize", "import"}:
             run_offline(options)
             return 0
@@ -293,6 +314,8 @@ def main(args=None):
                 )
             files = result.files("har" if options.har else "browser")
             if automatic_report is not None:
+                from .privacy import safe_ui_report
+                automatic_report = safe_ui_report(automatic_report)
                 files["self-discovery.json"] = (
                     json.dumps(automatic_report, indent=2) + "\n"
                 )
@@ -344,9 +367,16 @@ def main(args=None):
         print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
         return 130
     except BrowserError as error:
-        print(str(error), file=sys.stderr)
+        if options.command == "run":
+            reason = "har_dependency_required" if str(error).startswith("har_dependency_required") else "invalid_or_unsupported_input"
+            print(json.dumps({"coverage": "unsupported", "reason": reason}), file=sys.stderr)
+        else:
+            print(str(error), file=sys.stderr)
         return 1
     except Exception:
+        if options.command == "run":
+            print(json.dumps({"coverage": "unsupported", "reason": "invalid_or_unsupported_input"}), file=sys.stderr)
+            return 1
         print(
             "Command failed. Check the inputs and use a new output directory before retrying.",
             file=sys.stderr,

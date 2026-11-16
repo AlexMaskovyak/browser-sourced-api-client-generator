@@ -232,7 +232,8 @@ def validated_graphql_operations(schema_sdl, operations_path):
         raise BrowserError(
             "GraphQL generation requires --operations as well as --graphql-schema."
         )
-    query_text = read_document(operations_path)
+    from .privacy import safe_operations
+    query_text = safe_operations(read_document(operations_path))
     try:
         document = parse(query_text)
         if validate(build_schema(schema_sdl), document):

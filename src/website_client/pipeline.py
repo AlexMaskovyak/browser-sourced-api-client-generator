@@ -113,7 +113,7 @@ def import_definition(options) -> Manifest:
         try:
             compile_operations((text,))
         except ValueError as error:
-            raise BrowserError(str(error)) from None
+            raise BrowserError("invalid_graphql_operations") from None
         producer = Producer(options.producer, options.producer_version)
         endpoint = endpoint_url(options.endpoint)
         document = Artifact.create(
@@ -132,7 +132,11 @@ def import_definition(options) -> Manifest:
     source = read_text(source_path, MAX_DOCUMENT)
     producer = Producer(options.producer, options.producer_version)
     if options.openapi:
-        spec = openapi_document(source)
+        from .admission import admit_openapi
+        safe, spec, exclusions = admit_openapi(source)
+        admission_report = Artifact.create("admission.json", Kind.REPORT, encoded({"exclusions": exclusions}), Source.REPORT)
+        source_document = Artifact.create("source-openapi.json", Kind.REPORT, encoded(safe), Source.EXTERNAL)
+        source = encoded(spec if spec["paths"] else safe)
         endpoints = (
             [options.endpoint]
             if options.endpoint
@@ -154,7 +158,7 @@ def import_definition(options) -> Manifest:
             producer=producer,
         )
         return Manifest.create(
-            (item,),
+            (item, admission_report, source_document),
             tuple(Service.create(Protocol.OPENAPI, endpoint, item.id, identifier=options.service_id)
                   for endpoint in endpoints),
             producer,
@@ -197,8 +201,9 @@ def run_offline(options):
 
     Write progress to stderr so stdout can feed the next command unchanged. This
     path never opens a browser or sends service requests."""
+    from .privacy import sanitized_manifest
     if options.command == "import":
-        value = import_definition(options)
+        value = sanitized_manifest(import_definition(options))
     else:
         sources = options.input or ["-"]
         if len(sources) > 20:
@@ -209,7 +214,7 @@ def run_offline(options):
         for source in sources:
             document = read_manifest(source, limit=remaining)
             remaining -= len(encoded(document.to_dict()).encode("utf-8"))
-            inputs.append(document)
+            inputs.append(sanitized_manifest(document))
         value = normalize_manifest(
             merge_manifests(tuple(inputs)),
             bind_schema=options.bind_schema,
@@ -239,7 +244,11 @@ def generate_bundle(source, output, name, identifier=None, allow_inferred=False)
     generation report; refuse unusable or ambiguous services before publication."""
     from .generation import generate
 
-    original = read_manifest(source)
+    from .privacy import sanitized_manifest
+    supplied = read_manifest(source)
+    supplied_hash = digest(supplied.to_dict())
+    supplied_artifacts = {item.id: item for item in supplied.artifacts}
+    original = sanitized_manifest(supplied)
     normalized = normalize_manifest(original)
     target = select_service(normalized, identifier, allow_inferred=allow_inferred)
     artifacts = {item.id: item for item in normalized.artifacts}
@@ -248,7 +257,7 @@ def generate_bundle(source, output, name, identifier=None, allow_inferred=False)
     if normalized.normalization is None:
         raise BrowserError("Selected manifest has no normalization result.")
     lineage = {
-        "inputBundleSha256": digest(original.to_dict()),
+        "inputBundleSha256": supplied_hash,
         "normalizedBundleSha256": digest(normalized.to_dict()),
         "producer": original.producer.to_dict(),
         "sourceBundles": [item.to_dict() for item in normalized.source_bundles or ()],
@@ -260,7 +269,7 @@ def generate_bundle(source, output, name, identifier=None, allow_inferred=False)
         },
         "schemaArtifact": artifact_reference(schema) if schema else None,
         "sourceSchemaArtifact": (
-            artifact_reference(artifacts[target.source_schema_artifact])
+            {**artifact_reference(artifacts[target.source_schema_artifact]), "sha256": supplied_artifacts.get(target.source_schema_artifact, artifacts[target.source_schema_artifact]).sha256}
             if target.source_schema_artifact else None
         ),
         "operationArtifacts": [artifact_reference(artifacts[ref]) for ref in target.operation_artifacts],
@@ -287,10 +296,10 @@ def generate_bundle(source, output, name, identifier=None, allow_inferred=False)
         schema_path.write_text(schema.content, encoding="utf-8")
         if target.protocol is Protocol.OPENAPI:
             return generate(output, name, openapi=schema_path, lineage=lineage)
-        if operations is None:
-            raise BrowserError("Selected GraphQL API has no validated operation document.")
-        operations_path = root / "operations.graphql"
-        operations_path.write_text(operations.content, encoding="utf-8")
+        operations_path = None
+        if operations is not None:
+            operations_path = root / "operations.graphql"
+            operations_path.write_text(operations.content, encoding="utf-8")
         return generate(
             output, name, schema=schema_path, operations=operations_path, lineage=lineage,
         )

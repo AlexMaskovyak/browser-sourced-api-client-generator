@@ -52,9 +52,13 @@ class SiteExplorer:
         max_actions=DEFAULT_MAX_ACTIONS,
         max_depth=DEFAULT_MAX_DEPTH,
         duration_seconds=DEFAULT_EXPLORE_SECONDS,
+        strict_origin=False,
+        api_origins=None,
     ):
         validate_exploration(max_pages, max_actions, max_depth, duration_seconds)
         self.session = session
+        self.strict_origin = strict_origin
+        self.api_origins = api_origins if api_origins is not None else set()
         self.start_url = session.current_url()
         self.max_pages = max_pages
         self.max_actions = max_actions
@@ -84,7 +88,7 @@ class SiteExplorer:
             self.omitted += 1
 
     def _guard(self, route):
-        reason = request_allowed(route.request, self.session._origin)
+        reason = request_allowed(route.request, self.session._origin, self.strict_origin, self.api_origins)
         if (
             reason is None
             and self._control_phase
@@ -290,7 +294,7 @@ class SiteExplorer:
         for index in range(min(links.count(), MAX_ELEMENTS)):
             element = links.nth(index)
             href = element.get_attribute("href")
-            definition = schema_url(page.url, href)
+            definition = schema_url(page.url, href, advertised="service-desc" in (element.get_attribute("rel") or "").split())
             if (
                 definition
                 and definition not in observer.schema_links

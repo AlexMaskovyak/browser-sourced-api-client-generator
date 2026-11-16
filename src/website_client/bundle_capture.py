@@ -31,13 +31,23 @@ def capture_manifest(discovery, files) -> Manifest:
         source, sources, declarations = Source.REPORT, [], []
         if name.startswith("openapi-"):
             kind = Kind.OPENAPI
-            spec = openapi_document(content)
+            from .admission import admit_openapi
+            safe_source, spec, exclusions = admit_openapi(content)
             inferred = bool(spec.get("x-discovery-inferred"))
             source = Source.INFERRED if inferred else Source.DOWNLOADED
-            canonical = json.dumps(spec, indent=2) + "\n"
+            canonical = content
+            content = json.dumps(spec, indent=2) + "\n"
+            if exclusions:
+                report = Artifact.create("admission-" + sha256(canonical)[:12] + ".json", Kind.REPORT, json.dumps({"exclusions": exclusions}) + "\n", Source.REPORT)
+                artifacts[report.id] = report
+                original = Artifact.create("source-" + sha256(canonical)[:12] + ".json", Kind.REPORT, canonical, Source.REPORT)
+                artifacts[original.id] = original
             sources = locations(
-                discovery.definition_sources.get(("openapi", sha256(canonical)), ())
+                discovery.definition_sources.get(("openapi", sha256(content)), ())
             )
+        elif name.startswith("arazzo-"):
+            kind, source = Kind.ARAZZO, Source.DOWNLOADED
+            sources = locations(discovery.definition_sources.get(("arazzo", sha256(content)), ()))
         elif name.startswith("graphql-schema-"):
             kind, source = Kind.GRAPHQL_SCHEMA, Source.DOWNLOADED
             sources = locations(
