@@ -16,7 +16,7 @@ def documents():
     return json.loads((FIXTURES / 'workflow.json').read_text()), {'api': json.loads((FIXTURES / 'openapi.json').read_text())}
 
 
-def test_research_sequence_has_explicit_declared_file_and_is_admitted():
+def test_original_research_sequence_without_input_schema_is_admitted():
     document, sources = documents()
     admitted, exclusions = admit_workflows(document, sources)
     assert not exclusions
@@ -43,6 +43,7 @@ def test_unsupported_semantics_exclude_only_affected_workflow(change, reason):
     valid = deepcopy(document['workflows'][0])
     valid['workflowId'] = 'valid'
     document['workflows'].append(valid)
+    document['workflows'][0]['inputs'] = {'type': 'object', 'properties': {'file': {}}, 'additionalProperties': False}
     change(document['workflows'][0])
     admitted, exclusions = admit_workflows(document, sources)
     assert [item['workflowId'] for item in admitted['workflows']] == ['valid']
@@ -101,3 +102,10 @@ def test_duplicate_workflow_ids_are_all_excluded_and_metadata_is_not_executable(
     assert len(admitted['workflows']) == 1
     assert 'x-discovery-exclusions' not in admitted
     assert exclusions[0]['reason'] == 'sensitive_structure'
+
+
+def test_unused_external_component_does_not_exclude_selected_workflow():
+    document, sources = documents()
+    sources['api']['components']['schemas']['Unused'] = {'$ref': 'https://must-not-fetch.invalid/schema.json'}
+    admitted, exclusions = admit_workflows(document, sources)
+    assert len(admitted['workflows']) == 1 and not exclusions

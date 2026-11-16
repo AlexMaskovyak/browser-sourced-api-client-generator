@@ -1,6 +1,7 @@
 """Non-fetching, dialect-correct schema validation at workflow wire boundaries."""
 
 from copy import deepcopy
+from jsonpointer import resolve_pointer, JsonPointerException
 import json
 
 from jsonschema import Draft202012Validator
@@ -20,7 +21,8 @@ def no_fetch(uri):
 REGISTRY = Registry(retrieve=no_fetch)
 
 
-def local_schema(value, depth=0, context=None):
+def local_schema(value, depth=0, context=None, document=None, seen=None):
+    seen = set() if seen is None else seen
     if depth > 80:
         raise WorkflowRejected('unsupported_schema_depth')
     if context in {"enum", "const", "default", "example", "examples"}:
@@ -29,25 +31,32 @@ def local_schema(value, depth=0, context=None):
     if isinstance(value, dict):
         if context in maps:
             for item in value.values():
-                local_schema(item, depth + 1)
+                local_schema(item, depth + 1, document=document, seen=seen)
             return
         for key, item in value.items():
             if key in {'$id', '$dynamicRef', '$dynamicAnchor', '$recursiveRef', '$recursiveAnchor', '$vocabulary', '$anchor'}:
                 raise WorkflowRejected('unsupported_schema_reference')
-            if key == '$ref' and (not isinstance(item, str) or not item.startswith('#/')):
-                raise WorkflowRejected('external_reference')
-            local_schema(item, depth + 1, key)
+            if key == '$ref':
+                if not isinstance(item, str) or not item.startswith('#/'):
+                    raise WorkflowRejected('external_reference')
+                if document is not None and item not in seen:
+                    seen.add(item)
+                    try:
+                        target = resolve_pointer(document, item[1:])
+                    except JsonPointerException:
+                        raise WorkflowRejected('unresolved_reference') from None
+                    local_schema(target, depth + 1, document=document, seen=seen)
+            local_schema(item, depth + 1, key, document, seen)
     elif isinstance(value, list):
         for item in value:
-            local_schema(item, depth + 1)
+            local_schema(item, depth + 1, document=document, seen=seen)
 
 
 def validate_value(value, schema, *, document=None, dialect='2020-12', reason='invalid_inputs'):
     """Resolve only bundled local pointers through standard schema validators."""
     try:
-        local_schema(schema)
+        local_schema(schema, document=document)
         if document is not None:
-            local_schema(document)
             root = deepcopy(document)
             root['x-website-client-validation'] = schema
             root['$ref'] = '#/x-website-client-validation'

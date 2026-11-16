@@ -76,7 +76,7 @@ def prune_components(document):
             reference = value.get('$ref')
             if isinstance(reference, str) and reference.startswith('#/components/') and reference not in used:
                 used.add(reference)
-                visit(resolved({'components': original}, value))
+                visit(resolve_pointer({'components': original}, reference[1:]))
             for item in value.values():
                 visit(item)
         elif isinstance(value, list):
