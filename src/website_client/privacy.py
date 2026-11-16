@@ -201,7 +201,16 @@ def _workflow_sources(items: list[dict]) -> list[dict]:
     result = []
     for item in items:
         selected = {key: item.get(key) for key in ("name", "type", "url")}
-        if not sensitive(json.dumps(selected)):
+        portable = selected.get("url")
+        portable_reference = isinstance(portable, str) and re.fullmatch(
+            r"sources/artifact-[a-f0-9]{64}\.json", portable
+        )
+        inspected = (
+            {key: value for key, value in selected.items() if key != "url"}
+            if portable_reference
+            else selected
+        )
+        if not sensitive(json.dumps(inspected)):
             result.append({key: item[key] for key in selected if key in item})
     return result
 
@@ -330,6 +339,12 @@ def safe_report(text: str) -> str:
         return encoded_json(admit_openapi(value)[0])
     if isinstance(value, dict) and "runtimeProfiles" in value:
         return encoded_json({"runtimeProfiles": _report_profiles(value)})
+    if isinstance(value, dict) and "workflowBindings" in value:
+        from .workflow_binding import clean_binding_report
+
+        return encoded_json(
+            {"workflowBindings": clean_binding_report(value["workflowBindings"])}
+        )
     cleaned = _clean_report_fields(value)
     if isinstance(value, dict) and isinstance(value.get("endpoints"), list):
         cleaned["endpoints"] = _report_graphql_endpoints(value["endpoints"])

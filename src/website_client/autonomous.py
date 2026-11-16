@@ -29,6 +29,13 @@ from .generation import generate, package_name_for
 from .normalization import normalize_manifest
 from .privacy import sanitized_manifest, safe_workflow
 from .runtime_profile import OriginCaptures, save_browser_profile, service_origin
+from .workflow_binding import (
+    InputRegistry,
+    bind_sources,
+    referenced_local_files,
+    register_definition,
+    workflow_file,
+)
 
 
 def _profile_id(url):
@@ -223,6 +230,7 @@ def _definition_input(
     value: Any,
     endpoint: str | None,
     operations: str | Path | None,
+    bindings: InputRegistry | None = None,
 ) -> Manifest:
     from .pipeline import import_definition
 
@@ -245,7 +253,10 @@ def _definition_input(
             options.graphql_schema = path
         except BrowserError:
             options.operations = path
-    return sanitized_manifest(import_definition(options))
+    result = sanitized_manifest(import_definition(options))
+    if bindings is not None and options.openapi:
+        register_definition(result, path, bindings, endpoint)
+    return result
 
 
 def _saved_input(
@@ -253,6 +264,7 @@ def _saved_input(
     *,
     endpoint: str | None = None,
     operations: str | Path | None = None,
+    bindings: InputRegistry | None = None,
 ) -> Manifest:
     """Classify the supplied file only; never fetch a target or a referenced URL."""
     from .definitions import MAX_DOCUMENT
@@ -270,11 +282,14 @@ def _saved_input(
     if len(text.encode()) > MAX_DOCUMENT:
         raise BrowserError("unsupported: definition exceeds 8 MiB")
     if isinstance(value, dict) and "arazzo" in value:
+        value, location, references = workflow_file(value, path)
         item = Artifact.create(
             "workflow.json", Kind.ARAZZO, encoded(safe_workflow(value)), Source.EXTERNAL
         )
+        if bindings is not None:
+            bindings.register_workflow(item, location, references)
         return Manifest.create((item,), ())
-    return _definition_input(path, text, value, endpoint, operations)
+    return _definition_input(path, text, value, endpoint, operations, bindings)
 
 
 def _capture_profiles(
@@ -480,40 +495,59 @@ class CollectedInputs:
     profiles: dict[str, str] = field(default_factory=dict, repr=False)
     allowed_origins: set[str] | None = field(default=None, repr=False)
     discovery_report: dict[str, Any] | None = field(default=None, repr=False)
+    bindings: InputRegistry = field(default_factory=InputRegistry, repr=False)
+
+
+def _initial_paths(request: RunRequest) -> list[str | Path]:
+    paths = list(request.inputs)
+    if urlsplit(str(request.source)).scheme not in {"http", "https"}:
+        paths.insert(0, request.source)
+    for path in list(paths):
+        for declared in referenced_local_files(path):
+            if all(Path(existing).resolve() != declared for existing in paths):
+                paths.append(declared)
+    if len(paths) > 20:
+        raise BrowserError("invalid_input_count")
+    return paths
 
 
 def _collect_inputs(request: RunRequest) -> CollectedInputs:
-    source, inputs = request.source, request.inputs
-    endpoint, operations = request.endpoint, request.operations
-    browser, browser_path = request.browser, request.browser_path
-    login_handler, headless = request.login_handler, request.headless
-    max_pages, max_actions = request.max_pages, request.max_actions
-    max_depth, duration_seconds = request.max_depth, request.duration_seconds
-    profiles, allowed, discovery_report = {}, None, None
-    manifests = []
-    if urlsplit(str(source)).scheme in {"http", "https"}:
-        manifest, discovery_report, profiles, allowed = _browser_input(
-            str(source),
-            browser=browser,
-            browser_path=browser_path,
-            login_handler=login_handler,
-            headless=headless,
-            max_pages=max_pages,
-            max_actions=max_actions,
-            max_depth=max_depth,
-            duration_seconds=duration_seconds,
+    collected = CollectedInputs([])
+    if urlsplit(str(request.source)).scheme in {"http", "https"}:
+        manifest, report, profiles, allowed = _browser_input(
+            str(request.source),
+            browser=request.browser,
+            browser_path=request.browser_path,
+            login_handler=request.login_handler,
+            headless=request.headless,
+            max_pages=request.max_pages,
+            max_actions=request.max_actions,
+            max_depth=request.max_depth,
+            duration_seconds=request.duration_seconds,
         )
-        manifests.append(manifest)
-    else:
-        manifests.append(_saved_input(source, endpoint=endpoint, operations=operations))
-    for path in inputs:
-        manifests.append(_saved_input(path, endpoint=endpoint))
+        collected.manifests.append(manifest)
+        collected.discovery_report, collected.profiles, collected.allowed_origins = (
+            report,
+            profiles,
+            allowed,
+        )
+    for path in _initial_paths(request):
+        collected.manifests.append(
+            _saved_input(
+                path,
+                endpoint=request.endpoint,
+                operations=request.operations
+                if str(path) == str(request.source)
+                else None,
+                bindings=collected.bindings,
+            )
+        )
     if (
-        sum(len(encoded(item.to_dict()).encode()) for item in manifests)
+        sum(len(encoded(item.to_dict()).encode()) for item in collected.manifests)
         > 64 * 1024 * 1024
     ):
         raise BrowserError("input_budget_exceeded")
-    return CollectedInputs(manifests, profiles, allowed, discovery_report)
+    return collected
 
 
 def _merge_inputs(manifests: list[Manifest]) -> tuple[Manifest, list[dict[str, str]]]:
@@ -815,6 +849,7 @@ def run(
     )
     collected = _collect_inputs(request)
     manifest, conflicts = _merge_inputs(collected.manifests)
+    manifest = bind_sources(manifest, collected.bindings)
     profiles = _runtime_profiles(manifest, collected.profiles)
     normalized = normalize_manifest(manifest)
     artifacts = {item.id: item for item in normalized.artifacts}
