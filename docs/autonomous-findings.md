@@ -233,3 +233,24 @@ reproduced-incompatibility exception. Actual metadata and clean sibling-wheel
 installation are required checks. No PR existed before the user's latest request;
 that request now authorizes a draft PR and branch pushes. Overall implementation
 remains incomplete through M3/M4.
+
+## Pushed checkpoint and quality review
+
+The latest user request authorized branch pushes and a draft PR. Draft PR #12 is
+[open](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12).
+The pushed guard/runtime checkpoint `d4d9bd1` passed a coordinator-run full test from
+an isolated fixed archive: 303 passed in 62.47s. Later dependency patch installation
+changes the old native-null counterexample expectation; it does not invalidate that
+recorded checkpoint result. No GitHub checks are configured/reported for this branch.
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F17 | workflow quiet_runner | Overlapping thread contexts restore logger handlers early and leak a credential canary; later restoration also corrupts global stream/handler state. Independent reproduction. | Serialize suppression or use equivalent scoped native logging with correct restoration. | Correction pending. |
+| F18 | multipart request guard | A dict supplied to a string note field is stringified natively, then accepted by wire-only validation and sent as a POST. | Validate resolved native values before coercion without implementing another expression evaluator. | Correction pending. |
+
+The new explicit quality requirement also triggers a bounded refactor audit. The
+independent reviewer identified long/mixed orchestration, anonymous operation/source
+records, duplicated profile lifecycle, dense security predicates and mixed model
+conversion. The durable plan records reusable helpers, validated dataclasses,
+secret-safe repr, conventional spacing and focused regression checks. These quality
+criteria must pass independent review before completion.
