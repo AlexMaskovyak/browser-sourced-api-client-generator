@@ -28,3 +28,24 @@ Design review and implementation evidence will be appended at fixed revisions.
 Coordinator disposition: D1-D7 are required milestone criteria, not optional risks.
 Public Python profile support is M1 and automatic mixed-operation admission is M2.
 The architecture remains the supplied upstream architecture.
+
+## Baseline verification
+
+- Worktree base: `fb218f4`, clean main and preserved feature worktree at `682d28c`.
+- Installed worktree-only Poetry 2.5.1 under ignored `work/poetry-env`; selected
+  Python 3.12.14. Neither existing environment was changed.
+- `work/poetry-env/bin/poetry install --with dev`: succeeded from existing lock.
+- `work/poetry-env/bin/poetry run pytest -q`: **205 passed in 10.89 seconds**.
+- No project-configured lint or type-check command exists at baseline. Ruff is an
+  upstream dependency, which does not establish a project lint policy.
+- Docker engine 27.4.0 is available. Existing cached images are not clean acceptance
+  evidence for this branch.
+
+## Independent design review closure
+
+Adversary reviewed `2067028` and the coordinator recorded D6/D7 in `032072a`.
+No additional material design blockers were reported. Planning/adversarial design
+review is complete before application changes. D1-D7 remain implementation and test
+obligations. Required probes include two-process profile rotation, no replay on
+request/profile-save failure, public Python default-profile use and mixed-operation
+partial coverage. No product acceptance has yet been claimed.
