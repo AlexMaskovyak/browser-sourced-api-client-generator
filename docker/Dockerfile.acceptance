@@ -4,7 +4,9 @@ FROM browser-sourced-api-client-generator-e2e AS generation
 USER root
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+# Tests using the default Chrome name exercise the same disposable Chromium.
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s /work/docker/test-chromium.sh /usr/local/bin/google-chrome
 USER tester
 RUN python -c 'from website_client.har_inference import backend_module; print(backend_module())'
 CMD ["xvfb-run", "-a", "python", "/work/docker/acceptance_generate.py"]
