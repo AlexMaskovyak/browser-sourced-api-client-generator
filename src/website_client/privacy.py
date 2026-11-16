@@ -52,6 +52,14 @@ REPORT_REASONS = frozenset(
         "upstream_inference_warning",
         "upstream_leak_detected",
         "conflicting_contracts",
+        "conflicting_artifact_identity",
+        "unresolved_source",
+        "ambiguous_source",
+        "invalid_source_binding",
+        "invalid_workflow_structure",
+        "unsupported_workflow_structure",
+        "unresolved_source_destination",
+        "ambiguous_workflow_namespace",
     }
 )
 REPORT_TEXT_FIELDS = frozenset(
@@ -220,11 +228,29 @@ def safe_workflow(value: dict[str, Any]) -> dict[str, Any]:
     value = deepcopy(value)
     if value.get("arazzo") != "1.0.0":
         raise BrowserError("unsupported_workflow_version")
-    if set(value) - {"arazzo", "info", "sourceDescriptions", "workflows", "components"}:
+    if set(value) - {
+        "arazzo",
+        "info",
+        "sourceDescriptions",
+        "workflows",
+        "components",
+        "x-discovery-exclusions",
+    }:
         raise BrowserError("unsupported_workflow_structure")
     if "info" in value:
         value["info"] = {"title": "Explicit workflows", "version": "1.0.0"}
-    excluded, workflows = [], []
+    prior = value.pop("x-discovery-exclusions", [])
+    excluded = (
+        [
+            {"workflow": "[omitted]", "reason": "sensitive_structure"}
+            for record in prior
+            if isinstance(record, dict)
+            and record.get("reason") == "sensitive_structure"
+        ]
+        if isinstance(prior, list)
+        else []
+    )
+    workflows = []
     for original in value.get("workflows", []):
         item = _workflow_item(original)
         if sensitive(json.dumps(item)):

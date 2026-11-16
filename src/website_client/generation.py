@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from graphql import build_schema, parse, print_ast, validate
 
 from .browser import BrowserError
-from .definitions import graphql_schema, openapi_document, read_document
+from .definitions import read_document
 from .discovery import new_output
 
 GENERATOR_TIMEOUT_SECONDS = 120
@@ -47,6 +47,7 @@ class GeneratedProject:
 
     Backends own generated request code; shared packaging adds browser transport,
     CLI entry points and reports after backend generation succeeds."""
+
     directory: Path
     package_name: str
     operations: dict
@@ -162,22 +163,36 @@ def _openapi_backend(stage, name, package, spec, project):
     """Use the pinned public API so warnings are structured, never terminal text."""
     from openapi_python_client import generate as upstream_generate
     from openapi_python_client.config import Config, ConfigFile, MetaType
+
     stage.mkdir(parents=True, exist_ok=True)
     definition_path = stage / "definition.json"
     write_json(definition_path, spec)
     config = Config.from_sources(
-        ConfigFile(project_name_override=name, package_name_override=package, post_hooks=[]),
-        MetaType.POETRY, definition_path, "utf-8", False, project,
+        ConfigFile(
+            project_name_override=name, package_name_override=package, post_hooks=[]
+        ),
+        MetaType.POETRY,
+        definition_path,
+        "utf-8",
+        False,
+        project,
     )
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         errors = upstream_generate(config=config)
-    return [{"reason": "upstream_generation_warning", "type": type(item).__name__,
-             "level": item.level.value} for item in errors]
+    return [
+        {
+            "reason": "upstream_generation_warning",
+            "type": type(item).__name__,
+            "level": item.level.value,
+        }
+        for item in errors
+    ]
 
 
 def generate_openapi_project(stage, name, package, source):
     """Keep independent usable methods when admission or the backend excludes others."""
     from .admission import METHODS, admit_openapi, prune_components
+
     safe, spec, exclusions = admit_openapi(source)
     project = stage / "project"
     if not spec["paths"]:
@@ -190,20 +205,44 @@ def generate_openapi_project(stage, name, package, source):
         admitted = deepcopy(spec)
         admitted["paths"] = {}
         for index, (path, method, operation) in enumerate(
-            (path, method, operation) for path, item in spec["paths"].items()
-            for method, operation in item.items() if method in METHODS
+            (path, method, operation)
+            for path, item in spec["paths"].items()
+            for method, operation in item.items()
+            if method in METHODS
         ):
             candidate = deepcopy(spec)
-            candidate["paths"] = {path: {key: deepcopy(value) for key, value in spec["paths"][path].items() if key not in METHODS}}
+            candidate["paths"] = {
+                path: {
+                    key: deepcopy(value)
+                    for key, value in spec["paths"][path].items()
+                    if key not in METHODS
+                }
+            }
             candidate["paths"][path][method] = deepcopy(operation)
             prune_components(candidate)
             probe = stage / ("probe-" + str(index))
-            warnings = _openapi_backend(probe, name, package, candidate, probe / "project")
+            warnings = _openapi_backend(
+                probe, name, package, candidate, probe / "project"
+            )
             if warnings:
-                exclusions.append({"operation": operation.get("operationId"), "method": method.upper(),
-                                   "path": path, "reason": "upstream_generation_warning", "diagnostics": warnings})
+                exclusions.append(
+                    {
+                        "operation": operation.get("operationId"),
+                        "method": method.upper(),
+                        "path": path,
+                        "reason": "upstream_generation_warning",
+                        "diagnostics": warnings,
+                    }
+                )
             else:
-                selected = admitted["paths"].setdefault(path, {key: deepcopy(value) for key, value in spec["paths"][path].items() if key not in METHODS})
+                selected = admitted["paths"].setdefault(
+                    path,
+                    {
+                        key: deepcopy(value)
+                        for key, value in spec["paths"][path].items()
+                        if key not in METHODS
+                    },
+                )
                 selected[method] = deepcopy(operation)
         spec = admitted
         prune_components(spec)
@@ -213,14 +252,23 @@ def generate_openapi_project(stage, name, package, source):
         if final_warnings:
             raise BrowserError("unsupported: conflicting upstream generation inputs")
     operations = operation_metadata(project, package)
-    expected = sum(method in METHODS for item in spec['paths'].values() for method in item)
+    expected = sum(
+        method in METHODS for item in spec["paths"].values() for method in item
+    )
     if len(operations) != expected:
-        raise BrowserError("unsupported: upstream omitted operations without attributable diagnostics")
+        raise BrowserError(
+            "unsupported: upstream omitted operations without attributable diagnostics"
+        )
     configure_openapi_package(project, name, package)
     write_json(project / "openapi.json", spec)
     write_json(project / "source-openapi.json", safe)
-    return GeneratedProject(project, package, operations, "openapi-python-client",
-                            {"exclusions": exclusions, "diagnostics": diagnostics})
+    return GeneratedProject(
+        project,
+        package,
+        operations,
+        "openapi-python-client",
+        {"exclusions": exclusions, "diagnostics": diagnostics},
+    )
 
 
 def validated_graphql_operations(schema_sdl, operations_path):
@@ -233,6 +281,7 @@ def validated_graphql_operations(schema_sdl, operations_path):
             "GraphQL generation requires --operations as well as --graphql-schema."
         )
     from .privacy import safe_operations
+
     query_text = safe_operations(read_document(operations_path))
     try:
         document = parse(query_text)
@@ -286,7 +335,11 @@ def write_graphql_configuration(stage, project, package, schema_sdl, document):
     configuration = [
         "[tool.ariadne-codegen]",
         f"schema_path = {json.dumps(str(schema_path))}",
-        *([f"queries_path = {json.dumps(str(operations_path))}"] if document is not None else ["enable_custom_operations = true"]),
+        *(
+            [f"queries_path = {json.dumps(str(operations_path))}"]
+            if document is not None
+            else ["enable_custom_operations = true"]
+        ),
         f"target_package_name = {json.dumps(package)}",
         f"target_package_path = {json.dumps(str(project))}",
         "async_client = false",
@@ -305,14 +358,20 @@ def generate_graphql_project(stage, name, package, source, operations_path):
     Unlike the operation-only backend, this path has a complete schema and can emit
     typed response models. No endpoint is called during generation."""
     from .graphql_admission import safe_schema, schema_operations
+
     schema_sdl, privacy_exclusions = safe_schema(source)
     operation_exclusions = []
     if operations_path:
         from .privacy import safe_operations
-        text, operation_exclusions = safe_operations(read_document(operations_path), with_exclusions=True)
+
+        text, operation_exclusions = safe_operations(
+            read_document(operations_path), with_exclusions=True
+        )
         admitted_operations = stage / "admitted-operations.graphql"
         admitted_operations.write_text(text)
-        document, selected = validated_graphql_operations(schema_sdl, admitted_operations)
+        document, selected = validated_graphql_operations(
+            schema_sdl, admitted_operations
+        )
     else:
         document, selected = None, None
     project = stage / "project"
@@ -338,28 +397,42 @@ def generate_graphql_project(stage, name, package, source, operations_path):
     (project / "schema.graphql").write_text(schema_sdl)
     if document is not None:
         (project / "operations.graphql").write_text(print_ast(document) + "\n")
-    return GeneratedProject(project, package, operations, "ariadne-codegen",
-                            {"exclusions": privacy_exclusions + operation_exclusions + exclusions})
+    return GeneratedProject(
+        project,
+        package,
+        operations,
+        "ariadne-codegen",
+        {"exclusions": privacy_exclusions + operation_exclusions + exclusions},
+    )
+
+
+def copy_runtime_sources(target: Path, sources: dict[str, str]) -> None:
+    """Copy declared standalone runtime modules into an already staged package."""
+    for output_name, source_name in sources.items():
+        target.joinpath(output_name).write_text(
+            Path(__file__).with_name(source_name).read_text()
+        )
 
 
 def write_runtime_files(project, runtime_config=None):
     """Copy only the standalone runtime, never the generator implementation."""
     target = project.directory / project.package_name
-    for output_name, source_name in RUNTIME_SOURCES.items():
-        target.joinpath(output_name).write_text(
-            Path(__file__).with_name(source_name).read_text()
-        )
+    copy_runtime_sources(target, RUNTIME_SOURCES)
     write_json(target / "_operations.json", project.operations)
     config = {"kind": next(iter(project.operations.values()))["kind"]}
     config.update(runtime_config or {})
     if config.get("endpoint"):
         from .runtime_profile import service_origin
+
         config["origin"] = service_origin(config["endpoint"])
         if urlsplit(config["endpoint"]).query:
             raise BrowserError("Runtime endpoints cannot contain query values.")
     if set(config) - {"kind", "endpoint", "origin", "profileId"}:
         raise BrowserError("Invalid non-secret runtime configuration.")
-    if config.get("profileId") is not None and (not isinstance(config["profileId"], str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", config["profileId"])):
+    if config.get("profileId") is not None and (
+        not isinstance(config["profileId"], str)
+        or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", config["profileId"])
+    ):
         raise BrowserError("Invalid runtime profile identifier.")
     write_json(target / "_runtime.json", config)
     with (target / "__init__.py").open("a") as stream:
@@ -386,7 +459,17 @@ def write_generation_report(project, source, operations_source=None, lineage=Non
         "liveVerified": False,
     }
     if project.generator_name == "ariadne-codegen":
-        report.update(generationMode=("graphql-schema-only" if any(item["kind"] == "graphql-custom" for item in project.operations.values()) else "graphql-schema"), schemaValidated=True)
+        report.update(
+            generationMode=(
+                "graphql-schema-only"
+                if any(
+                    item["kind"] == "graphql-custom"
+                    for item in project.operations.values()
+                )
+                else "graphql-schema"
+            ),
+            schemaValidated=True,
+        )
     else:
         report.update(generationMode="openapi", definitionValidated=True)
     if operations_source is not None:
