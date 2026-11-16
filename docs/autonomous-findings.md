@@ -215,3 +215,21 @@ F4-F13 are resolved within M2. M2 is complete. Its coherent application commits 
 M3 must preserve explicit supplied/discovered workflow source associations, implement
 the restricted runner and validate actual responses before dependent requests.
 M4 installed console/wheel and clean-container acceptance remain incomplete.
+
+## M3 admission and required native fix
+
+At `a99cfeb`, author workflow/admission/generation checks passed 41 tests in 5.33s;
+independent fixed-archive check passed 41 in 5.64s. Execution/binding integration is
+still in progress.
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F14 | workflow input-reference admission | Original supplied workflow has no inputs schema and is wrongly excluded as unknown_input_reference; the native evidence executed it. | Restore original fixture, JSON Schema permissive defaults and runtime input-presence checks. | Working correction pending commit/review. |
+| F15 | native Arazzo HTTPExecutor | Schema-valid whole JSON null sends empty bytes and receives 422; nested null sends correct JSON. Reproduced on actual wire. | Minimal explicitly versioned upstream dependency fix; no completion waiver or custom transport serializer. | Patch/build/installed-wheel acceptance pending. |
+| F16 | workflow source closure | Unused remote component rejects an independent workflow. Reviewer fixed-slice reproduction. | Validate selected operation dependency closure; preserve unrelated executable workflows. | Working correction pending final review. |
+
+The adversary confirmed the native dependency patch design is authorized by the
+reproduced-incompatibility exception. Actual metadata and clean sibling-wheel
+installation are required checks. No PR existed before the user's latest request;
+that request now authorizes a draft PR and branch pushes. Overall implementation
+remains incomplete through M3/M4.
