@@ -4,6 +4,7 @@ from dataclasses import replace
 from copy import deepcopy
 import json
 import re
+import hashlib
 from urllib.parse import urlsplit, urlunsplit
 
 from graphql import parse, print_ast, visit
@@ -14,35 +15,60 @@ from .browser import BrowserError
 from .graphql_admission import safe_schema
 
 
-def safe_operations(source):
+def safe_operations(source, with_exclusions=False):
     """Exclude sensitive named operations and their fragments without wire rewriting."""
     try:
         document = parse(source)
     except Exception:
         raise BrowserError("invalid_graphql_operations") from None
-    definitions = {item.name.value: item for item in document.definitions if item.name is not None}
-    unsafe = {name for name, item in definitions.items() if sensitive(print_ast(item))}
+    definitions, conflicts = {}, set()
+    for item in document.definitions:
+        if item.name is None:
+            continue
+        key = (item.kind, item.name.value)
+        if key in definitions and print_ast(definitions[key]) != print_ast(item):
+            conflicts.add(key)
+        definitions[key] = item
+    unsafe = {key for key, item in definitions.items() if sensitive(print_ast(item))} | conflicts
     changed = True
     while changed:
         changed = False
-        for name, item in definitions.items():
+        for key, item in definitions.items():
             spreads = []
             class Spreads(Visitor):
                 def enter_fragment_spread(self, node, *_):
                     spreads.append(node.name.value)
             visit(item, Spreads())
-            if name not in unsafe and unsafe.intersection(spreads):
-                unsafe.add(name)
+            if key not in unsafe and any(("fragment_definition", name) in unsafe for name in spreads):
+                unsafe.add(key)
                 changed = True
-    document.definitions = tuple(item for name, item in definitions.items() if name not in unsafe)
-    return print_ast(document) + '\n'
+    exclusions = []
+    for item in document.definitions:
+        if item.kind != 'operation_definition':
+            continue
+        name = item.name.value if item.name else None
+        key = (item.kind, name)
+        reason = ('unnamed_operation' if name is None else 'conflicting_operation' if key in conflicts
+                  else 'sensitive_structure' if key in unsafe else 'unsupported_subscription' if item.operation.value == 'subscription' else None)
+        if reason:
+            exclusions.append({'operation': '[omitted]' if sensitive(name) else name, 'reason': reason})
+            if name is not None:
+                unsafe.add(key)
+    document.definitions = tuple(item for key, item in definitions.items() if key not in unsafe)
+    # The existing GraphQL parser/compiler still owns fragments and variable semantics.
+    text = print_ast(document) + '\n'
+    return (text, exclusions) if with_exclusions else text
 
 
 def safe_workflow(value):
     """Preserve explicit safe workflows for the restricted runner; never execute here."""
     value = deepcopy(value)
+    if value.get('arazzo') != '1.0.0':
+        raise BrowserError('unsupported_workflow_version')
+    if set(value) - {'arazzo', 'info', 'sourceDescriptions', 'workflows', 'components'}:
+        raise BrowserError('unsupported_workflow_structure')
     if 'info' in value:
-        value['info'] = {'title': 'Explicit workflows', 'version': value['info'].get('version', '1.0.0')}
+        value['info'] = {'title': 'Explicit workflows', 'version': '1.0.0'}
     excluded, workflows = [], []
     for item in value.get('workflows', []):
         item = deepcopy(item)
@@ -58,7 +84,12 @@ def safe_workflow(value):
             workflows.append(item)
     value['workflows'] = workflows
     # Source definitions may be retained only with non-sensitive fixed references.
-    value['sourceDescriptions'] = [item for item in value.get('sourceDescriptions', []) if not sensitive(json.dumps(item))]
+    value['sourceDescriptions'] = [{key: item[key] for key in ('name', 'type', 'url') if key in item}
+                                   for item in value.get('sourceDescriptions', []) if not sensitive(json.dumps({key: item.get(key) for key in ('name', 'type', 'url')}))]
+    if 'components' in value and sensitive(json.dumps(value['components'])):
+        value.pop('components')
+        value['workflows'] = []
+        excluded.append({'workflow': '[omitted]', 'reason': 'sensitive_structure'})
     if excluded:
         value['x-discovery-exclusions'] = excluded
     return value
@@ -81,9 +112,17 @@ def safe_report(text):
     reasons = {'unsupported_serialization', 'external_reference', 'unresolved_reference', 'sensitive_structure',
                'unsupported_callbacks', 'unsupported_destination', 'invalid_contract', 'upstream_generation_warning',
                'unsupported_selection', 'unsupported_abstract_selection', 'ambiguous_native_name', 'unknown_request_body',
-               'response_body_unknown', 'privacy_or_capture_omission', 'upstream_inference_warning', 'upstream_leak_detected', 'conflicting_contracts'}
+               'har_dependency_required', 'response_body_unknown', 'unsupported_subscription', 'unnamed_operation', 'conflicting_operation', 'privacy_or_capture_omission', 'upstream_inference_warning', 'upstream_leak_detected', 'conflicting_contracts'}
     if isinstance(value, dict) and 'openapi' in value:
         return encoded_json(admit_openapi(value)[0])
+    if isinstance(value, dict) and 'runtimeProfiles' in value:
+        from .runtime_profile import service_origin
+        profiles = {}
+        for api_origin, identifier in value['runtimeProfiles'].items():
+            selected = service_origin(api_origin)
+            if identifier == 'origin_' + hashlib.sha256(selected.encode()).hexdigest()[:24]:
+                profiles[selected] = identifier
+        return encoded_json({'runtimeProfiles': profiles})
     def clean(item):
         if isinstance(item, list):
             return [clean(element) for element in item if isinstance(element, (dict, list))]
@@ -97,7 +136,7 @@ def safe_report(text):
                 result[key] = clean(element)
             elif key == 'reason' and element in reasons:
                 result[key] = element
-            elif key in {'method', 'operation', 'path', 'workflow', 'level', 'type', 'backend', 'version', 'artifact'} and isinstance(element, str) and (not sensitive(element) or key == 'artifact' and re.fullmatch(r'artifact-[a-f0-9]{64}', element)):
+            elif key in {'method', 'operation', 'path', 'workflow', 'service', 'level', 'type', 'backend', 'version', 'artifact'} and isinstance(element, str) and (not sensitive(element) or key == 'artifact' and re.fullmatch(r'artifact-[a-f0-9]{64}', element)):
                 result[key] = element
             elif key == 'count' and type(element) is int:
                 result[key] = element
@@ -143,7 +182,9 @@ def sanitized_manifest(manifest):
                 if exclusions:
                     audit.append({'artifact': identifiers[item.id], 'exclusions': exclusions})
             elif kind is Kind.GRAPHQL_OPERATIONS:
-                text = safe_operations(text)
+                text, exclusions = safe_operations(text, with_exclusions=True)
+                if exclusions:
+                    audit.append({"artifact": identifiers[item.id], "exclusions": exclusions})
             elif kind is Kind.HAR:
                 discovery = Discovery()
                 value = json.loads(text)
@@ -163,12 +204,15 @@ def sanitized_manifest(manifest):
         artifacts.append(replace(item, id=identifiers[item.id], name=(f'input-{index:04d}.{kind.value}' if sensitive(item.name) else item.name), kind=kind,
                                  content=text, sha256=sha256(text), provenance=provenance))
         audit.append({'artifact': identifiers[item.id], 'sourceSha256': item.sha256, 'sanitizedSha256': sha256(text)})
-    artifacts.append(Artifact.create('privacy-audit.json', Kind.REPORT, json.dumps(audit, sort_keys=True) + '\n', Source.REPORT))
     producer = Producer('external-input', 'unspecified') if sensitive(manifest.producer.name + manifest.producer.version) else manifest.producer
     services = tuple(replace(target, id=("service-" + sha256(target.id)[:16] if sensitive(target.id) else target.id),
                              schema_artifact=identifiers.get(target.schema_artifact), source_schema_artifact=identifiers.get(target.source_schema_artifact),
                              operation_artifacts=tuple(identifiers[reference] for reference in target.operation_artifacts),
                              compiled_operations_artifact=identifiers.get(target.compiled_operations_artifact),
                              issues=(), operation_names=(), status=None) for target in manifest.services if safe_location(target.endpoint) == target.endpoint)
+    for target in manifest.services:
+        if safe_location(target.endpoint) != target.endpoint:
+            audit.append({'exclusions': [{'service': 'service-' + sha256(target.id)[:16], 'reason': 'unsupported_destination'}]})
+    artifacts.append(Artifact.create('privacy-audit.json', Kind.REPORT, json.dumps(audit, sort_keys=True) + '\n', Source.REPORT))
     return replace(manifest, producer=producer, artifacts=tuple(artifacts), services=services,
                    source_bundles=tuple(replace(source, producer=Producer("external-input", "unspecified")) if sensitive(source.producer.name + source.producer.version) else source for source in (manifest.source_bundles or ())))

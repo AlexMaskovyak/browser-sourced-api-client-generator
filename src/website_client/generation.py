@@ -306,7 +306,15 @@ def generate_graphql_project(stage, name, package, source, operations_path):
     typed response models. No endpoint is called during generation."""
     from .graphql_admission import safe_schema, schema_operations
     schema_sdl, privacy_exclusions = safe_schema(source)
-    document, selected = validated_graphql_operations(schema_sdl, operations_path) if operations_path else (None, None)
+    operation_exclusions = []
+    if operations_path:
+        from .privacy import safe_operations
+        text, operation_exclusions = safe_operations(read_document(operations_path), with_exclusions=True)
+        admitted_operations = stage / "admitted-operations.graphql"
+        admitted_operations.write_text(text)
+        document, selected = validated_graphql_operations(schema_sdl, admitted_operations)
+    else:
+        document, selected = None, None
     project = stage / "project"
     project.mkdir()
     configuration_path = write_graphql_configuration(
@@ -331,7 +339,7 @@ def generate_graphql_project(stage, name, package, source, operations_path):
     if document is not None:
         (project / "operations.graphql").write_text(print_ast(document) + "\n")
     return GeneratedProject(project, package, operations, "ariadne-codegen",
-                            {"exclusions": privacy_exclusions + exclusions})
+                            {"exclusions": privacy_exclusions + operation_exclusions + exclusions})
 
 
 def write_runtime_files(project, runtime_config=None):

@@ -46,12 +46,13 @@ def test_saved_sdl_introspection_named_and_schema_less_operations_routes(tmp_pat
         (schema, None), (schema, operations),
         (json.dumps(graphql_sync(build_schema(schema), get_introspection_query()).formatted), None),
         (operations.read_text(), None),
+        (json.dumps(graphql_sync(build_schema(schema), get_introspection_query()).formatted), operations),
     ]):
         source = tmp_path / ('input-' + str(index))
         source.write_text(content)
         coverage = run(source, tmp_path / ('output-' + str(index)), endpoint='https://neutral.invalid/graphql', operations=operations_path)
         assert len(coverage['services']) == 1
-        assert coverage['services'][0]['operations'] == (['Status'] if index in {1, 3} else ['query_status'])
+        assert coverage['services'][0]['operations'] == (['Status'] if index in {1, 3, 4} else ['query_status'])
         assert coverage['services'][0]['provenance'] == ('schema-less-operations' if index == 3 else 'definition')
 
 
@@ -184,6 +185,18 @@ def test_real_url_traversal_collects_definitions_traffic_and_profile(tmp_path, m
         result = subprocess.run([sys.executable, '-m', package + '._cli', 'read'], cwd=project, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout) == {'value': 7}
+        # Saved evidence regenerates offline and retains the same non-secret profile association.
+        calls_before = list(server.calls)
+        monkeypatch.setattr('website_client.har_inference.backend_module', lambda: pytest.fail('converted saved manifest reinvoked HAR inference'))
+        monkeypatch.setattr('website_client.autonomous._browser_input', lambda *_a, **_k: pytest.fail('saved manifest reopened browser'))
+        regenerated_output = tmp_path / 'regenerated'
+        regenerated = run(output / 'manifest.json', regenerated_output)
+        assert server.calls == calls_before
+        regenerated_service = next(item for item in regenerated['services'] if item['provenance'] == 'definition')
+        regenerated_project = regenerated_output / regenerated_service['directory']
+        result = subprocess.run([sys.executable, '-m', regenerated_service['package'].replace('-', '_') + '._cli', 'read'], cwd=regenerated_project, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {'value': 7}
         profile_files = list((tmp_path / 'profiles').glob('*.json'))
         assert len(profile_files) == 1 and 'LOCAL_BEARER' in profile_files[0].read_text()
         for path in output.rglob('*'):
@@ -281,3 +294,196 @@ def test_historical_short_secret_path_and_sensitive_shapes_are_excluded(tmp_path
     for path in output.rglob('*'):
         if path.is_file():
             assert b'SECRET123' not in path.read_bytes()
+
+
+@pytest.mark.parametrize('mode', ['traffic-only', 'html-only', 'same-origin-ref', 'declared-other-origin'])
+def test_url_route_coverage_origins_and_reference_bounds(tmp_path, monkeypatch, mode):
+    monkeypatch.setenv('WEBSITE_CLIENT_PROFILE_DIR', str(tmp_path / 'profiles'))
+    class ApiHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.send_header('Access-Control-Allow-Origin', url)
+            self.send_header('Access-Control-Allow-Headers', 'Authorization,X-Contract-Auth')
+            self.send_header('Access-Control-Allow-Methods', 'GET,OPTIONS')
+            self.end_headers()
+        def do_GET(self):
+            api.calls.append((self.path, self.headers.get('Cookie'), self.headers.get('Authorization'), self.headers.get('X-Contract-Auth')))
+            assert self.headers.get('Cookie') is None
+            assert self.headers.get('Authorization') == 'Bearer API_TOKEN'
+            assert self.headers.get('X-Contract-Auth') == 'DECLARED_TOKEN'
+            body = b'{"value":7}'
+            self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', url)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    api = ThreadingHTTPServer(('127.0.0.1', 0), ApiHandler)
+    api.calls = []
+    threading.Thread(target=api.serve_forever, daemon=True).start()
+    api_url = f'http://localhost:{api.server_port}'
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+        def send(self, value, content_type='text/html', status=200):
+            body = value.encode()
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def do_GET(self):
+            server.calls.append(self.path)
+            if self.path == '/':
+                link = '<link rel="service-desc" href="/definition/main.json">' if mode in {'same-origin-ref', 'declared-other-origin'} else ''
+                if mode == 'html-only':
+                    data = ''
+                else:
+                    data_url = api_url + '/read' if mode == 'declared-other-origin' else url + '/read'
+                    data = '<button role="tab" onclick="fetch(\'' + data_url + '\',{headers:{Authorization:\'Bearer API_TOKEN\',\'X-Contract-Auth\':\'DECLARED_TOKEN\'}})">Data</button>'
+                return self.send(link + data + '<a href="/page-two">More</a><button role="tab" onclick="fetch(\'http://localhost:' + str(server.server_port) + '/offsite\')">Other</button>')
+            if self.path == '/page-two':
+                return self.send('<details><summary>Details</summary>Neutral</details>')
+            if self.path == '/definition/main.json':
+                document = spec(api_url if mode == 'declared-other-origin' else url)
+                if mode == 'same-origin-ref':
+                    document['paths']['/read']['get']['responses']['200']['content']['application/json']['schema'] = {'$ref': './schema.json'}
+                else:
+                    document['security'] = [{'Declared': []}]
+                    document['components'] = {'securitySchemes': {'Declared': {'type': 'apiKey', 'in': 'header', 'name': 'X-Contract-Auth'}}}
+                return self.send(json.dumps(document), 'application/json')
+            if self.path == '/definition/schema.json':
+                return self.send(json.dumps({'type': 'object', 'required': ['value'], 'properties': {'value': {'type': 'integer'}}}), 'application/json')
+            if self.path == '/read':
+                return self.send('{"value":7}', 'application/json')
+            if self.path == '/offsite':
+                server.offsite += 1
+            return self.send('{}', 'application/json', 404)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.calls, server.offsite = [], 0
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{server.server_port}'
+    def initial_login(session):
+        session._context.add_cookies([{'name': 'start_sid', 'value': 'START_COOKIE', 'url': url}])
+    try:
+        output = tmp_path / 'output'
+        report = run(url, output, login_handler=initial_login, headless=True, max_pages=3, max_actions=5, duration_seconds=10)
+        assert server.offsite == 0
+        assert any(item['reason'] == 'undeclared_origin' for item in report['discovery']['exploration']['blockedRequests'])
+        if mode == 'html-only':
+            assert report['coverage'] == 'unsupported' and not report['services']
+            return
+        assert report['services']
+        provenance = {item['provenance'] for item in report['services']}
+        if mode == 'traffic-only':
+            assert provenance == {'traffic-har2sdk'}
+            service = report['services'][0]
+            project = output / service['directory']
+            result = subprocess.run([sys.executable, '-m', service['package'].replace('-', '_') + '._cli', service['operations'][0]], cwd=project, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stderr
+            assert json.loads(result.stdout) == {'value': 7}
+        else:
+            assert 'definition' in provenance
+            service = next(item for item in report['services'] if item['provenance'] == 'definition')
+            project = output / service['directory']
+            result = subprocess.run([sys.executable, '-m', service['package'].replace('-', '_') + '._cli', 'read'], cwd=project, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stderr
+            assert json.loads(result.stdout) == {'value': 7}
+            if mode == 'same-origin-ref':
+                assert '/definition/schema.json' in server.calls
+                assert '$ref' not in (project / 'openapi.json').read_text()
+        profiles = [json.loads(path.read_text()) for path in (tmp_path / 'profiles').glob('*.json')]
+        if mode == 'declared-other-origin':
+            assert len(profiles) == 2
+            start = next(profile for profile in profiles if profile['origin'].startswith(url))
+            selected = next(profile for profile in profiles if profile['origin'].startswith(api_url))
+            assert 'authorization' not in start['headers']
+            assert selected['headers'] == {'authorization': 'Bearer API_TOKEN', 'x-contract-auth': 'DECLARED_TOKEN'}
+            assert selected['storage_state']['cookies'] == []
+            assert len(api.calls) >= 2
+        else:
+            assert len(profiles) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        api.shutdown()
+        api.server_close()
+
+
+def test_profile_output_overlap_is_rejected_before_login(tmp_path, monkeypatch):
+    from website_client.browser import BrowserError
+    output = tmp_path / 'output'
+    monkeypatch.setenv('WEBSITE_CLIENT_PROFILE_DIR', str(output / 'profiles'))
+    monkeypatch.setattr('website_client.autonomous._browser_input', lambda *_a, **_k: pytest.fail('login opened before profile path validation'))
+    with pytest.raises(BrowserError, match='profile_inside_output'):
+        run('https://neutral.invalid', output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize('with_schema', [False, True])
+def test_named_operations_exclude_subscription_without_switching_routes(tmp_path, with_schema):
+    operations = tmp_path / 'operations.graphql'
+    operations.write_text('query Status { status } subscription Updates { updates } query CANARY_PRIVATE { privateValue }')
+    schema = tmp_path / 'schema.graphql'
+    schema.write_text('type Query { status:String, privateValue:String } type Subscription { updates:String }')
+    result = run(schema if with_schema else operations, tmp_path / 'output', endpoint='https://neutral.invalid/graphql', operations=operations if with_schema else None)
+    assert result['coverage'] == 'partial'
+    assert result['services'][0]['operations'] == ['Status']
+    assert {item['reason'] for item in result['exclusions']} >= {'unsupported_subscription', 'sensitive_structure'}
+    assert result['services'][0]['provenance'] == ('definition' if with_schema else 'schema-less-operations')
+    project = tmp_path / 'output' / result['services'][0]['directory']
+    assert (project / 'operations.graphql').exists() if with_schema else True
+    for path in (tmp_path / 'output').rglob('*'):
+        if path.is_file():
+            assert b'CANARY' not in path.read_bytes()
+
+
+def test_reused_service_id_with_different_endpoints_is_quarantined(tmp_path):
+    from dataclasses import replace
+    item = Artifact.create('schema.json', Kind.OPENAPI, json.dumps(spec()), Source.EXTERNAL)
+    unrelated = Artifact.create('other.json', Kind.OPENAPI, json.dumps(spec('https://other.invalid')), Source.EXTERNAL)
+    first = Manifest.create((item, unrelated), (Service.create(Protocol.OPENAPI, 'https://first.invalid', item.id, identifier='same-service'), Service.create(Protocol.OPENAPI, 'https://other.invalid', unrelated.id)))
+    second = Manifest.create((item,), (Service.create(Protocol.OPENAPI, 'https://second.invalid', item.id, identifier='same-service'),))
+    sources = []
+    for index, manifest in enumerate((first, second)):
+        source = tmp_path / ('manifest-' + str(index))
+        write_manifest(manifest, source)
+        sources.append(source)
+    result = run(sources[0], tmp_path / 'output', inputs=sources[1:])
+    assert result['coverage'] == 'partial'
+    assert len(result['services']) == 1
+    assert {'service': 'same-service', 'reason': 'conflicting_contracts'} in result['exclusions']
+
+
+def test_saved_capture_manifest_uses_har_backend_and_graphql_own_route(tmp_path, monkeypatch):
+    from website_client.discovery import Discovery
+    from website_client.bundle_capture import capture_manifest
+    discovery = Discovery()
+    discovery.add({'request': {'method': 'GET', 'url': 'https://neutral.invalid/read?tag=a&tag=b'}, 'response': {'status': 200, 'content': {'mimeType': 'application/json', 'text': '{"value":7}'}}})
+    manifest = capture_manifest(discovery, discovery.files('har'))
+    source = tmp_path / 'captured-manifest.json'
+    write_manifest(manifest, source)
+    result = run(source, tmp_path / 'output')
+    assert len(result['services']) == 1
+    assert result['services'][0]['provenance'] == 'traffic-har2sdk'
+    monkeypatch.setattr('website_client.har_inference.backend_module', lambda: pytest.fail('GraphQL-only traffic invoked HAR REST inference'))
+    har = tmp_path / 'graphql.har'
+    har.write_text(json.dumps({'log': {'version': '1.2', 'entries': [{'request': {'url': 'https://neutral.invalid/graphql', 'method': 'POST', 'postData': {'text': json.dumps({'query': 'query Status { status }', 'operationName': 'Status'})}}, 'response': {'status': 200, 'content': {'mimeType': 'application/json', 'text': '{"data":{"status":"ready"}}'}}}]}}))
+    result = run(har, tmp_path / 'graphql-output')
+    assert result['services'][0]['operations'] == ['Status']
+    assert result['services'][0]['provenance'] == 'schema-less-operations'
+
+
+def test_offline_reference_exclusion_never_opens_network(tmp_path, monkeypatch):
+    import socket
+    value = spec()
+    value['paths']['/unresolved'] = {'get': {'operationId': 'unresolved', 'responses': {'200': {'description': 'ok', 'content': {'application/json': {'schema': {'$ref': 'https://must-not-fetch.invalid/schema.json'}}}}}}}
+    source = tmp_path / 'definition.yaml'
+    source.write_text(yaml.safe_dump(value))
+    monkeypatch.setattr(socket.socket, 'connect', lambda *_a, **_k: pytest.fail('offline generation opened a network connection'))
+    result = run(source, tmp_path / 'output')
+    assert result['coverage'] == 'partial'
+    assert result['services'][0]['operations'] == ['read']
+    assert any(item['reason'] == 'external_reference' for item in result['exclusions'])

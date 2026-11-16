@@ -118,3 +118,11 @@ def test_unused_sensitive_security_and_malformed_operation_do_not_block_read():
     assert set(executable['paths']) == {'/read'}
     assert excluded == [{'operation': None, 'method': 'POST', 'path': '/bad', 'reason': 'invalid_contract'}]
     assert 'CANARY' not in json.dumps(safe) + json.dumps(executable)
+
+
+def test_complex_union_parameter_encoding_is_excluded_automatically():
+    value = contract()
+    value['paths']['/complex'] = {'get': {'operationId': 'complex', 'parameters': [{'name': 'filter', 'in': 'query', 'schema': {'oneOf': [{'type': 'string'}, {'type': 'object'}]}}], 'responses': {'200': {'description': 'ok'}}}}
+    safe, executable, excluded = admit_openapi(value)
+    assert set(executable['paths']) == {'/read'}
+    assert excluded[0]['reason'] == 'unsupported_serialization'

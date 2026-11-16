@@ -133,6 +133,7 @@ class Discovery:
         self.documents = {}
         self.definitions = {}
         self.definition_sources = {}
+        self.definition_raw_hashes = {}
         self.document_sources = {}
         self.document_declarations = {}
         self.graphql_endpoints = set()
@@ -185,7 +186,8 @@ class Discovery:
                 "queryParameters": [], "pathParameters": path_params, "responses": {}, "observations": 0,
                 "graphql": graphql, "graphqlUnmodeled": bool(graphql_unknown), "liveVerified": False})
             if (post.get("text") or body_evidence) and payload is None: endpoint["requestBodyUnmodeled"] = True
-            if sensitive_structure(payload) or sensitive_structure(body):
+            query_auth_unknown = any(AUTH.search(key) or key.lower() in {"api_key", "apikey", "signature", "x-amz-signature", "x-amz-credential"} for key, _ in parse_qsl(urlsplit(request["url"]).query))
+            if query_auth_unknown or sensitive_structure(payload) or sensitive_structure(body):
                 endpoint["privacyUnmodeled"] = True
             endpoint["observations"] += 1
             endpoint["queryParameters"] = sorted(set(endpoint["queryParameters"]) | set(query_names))
@@ -220,7 +222,7 @@ class Discovery:
             self.entries.append({"_definitionProbe": bool(entry.get("_definitionProbe")), "_resourceType": entry.get("_resourceType") if entry.get("_resourceType") in {"Fetch", "XHR", "Document"} else None, "startedDateTime": started, "time": duration,
                 "request": safe_request, "response": safe_response, "cache": {},
                 "timings": {"send": 0, "wait": duration, "receive": 0}, "_timingsEstimated": True, "_sanitized": True})
-            if not entry.get("_skipDefinition") and 200 <= status < 300 and isinstance(body, dict): self._definition(body, request["url"])
+            if not entry.get("_skipDefinition") and 200 <= status < 300 and isinstance(body, dict): self._definition(body, request["url"], hashlib.sha256(raw.encode()).hexdigest())
             elif 200 <= status < 300 and body is None and isinstance(raw, str) and len(raw.encode()) <= MAX_BODY and ("graphql" in response_mime or urlsplit(request["url"]).path.endswith((".graphql", ".gql"))):
                 try:
                     text = graphql_schema(raw)
@@ -229,7 +231,8 @@ class Discovery:
         except Exception:
             self.omitted += 1
 
-    def record_definition(self, kind, text, location=None):
+    def record_definition(self, kind, text, location=None, source_sha256=None):
+        source_sha256 = source_sha256 or hashlib.sha256(text.encode()).hexdigest()
         if kind == "openapi":
             from .admission import admit_openapi
             text = json.dumps(admit_openapi(text)[0], indent=2) + "\n"
@@ -245,10 +248,11 @@ class Discovery:
                         self.definition_sources.pop(prior, None)
                         self.definitions.pop(prior, None)
         self.definitions[key] = text
+        self.definition_raw_hashes.setdefault(key, set()).add(source_sha256)
         if location:
             self.definition_sources.setdefault(key, set()).add(location)
 
-    def _definition(self, body, location=None):
+    def _definition(self, body, location=None, source_sha256=None):
         try:
             if "openapi" in body:
                 from .admission import admit_openapi
@@ -257,7 +261,7 @@ class Discovery:
             elif "__schema" in body or isinstance(body.get("data"), dict) and "__schema" in body["data"]:
                 kind, text = "graphql-schema", graphql_schema(body)
             else: return
-            self.record_definition(kind, text, location)
+            self.record_definition(kind, text, location, source_sha256)
         except BrowserError:
             self.failures += 1
 
@@ -283,6 +287,8 @@ class Discovery:
             files[f"openapi-inferred-{index:04}.json"] = json.dumps(spec, indent=2) + "\n"
         for index, ((kind, _digest), text) in enumerate(self.definitions.items(), 1):
             files[f"{kind}-downloaded-{index:04}." + ("json" if kind in {"openapi", "arazzo"} else "graphql")] = text
+        if self.definition_raw_hashes:
+            files["source-hashes.json"] = json.dumps([{ "sourceSha256": source_hash, "sanitizedSha256": key[1]} for key, hashes in sorted(self.definition_raw_hashes.items()) for source_hash in sorted(hashes)], indent=2) + "\n"
         conflicts = set()
         combined = {}
         if self.documents:
