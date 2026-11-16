@@ -141,3 +141,17 @@ Supplied files were unchanged. This is not clean-container acceptance.
 Final M2 reference bundling, cross-origin profile wiring, HTML-only/traffic-only
 separation and complete regression review remain pending. No material finding is
 closed merely because other focused tests passed.
+
+Independent reviewer reran the integrated seven-file suite at `3343dff`: 116 passed
+in 15.14s. F7/F8 corrections passed. Two related named-operation admission failures
+were also reproduced and sent to the implementer:
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F11 | `privacy.safe_operations`, normalization and autonomous generation | Mixed named query/subscription loses the supported query without a schema, or silently switches to schema-only generation with a schema. A privacy-excluded named operation also disappears without a partial-coverage reason. | Admit supported named operations independently, preserve typed named route and fragment dependencies, and report every destructive exclusion. | Pending correction. |
+
+The adversary completed six offline cases plus one bounded browser probe at the same
+fixed revision. Signed provenance and producer canaries passed. Browser traversal
+visited the second page, fetched the API, blocked the attempted POST, and persisted no
+known-sensitive tab/form names. Initial-login callback ran once with stdin closed.
+No further broad probe extensions are required before the final corrected M2 pass.
