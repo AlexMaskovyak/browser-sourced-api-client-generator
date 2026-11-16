@@ -19,5 +19,7 @@ if [ "$#" -ne 0 ]; then
     exit 2
 fi
 docker build --tag browser-sourced-api-client-generator-e2e --file docker/Dockerfile .
+docker build --tag browser-sourced-api-client-generator-generation-e2e --file docker/Dockerfile.acceptance .
+docker run --rm --init --network none --shm-size=1g --cap-drop=ALL --security-opt=no-new-privileges browser-sourced-api-client-generator-generation-e2e xvfb-run -a python -m pytest -q -p no:cacheprovider tests
 docker run --rm --init --network none --shm-size=1g --cap-drop=ALL --security-opt=no-new-privileges browser-sourced-api-client-generator-e2e
 WEBSITE_CLIENT_REQUIRE_FIXED_SOURCE=1 WEBSITE_CLIENT_COMPATIBILITY_PASSED=1 WEBSITE_CLIENT_ACCEPTANCE_COMMAND=scripts/test-docker.sh "$script_dir/test-standalone.sh"
