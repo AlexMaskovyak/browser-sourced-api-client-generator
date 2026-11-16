@@ -49,7 +49,7 @@ Merges, real external service writes and messages to others remain unauthorized.
 ## Verification and boundaries
 
 Use existing Poetry project/lock and isolated worktree environment. Shell Poetry
-1.5.1 cannot read this project; provision Poetry 2.2 separately. Baseline has pytest
+1.5.1 cannot read this project; use the isolated Poetry 2.5.1 installation. Baseline has pytest
 but no configured lint/type checks. Record exact commands/counts and absence of
 checks, never unsupported passing claims. Use `poetry run pytest -q`, focused files,
 `poetry build` and milestone 4 acceptance command. Dependency registry downloads are
@@ -126,3 +126,34 @@ Before further implementation handoff:
 The reviewer identified concrete hotspots in autonomous.run, workflow admission and
 execution, duplicated profile lifecycle, native file conversion and source report
 parsing. These are bounded component refactors, not new architecture.
+
+## Clean distribution acceptance procedure
+
+The checked-in acceptance command must build separate generation and runtime
+images. Build-time installation may use declared package registries. Actual
+acceptance runs have no external network access and use only a neutral fixture
+service. The fixture driver completes initial login and closes stdin; it must not
+navigate, select contracts or repair inputs afterward.
+
+The generation image includes Chromium, Python generation dependencies and the
+pinned har2sdk generation cache. It must copy the local native companion wheel
+before Poetry resolves dependencies. It produces source projects and wheels,
+including a sibling native companion wheel for workflow installations. Preserve
+the existing browser and compatibility acceptance checks.
+
+The runtime image contains only Python, declared runtime dependencies, generated
+wheels and the independent fixture assertions. It must have no generator checkout,
+generator package, code generators, browser executable, separate Node/npm or
+research PYTHONPATH. Use a separate writable private-profile directory mount with
+matching non-root ownership. Cookie renewal needs atomic directory writes. Mount
+portable output separately and prove it contains no credentials.
+
+Acceptance must exercise actual installed public methods and console commands,
+four native upload forms, the guarded workflow, literal null versus omitted JSON,
+cookie renewal after browser closure, expired credentials with no prompt, and an
+excluded serialization command with no dispatch. Compare fixture request/effect
+counts and the committed 274-byte file hash. Run generated tests, inspect notices
+and installed dependency versions, and compare deterministic source/configuration
+apart from explicitly volatile metadata. Record image identifiers, commands,
+results and wheel hashes in a machine-readable summary. Any failed assertion must
+make the single acceptance command return nonzero.
