@@ -15,7 +15,9 @@ existing owners and describes the state and failure boundaries for implementatio
 | `generation`, existing templates/packaging | OpenAPI Python Client 0.29.1, Ariadne 0.19.0 multipart/custom builders, existing schema-less operation runtime; defaults, profile ID, tests/notices. |
 | private profile runtime | Protected platform directory outside outputs; origin-associated cookies/known headers; full-job file lock; atomic owner-only persistence. |
 | authenticated dispatch | Shared exact-byte APIRequestContext.fetch boundary; small HTTPX/prepared-requests adapters; upstream serializers remain authoritative. |
-| workflow admission/runtime | Arazzo 0.9.6 public start_workflow/execute_next_step; narrow syntax and dialect/schema guards, no custom scheduler/expression evaluator. |
+| `workflow_binding`, `workflow_generation` | Exact supplied/advertised source associations, conflict quarantine, standalone workflow project and companion dependency. Saved inputs never fetch missing sources. |
+| `workflow_admission`, `workflow_schema`, `workflow_runtime` | Versioned native Arazzo public start_workflow/execute_next_step; narrow syntax and dialect/schema guards, no custom scheduler/expression evaluator. |
+| `workflow_api`, `workflow_cli` | One installed Python function and console command; ordinary inputs, bounded file bytes, noninteractive results and distinct local output failures. |
 | `client_cli` | Command-scoped native files, default endpoint/profile; ordinary noninteractive invocation; native return values and bounded diagnostics. |
 
 URL -> initial login -> guarded existing exploration -> safe manifest/definitions ->
@@ -23,6 +25,13 @@ automatic capability filtering -> upstream generation -> existing standalone
 packaging -> installed Python/CLI execution via private profile and request driver.
 Supplied definitions/manifests enter offline normalization directly. HAR enters
 har2sdk; captured schema-less GraphQL keeps its separate existing compiler route.
+
+Workflow documents reference sources by their declared URL or exact local file
+reference. The input registry records those facts in memory; saved report entries
+retain only manifest document IDs and optional public endpoint overrides. A source
+must be an admitted OpenAPI document. Conflicting reports or destructive loss of
+essential schema information exclude the affected workflow. No component infers a
+connection from filenames, field values, source proximity or request order.
 
 ## Systems of record and credentials
 
