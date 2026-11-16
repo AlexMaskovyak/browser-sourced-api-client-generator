@@ -506,3 +506,52 @@ def test_excluded_subscription_prunes_only_its_orphan_fragments(tmp_path):
     assert 'StatusFields' in emitted
     assert 'UpdateFields' not in emitted
     assert any(item['reason'] == 'unsupported_subscription' for item in result['exclusions'])
+
+
+def test_final_browser_cookie_rotation_is_saved_before_cli_handoff(tmp_path, monkeypatch):
+    monkeypatch.setenv('WEBSITE_CLIENT_PROFILE_DIR', str(tmp_path / 'profiles'))
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+        def send(self, value, content_type='application/json', status=200, cookie=None):
+            body = value.encode()
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(body)))
+            if cookie:
+                self.send_header('Set-Cookie', cookie)
+            self.end_headers()
+            self.wfile.write(body)
+        def do_GET(self):
+            server.calls.append((self.path, self.headers.get('Cookie')))
+            if self.path == '/':
+                return self.send('<link rel="service-desc" href="/definition.json"><button role="tab" onclick="fetch(\'/rotate\')">Data</button>', 'text/html', cookie='sid=OLD; Path=/; HttpOnly')
+            if self.path == '/definition.json':
+                return self.send(json.dumps(spec(url)))
+            if self.path == '/rotate':
+                assert self.headers.get('Cookie') == 'sid=OLD'
+                return self.send('{"value":7}', cookie='sid=NEW; Path=/; HttpOnly')
+            if self.path == '/read':
+                if self.headers.get('Cookie') != 'sid=NEW':
+                    return self.send('{}', status=401)
+                return self.send('{"value":7}')
+            return self.send('{}', status=404)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.calls = []
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{server.server_port}'
+    try:
+        output = tmp_path / 'output'
+        report = run(url, output, login_handler=lambda _: None, headless=True, max_pages=1, max_actions=2, duration_seconds=10)
+        assert not any(path == '/read' for path, _ in server.calls)
+        profile = json.loads(next((tmp_path / 'profiles').glob('*.json')).read_text())
+        assert profile['storage_state']['cookies'][0]['value'] == 'NEW'
+        service = next(item for item in report['services'] if item['provenance'] == 'definition')
+        project = output / service['directory']
+        result = subprocess.run([sys.executable, '-m', service['package'].replace('-', '_') + '._cli', 'read'], cwd=project, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {'value': 7}
+        assert server.calls[-1] == ('/read', 'sid=NEW')
+    finally:
+        server.shutdown()
+        server.server_close()
