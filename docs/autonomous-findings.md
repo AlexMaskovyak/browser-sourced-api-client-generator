@@ -155,3 +155,22 @@ fixed revision. Signed provenance and producer canaries passed. Browser traversa
 visited the second page, fetched the API, blocked the attempted POST, and persisted no
 known-sensitive tab/form names. Initial-login callback ran once with stdin closed.
 No further broad probe extensions are required before the final corrected M2 pass.
+
+## Final M2 correction findings at d67e393
+
+Independent focused suite: 179 passed in 31.06s. Adversary's original six offline,
+browser and three correction cases passed, but a narrower reviewer fragment case
+still demonstrated F11: a fragment used only by an excluded subscription remains
+orphaned and causes NoUnusedFragments to reject the supported typed query.
+
+Full author regression at this revision: **263 passed, 2 failed in 48.70s**. The
+failure is not waived by the focused results.
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F12 | privacy report filtering and captured GraphQL owner | Dropping discovery.json metadata changes captured GET and operationName-in-URL conventions; two full-suite regressions fail. | Preserve only the owning compiler's safe method/endpoint/query-name metadata, excluding values and headers. | Affected check passed with orphan-fragment correction; full recheck pending. |
+| F13 | initial multi-origin profile seeding | Same-host, different-port API receives no cookie in browser fetch, but domain-only storage-state filtering copies start_sid into its saved profile and generated CLI sends it. Reviewer changed only the API host in the declared-origin test; one test failed in 4.51s. | Require origin ownership when seeding initial cookies; exclude/report ambiguity and preserve native renewal in isolated runtime contexts. | Exact browser regression and independent correction probe pending. |
+
+M2 remains open until F11-F13 and the full relevant suite pass. Workflow source-file
+association is an explicit M3 integration obligation; retained workflow documents
+have not been advertised as executable before that work.
