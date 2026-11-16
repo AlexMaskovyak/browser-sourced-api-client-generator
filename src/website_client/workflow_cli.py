@@ -3,13 +3,13 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import stat
 import sys
 from typing import Any, NoReturn
 
 from .authenticated_http import LIMIT
 from .runtime import execute_workflow, workflow_index
+from .result_output import write_result_text
 from .workflow_admission import IDENTIFIER
 from .workflow_runtime import ExecutionSummary
 
@@ -74,17 +74,36 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _write_result(summary: dict[str, Any], output: str | None) -> None:
     text = json.dumps(summary, allow_nan=False) + "\n"
-    if output is None:
-        print(text, end="")
-        return
-    descriptor = os.open(Path(output), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w") as stream:
-        stream.write(text)
+    write_result_text(text, output)
+
+
+CALLER_INPUT_REASONS = frozenset(
+    {
+        "missing_input",
+        "invalid_inputs",
+        "unsupported_input_object",
+        "input_depth_exceeded",
+        "file_exceeds_8_mib",
+        "invalid_binary_input",
+        "invalid_request",
+        "invalid_multipart_file",
+        "unsupported_path_value",
+        "missing_required_parameter",
+        "missing_required_body",
+        "malformed_request_json",
+    }
+)
 
 
 def _exit_code(summary: dict[str, Any]) -> int:
     if summary["status"] == "cancelled":
         return 130
+    if (
+        summary["status"] == "rejected"
+        and summary["requests"] == 0
+        and summary["reason"] in CALLER_INPUT_REASONS
+    ):
+        return 2
     return 0 if summary["status"] == "success" else 1
 
 
@@ -123,7 +142,7 @@ def main(args: list[str] | None = None) -> int:
             "status": "failure",
             "reason": "output_cancelled" if cancelled else "local_output_failure",
         }
-        print(json.dumps(summary, allow_nan=False), file=sys.stderr)
+        print(json.dumps(summary, allow_nan=False), file=sys.stderr, flush=True)
         return 130 if cancelled else 1
     return _exit_code(summary)
 

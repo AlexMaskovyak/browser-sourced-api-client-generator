@@ -40,7 +40,11 @@ RUNTIME_SOURCES = {
         "workflow_schema.py",
         "workflow_runtime.py",
     )
-} | {"runtime.py": "workflow_api.py", "_cli.py": "workflow_cli.py"}
+} | {
+    "runtime.py": "workflow_api.py",
+    "_cli.py": "workflow_cli.py",
+    "result_output.py": "result_output.py",
+}
 DEPENDENCIES = Path(__file__).with_name("native_dependencies")
 COMPANION = "arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl"
 
