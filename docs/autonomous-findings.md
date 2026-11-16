@@ -67,8 +67,6 @@ all-ready-service generation, schema-only native builders, private profiles,
 public Python defaults and usable-operation survival after upstream warnings.
 Those constraints remain in the architecture and passing milestone tests.
 
-## Quality review
-
 ## Workflow packaging findings under correction
 
 Independent review of `f6072a1` passed 19 focused checks and Ruff's 23 integration
