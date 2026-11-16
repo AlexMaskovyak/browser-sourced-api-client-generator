@@ -85,6 +85,21 @@ The wrong-origin private-profile adversarial probe passed with no dispatch. Thes
 findings concern the new packaging integration, not a change to the selected native
 upstream owners or the architecture.
 
+## Distribution finding under correction
+
+F22: The first standalone container run reached initial login, then the ordinary
+installed `website-client run URL` command returned its bounded unsupported-input
+error. The public API traceback identified a valid optional nullable JSON request
+body in the fixture definition: OpenAPI Python Client emitted an API module with
+an empty `else` block, and `generation.operation_metadata` raised SyntaxError while
+parsing it. One unsupported native SDK operation aborted its entire service.
+
+The implementer is reproducing this boundary and preserving independent usable
+SDK operations with a named exclusion. The original source remains available to
+the workflow owner; required workflow literal-null semantics must remain supported.
+This is a confirmed failed acceptance condition, not an accepted risk. Correction
+and fixed installed-command/container verification are pending.
+
 ## Quality review
 
 The user's explicit quality instruction applies to all owned integration code.
