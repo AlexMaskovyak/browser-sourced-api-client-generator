@@ -253,7 +253,9 @@ def test_operations_are_not_bound_by_schema_similarity():
     bundle["services"].append(other)
     normalized = normalize_bundle(bundle)
     assert normalized["services"][0]["status"] == "ready"
-    assert normalized["services"][1]["status"] == "blocked"
+    assert normalized["services"][1]["status"] == "ready"
+    assert normalized["services"][1]["operationArtifacts"] == []
+    assert normalized["services"][1].get("compiledOperationsArtifact") is None
 
 
 def test_multiple_ready_services_require_selection():
@@ -506,7 +508,8 @@ def test_discovery_manifest_preserves_schemas_and_frontend_documents_beyond_har(
     assert {item["name"] for item in bundle["artifacts"]} == set(files)
     assert any(item["kind"] == "graphql-schema" for item in bundle["artifacts"])
     target = bundle["services"][0]
-    assert normalize_bundle(bundle)["services"][0]["status"] == "blocked"
+    assert normalize_bundle(bundle)["services"][0]["status"] == "ready"
+    assert normalize_bundle(bundle)["services"][0]["operationArtifacts"] == []
     normalized = normalize_bundle(
         bundle, bind_operations=[target["id"] + "=operations-0001.graphql"]
     )

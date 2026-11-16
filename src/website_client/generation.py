@@ -280,11 +280,12 @@ def write_graphql_configuration(stage, project, package, schema_sdl, document):
     operations_path = stage / "operations.graphql"
     configuration_path = stage / "config.toml"
     schema_path.write_text(schema_sdl)
-    operations_path.write_text(print_ast(document))
+    if document is not None:
+        operations_path.write_text(print_ast(document))
     configuration = [
         "[tool.ariadne-codegen]",
         f"schema_path = {json.dumps(str(schema_path))}",
-        f"queries_path = {json.dumps(str(operations_path))}",
+        *([f"queries_path = {json.dumps(str(operations_path))}"] if document is not None else ["enable_custom_operations = true"]),
         f"target_package_name = {json.dumps(package)}",
         f"target_package_path = {json.dumps(str(project))}",
         "async_client = false",
@@ -302,12 +303,9 @@ def generate_graphql_project(stage, name, package, source, operations_path):
 
     Unlike the operation-only backend, this path has a complete schema and can emit
     typed response models. No endpoint is called during generation."""
-    if not operations_path:
-        raise BrowserError(
-            "GraphQL generation requires --operations as well as --graphql-schema."
-        )
-    schema_sdl = graphql_schema(source)
-    document, selected = validated_graphql_operations(schema_sdl, operations_path)
+    from .graphql_admission import safe_schema, schema_operations
+    schema_sdl, privacy_exclusions = safe_schema(source)
+    document, selected = validated_graphql_operations(schema_sdl, operations_path) if operations_path else (None, None)
     project = stage / "project"
     project.mkdir()
     configuration_path = write_graphql_configuration(
@@ -319,13 +317,20 @@ def generate_graphql_project(stage, name, package, source, operations_path):
         stage,
     )
 
-    operations = graphql_operation_metadata(selected)
+    if selected is not None:
+        operations, exclusions = graphql_operation_metadata(selected), []
+    else:
+        operations, exclusions = schema_operations(schema_sdl)
+    if not operations:
+        raise BrowserError("unsupported: no executable GraphQL operations")
     (project / "pyproject.toml").write_text(
         render_template("graphql_pyproject.toml.tmpl", name=name, package=package)
     )
     (project / "schema.graphql").write_text(schema_sdl)
-    (project / "operations.graphql").write_text(print_ast(document) + "\n")
-    return GeneratedProject(project, package, operations, "ariadne-codegen")
+    if document is not None:
+        (project / "operations.graphql").write_text(print_ast(document) + "\n")
+    return GeneratedProject(project, package, operations, "ariadne-codegen",
+                            {"exclusions": privacy_exclusions + exclusions})
 
 
 def write_runtime_files(project, runtime_config=None):
@@ -372,7 +377,7 @@ def write_generation_report(project, source, operations_source=None, lineage=Non
         "liveVerified": False,
     }
     if project.generator_name == "ariadne-codegen":
-        report.update(generationMode="graphql-schema", schemaValidated=True)
+        report.update(generationMode=("graphql-schema-only" if any(item["kind"] == "graphql-custom" for item in project.operations.values()) else "graphql-schema"), schemaValidated=True)
     else:
         report.update(generationMode="openapi", definitionValidated=True)
     if operations_source is not None:

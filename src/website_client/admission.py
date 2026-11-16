@@ -5,7 +5,7 @@ import json
 import re
 from urllib.parse import unquote, urlsplit
 
-from jsonpointer import resolve_pointer, JsonPointerException
+from jsonpointer import resolve_pointer, JsonPointerException, JsonPointer
 import yaml
 
 from .browser import BrowserError
@@ -99,11 +99,32 @@ def prune_components(document):
                 visit(item)
     visit(document.get('paths', {}))
     components = {}
-    for reference in sorted(used):
-        _, _, category, name, *_ = reference.split('/')
-        components.setdefault(category, {})[name] = original[category][name]
-    if original.get('securitySchemes'):
-        components['securitySchemes'] = original['securitySchemes']
+    for reference in sorted(used, key=lambda item: len(JsonPointer(item[1:]).parts)):
+        parts = JsonPointer(reference[1:]).parts[1:]
+        cursor = components
+        for index, part in enumerate(parts[:-1]):
+            following = parts[index + 1]
+            if isinstance(cursor, list):
+                while len(cursor) <= int(part):
+                    cursor.append({})
+                cursor = cursor[int(part)]
+            else:
+                cursor = cursor.setdefault(part, [] if following.isdigit() else {})
+        value = deepcopy(resolve_pointer({'components': original}, reference[1:]))
+        if isinstance(cursor, list):
+            while len(cursor) <= int(parts[-1]):
+                cursor.append({})
+            cursor[int(parts[-1])] = value
+        else:
+            cursor[parts[-1]] = value
+    security_names = set()
+    for item in document.get('paths', {}).values():
+        for method, operation in item.items():
+            if method in METHODS:
+                for requirement in operation.get('security', document.get('security', [])):
+                    security_names.update(requirement)
+    if security_names:
+        components['securitySchemes'] = {name: original.get('securitySchemes', {})[name] for name in sorted(security_names)}
     if components:
         document['components'] = components
     else:
@@ -129,10 +150,14 @@ def admit_openapi(source):
                 continue
             reason = None
             try:
+                if not isinstance(operation, dict):
+                    raise ValueError('invalid_contract')
+                security_names = {name for requirement in operation.get('security', safe.get('security', [])) for name in requirement}
+                security_schemes = {name: safe.get('components', {}).get('securitySchemes', {})[name] for name in security_names}
                 if sensitive(path):
                     raise ValueError('sensitive_structure')
                 walk_contract(safe, {'parameters': path_item.get('parameters', []), 'operation': operation,
-                                     'servers': safe.get('servers', []), 'securitySchemes': safe.get('components', {}).get('securitySchemes', {})})
+                                     'servers': safe.get('servers', []), 'securitySchemes': security_schemes})
                 for server in safe.get('servers', []):
                     parsed = urlsplit(server.get('url', ''))
                     if parsed.username or parsed.password or parsed.query or parsed.fragment or server.get('variables'):
@@ -140,10 +165,10 @@ def admit_openapi(source):
                 if operation.get('servers') or path_item.get('servers'):
                     raise ValueError('unsupported_destination')
                 request_features(safe, path_item, operation)
-            except (ValueError, TypeError, KeyError, RecursionError) as error:
+            except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as error:
                 reason = str(error) if str(error) in {'external_reference', 'unresolved_reference', 'sensitive_structure', 'unsupported_serialization', 'unsupported_callbacks', 'unsupported_destination'} else 'invalid_contract'
             if reason:
-                exclusions.append({'operation': operation.get('operationId') if not sensitive(operation.get('operationId')) else None,
+                exclusions.append({'operation': operation.get('operationId') if isinstance(operation, dict) and not sensitive(operation.get('operationId')) else None,
                                    'method': method.upper(), 'path': path if not sensitive(path) else '[omitted]', 'reason': reason})
                 continue
             selected = executable['paths'].setdefault(path, {key: deepcopy(value) for key, value in path_item.items() if key not in METHODS})
