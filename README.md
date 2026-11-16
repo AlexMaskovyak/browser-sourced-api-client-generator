@@ -8,8 +8,8 @@ or model API is required.
 
 This branch is under active implementation in [draft PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12).
 The authenticated runtime, autonomous service generation and packaged workflow
-execution pass local tests. Independent packaging review and clean-container
-acceptance remain in progress.
+execution pass local tests and independent review. Clean-container distribution
+acceptance remains in progress.
 
 ## Install
 
