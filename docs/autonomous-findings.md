@@ -69,6 +69,24 @@ Those constraints remain in the architecture and passing milestone tests.
 
 ## Quality review
 
+## Workflow packaging findings under correction
+
+Independent review of `f6072a1` passed 19 focused checks and Ruff's 23 integration
+files. Bounded adversarial probes then established the following defects. These
+remain open until the corrected installed commands/source selection are rechecked.
+
+| ID | Location and reproduction | Impact | Required correction |
+| --- | --- | --- | --- |
+| F19 | `workflow_cli._write_result`: close an installed command's stdout pipe, then execute a successful workflow. Three requests and one commit finish; interpreter shutdown raises BrokenPipeError and exits 120. | The local output stage loses its machine-readable remote outcome and promised exit code. | Flush within the guarded output stage, prevent a second shutdown flush, preserve outcome on stderr and exit 1 without retry. |
+| F20 | `workflow_cli._exit_code`: invoke an installed workflow without its required file input. It reports missing_input with zero requests, but exits 1. | Caller input error disagrees with exit-2 help and the required convention. | Classify rejected caller inputs before dispatch as usage errors; retain exit 1 for workflow/remote failures. |
+| F21 | `workflow_binding._resolve_sources`: supply a workflow's exact declared local OpenAPI file and a saved report pointing that source name at a different OpenAPI file. The saved report wins without an exclusion. | Contradictory contract evidence selects the wrong destination. | Quarantine combined saved-report and exact current-source conflicts, while retaining unrelated services and workflows. |
+
+The wrong-origin private-profile adversarial probe passed with no dispatch. These
+findings concern the new packaging integration, not a change to the selected native
+upstream owners or the architecture.
+
+## Quality review
+
 The user's explicit quality instruction applies to all owned integration code.
 The accepted refactor uses validated integration records such as OperationBinding,
 WorkflowPlan, ExecutionSummary, RunRequest, RuntimeConfig and FileDescriptor.
