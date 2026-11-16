@@ -83,3 +83,23 @@ def test_dispatch_driver_errors_never_expose_credential_logs(stage):
     assert api.fetch.call_count == 1
     if stage != 'fetch':
         response.dispose.assert_called_once()
+
+
+def test_initial_cookie_ownership_is_not_shared_between_origin_ports(tmp_path, monkeypatch):
+    from website_client.runtime_profile import OriginCaptures, save_browser_profile
+    first, second = 'http://127.0.0.1:8101', 'http://127.0.0.1:8102'
+    captures = OriginCaptures(first)
+    captures.declare(second)
+    captures.observe_request(Mock(url=first, all_headers=lambda: {'cookie': 'sid=SHARED_COOKIE'}))
+    assert captures.cookies_for(first) == {('sid', 'SHARED_COOKIE')}
+    assert captures.cookies_for(second) == set()
+    captures.observe_request(Mock(url=second, all_headers=lambda: {'cookie': 'sid=SHARED_COOKIE'}))
+    assert captures.cookies_for(first) == captures.cookies_for(second) == set()
+    monkeypatch.setenv('WEBSITE_CLIENT_PROFILE_DIR', str(tmp_path / 'profiles'))
+    context = Mock()
+    context.storage_state.return_value = {'cookies': [{'name': 'sid', 'value': 'SHARED_COOKIE', 'domain': '127.0.0.1', 'path': '/'}], 'origins': []}
+    for index, endpoint in enumerate((first, second)):
+        identifier = 'origin' + str(index)
+        save_browser_profile(context, identifier, endpoint, owned_cookies=captures.cookies_for(endpoint))
+        with ProfileStore(identifier, endpoint).locked() as store:
+            assert store.load()['storage_state']['cookies'] == []

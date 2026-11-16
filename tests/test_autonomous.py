@@ -296,7 +296,7 @@ def test_historical_short_secret_path_and_sensitive_shapes_are_excluded(tmp_path
             assert b'SECRET123' not in path.read_bytes()
 
 
-@pytest.mark.parametrize('mode', ['traffic-only', 'html-only', 'same-origin-ref', 'declared-other-origin'])
+@pytest.mark.parametrize('mode', ['traffic-only', 'html-only', 'same-origin-ref', 'declared-other-origin', 'declared-other-port'])
 def test_url_route_coverage_origins_and_reference_bounds(tmp_path, monkeypatch, mode):
     monkeypatch.setenv('WEBSITE_CLIENT_PROFILE_DIR', str(tmp_path / 'profiles'))
     class ApiHandler(BaseHTTPRequestHandler):
@@ -323,7 +323,8 @@ def test_url_route_coverage_origins_and_reference_bounds(tmp_path, monkeypatch, 
     api = ThreadingHTTPServer(('127.0.0.1', 0), ApiHandler)
     api.calls = []
     threading.Thread(target=api.serve_forever, daemon=True).start()
-    api_url = f'http://localhost:{api.server_port}'
+    api_host = '127.0.0.1' if mode == 'declared-other-port' else 'localhost'
+    api_url = f'http://{api_host}:{api.server_port}'
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -337,17 +338,17 @@ def test_url_route_coverage_origins_and_reference_bounds(tmp_path, monkeypatch, 
         def do_GET(self):
             server.calls.append(self.path)
             if self.path == '/':
-                link = '<link rel="service-desc" href="/definition/main.json">' if mode in {'same-origin-ref', 'declared-other-origin'} else ''
+                link = '<link rel="service-desc" href="/definition/main.json">' if mode in {'same-origin-ref', 'declared-other-origin', 'declared-other-port'} else ''
                 if mode == 'html-only':
                     data = ''
                 else:
-                    data_url = api_url + '/read' if mode == 'declared-other-origin' else url + '/read'
+                    data_url = api_url + '/read' if mode in {'declared-other-origin', 'declared-other-port'} else url + '/read'
                     data = '<button role="tab" onclick="fetch(\'' + data_url + '\',{headers:{Authorization:\'Bearer API_TOKEN\',\'X-Contract-Auth\':\'DECLARED_TOKEN\'}})">Data</button>'
                 return self.send(link + data + '<a href="/page-two">More</a><button role="tab" onclick="fetch(\'http://localhost:' + str(server.server_port) + '/offsite\')">Other</button>')
             if self.path == '/page-two':
                 return self.send('<details><summary>Details</summary>Neutral</details>')
             if self.path == '/definition/main.json':
-                document = spec(api_url if mode == 'declared-other-origin' else url)
+                document = spec(api_url if mode in {'declared-other-origin', 'declared-other-port'} else url)
                 if mode == 'same-origin-ref':
                     document['paths']['/read']['get']['responses']['200']['content']['application/json']['schema'] = {'$ref': './schema.json'}
                 else:
@@ -395,13 +396,16 @@ def test_url_route_coverage_origins_and_reference_bounds(tmp_path, monkeypatch, 
                 assert '/definition/schema.json' in server.calls
                 assert '$ref' not in (project / 'openapi.json').read_text()
         profiles = [json.loads(path.read_text()) for path in (tmp_path / 'profiles').glob('*.json')]
-        if mode == 'declared-other-origin':
+        if mode in {'declared-other-origin', 'declared-other-port'}:
             assert len(profiles) == 2
             start = next(profile for profile in profiles if profile['origin'].startswith(url))
             selected = next(profile for profile in profiles if profile['origin'].startswith(api_url))
             assert 'authorization' not in start['headers']
             assert selected['headers'] == {'authorization': 'Bearer API_TOKEN', 'x-contract-auth': 'DECLARED_TOKEN'}
             assert selected['storage_state']['cookies'] == []
+            assert start['storage_state']['cookies'][0]['value'] == 'START_COOKIE'
+            if mode == 'declared-other-port':
+                assert any(item['reason'] == 'cookie_origin_isolation' for item in report['exclusions'])
             assert len(api.calls) >= 2
         else:
             assert len(profiles) == 1
@@ -487,3 +491,18 @@ def test_offline_reference_exclusion_never_opens_network(tmp_path, monkeypatch):
     assert result['coverage'] == 'partial'
     assert result['services'][0]['operations'] == ['read']
     assert any(item['reason'] == 'external_reference' for item in result['exclusions'])
+
+
+def test_excluded_subscription_prunes_only_its_orphan_fragments(tmp_path):
+    operations = tmp_path / 'operations.graphql'
+    operations.write_text('query Status { ...StatusFields } subscription Updates { ...UpdateFields } fragment StatusFields on Query { status } fragment UpdateFields on Subscription { updates }')
+    schema = tmp_path / 'schema.graphql'
+    schema.write_text('type Query { status:String } type Subscription { updates:String }')
+    result = run(schema, tmp_path / 'output', endpoint='https://neutral.invalid/graphql', operations=operations)
+    assert result['coverage'] == 'partial'
+    assert result['services'][0]['operations'] == ['Status']
+    project = tmp_path / 'output' / result['services'][0]['directory']
+    emitted = (project / 'operations.graphql').read_text()
+    assert 'StatusFields' in emitted
+    assert 'UpdateFields' not in emitted
+    assert any(item['reason'] == 'unsupported_subscription' for item in result['exclusions'])

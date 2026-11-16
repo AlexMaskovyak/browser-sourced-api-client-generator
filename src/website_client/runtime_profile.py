@@ -1,6 +1,7 @@
 """Private, origin-scoped login state shared by installed clients on this machine."""
 
 from contextlib import contextmanager
+from http.cookies import SimpleCookie
 import json
 import os
 from pathlib import Path
@@ -140,10 +141,13 @@ class ProfileStore:
                 os.unlink(temporary)
 
 
-def save_browser_profile(context, identifier, endpoint, headers=None, allowed_headers=()):
+def save_browser_profile(context, identifier, endpoint, headers=None, allowed_headers=(), owned_cookies=None):
     """Save selected login state; call only after explicit initial login completes."""
     with ProfileStore(identifier, endpoint).locked() as store:
-        store.save(context.storage_state(), headers or {}, allowed_headers)
+        state = context.storage_state()
+        if owned_cookies is not None:
+            state["cookies"] = [cookie for cookie in state.get("cookies", []) if (cookie.get("name"), cookie.get("value")) in owned_cookies]
+        store.save(state, headers or {}, allowed_headers)
 
 
 class HeaderCapture:
@@ -170,6 +174,7 @@ class OriginCaptures:
     """Capture only origins and authentication names selected by initial definitions."""
     def __init__(self, endpoint):
         self.captures = {}
+        self.cookie_owners = {}
         self.declare(endpoint)
 
     def declare(self, endpoint, names=()):
@@ -182,5 +187,32 @@ class OriginCaptures:
             selected = self.captures.get(service_origin(params['request']['url']))
             if selected is not None:
                 selected.observe(method, params)
+                if method == "Network.requestWillBeSent":
+                    self._cookies(params["request"]["url"], params["request"].get("headers", {}))
         except (KeyError, TypeError, ProfileError):
             return
+
+    def _cookies(self, url, headers):
+        selected = service_origin(url)
+        if selected not in self.captures:
+            return
+        raw = next((value for name, value in headers.items() if name.lower() == 'cookie'), '')
+        cookies = SimpleCookie()
+        try:
+            cookies.load(raw)
+        except Exception:
+            return
+        for name, item in cookies.items():
+            self.cookie_owners.setdefault((name, item.value), set()).add(selected)
+
+    def observe_request(self, request):
+        """Called only for allowed reads, before native request dispatch."""
+        try:
+            headers = request.all_headers() if hasattr(request, 'all_headers') else request.headers
+            self._cookies(request.url, headers)
+        except Exception:
+            return
+
+    def cookies_for(self, api_origin):
+        """Never seed a jar cookie observed at another origin or shared ambiguously."""
+        return {identity for identity, owners in self.cookie_owners.items() if owners == {api_origin}}

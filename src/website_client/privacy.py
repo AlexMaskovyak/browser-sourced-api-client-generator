@@ -7,7 +7,7 @@ import re
 import hashlib
 from urllib.parse import urlsplit, urlunsplit
 
-from graphql import parse, print_ast, visit
+from graphql import parse, print_ast, visit, separate_operations
 from graphql.language import Visitor
 
 from .admission import admit_openapi, sensitive, scrub_document, _remove_sensitive_source
@@ -55,6 +55,9 @@ def safe_operations(source, with_exclusions=False):
             if name is not None:
                 unsafe.add(key)
     document.definitions = tuple(item for key, item in definitions.items() if key not in unsafe)
+    # Standard GraphQL dependency separation removes orphan fragments after exclusion.
+    reachable = {(node.kind, node.name.value) for operation in separate_operations(document).values() for node in operation.definitions if node.name is not None}
+    document.definitions = tuple(node for node in document.definitions if (node.kind, node.name.value) in reachable)
     # The existing GraphQL parser/compiler still owns fragments and variable semantics.
     text = print_ast(document) + '\n'
     return (text, exclusions) if with_exclusions else text
@@ -112,7 +115,7 @@ def safe_report(text):
     reasons = {'unsupported_serialization', 'external_reference', 'unresolved_reference', 'sensitive_structure',
                'unsupported_callbacks', 'unsupported_destination', 'invalid_contract', 'upstream_generation_warning',
                'unsupported_selection', 'unsupported_abstract_selection', 'ambiguous_native_name', 'unknown_request_body',
-               'har_dependency_required', 'response_body_unknown', 'unsupported_subscription', 'unnamed_operation', 'conflicting_operation', 'privacy_or_capture_omission', 'upstream_inference_warning', 'upstream_leak_detected', 'conflicting_contracts'}
+               'cookie_origin_isolation', 'har_dependency_required', 'response_body_unknown', 'unsupported_subscription', 'unnamed_operation', 'conflicting_operation', 'privacy_or_capture_omission', 'upstream_inference_warning', 'upstream_leak_detected', 'conflicting_contracts'}
     if isinstance(value, dict) and 'openapi' in value:
         return encoded_json(admit_openapi(value)[0])
     if isinstance(value, dict) and 'runtimeProfiles' in value:
@@ -141,7 +144,24 @@ def safe_report(text):
             elif key == 'count' and type(element) is int:
                 result[key] = element
         return result
-    return encoded_json(clean(value))
+    cleaned = clean(value)
+    if isinstance(value, dict) and isinstance(value.get('endpoints'), list):
+        endpoints = []
+        from .discovery import route, FIELD
+        for item in value['endpoints']:
+            try:
+                operation = item.get('graphql') or {}
+                name = operation.get('name')
+                if not isinstance(name, str) or sensitive(name) or item.get('method') not in {'GET', 'POST'}:
+                    continue
+                base, path, _ = route(item['origin'] + item['path'])
+                parameters = [key for key in item.get('queryParameters', []) if isinstance(key, str) and FIELD.fullmatch(key) and not sensitive(key)]
+                endpoints.append({'origin': base, 'path': path, 'method': item['method'],
+                                  'queryParameters': parameters, 'graphql': {'name': name}})
+            except (AttributeError, KeyError, TypeError, ValueError, BrowserError):
+                continue
+        cleaned['endpoints'] = endpoints
+    return encoded_json(cleaned)
 
 
 def encoded_json(value):
