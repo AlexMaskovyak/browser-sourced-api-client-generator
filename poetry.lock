@@ -44,6 +44,25 @@ typing_extensions = {version = ">=4.16.0", markers = "python_version < \"3.15\""
 trio = ["trio (>=0.32.0)"]
 
 [[package]]
+name = "arazzo-runner"
+version = "0.9.6"
+description = "Execution libraries and test tools for Arazzo workflows and Open API operations"
+optional = false
+python-versions = "<4.0,>=3.11"
+groups = ["main"]
+files = [
+    {file = "arazzo_runner-0.9.6-py3-none-any.whl", hash = "sha256:6db1a33da2290a41e2dc3990302a387421508e1884bc1db085428d06e5f8be28"},
+    {file = "arazzo_runner-0.9.6.tar.gz", hash = "sha256:5491c9facc1a552ad278657315d527889a63353185f6c93456d8af01180f9102"},
+]
+
+[package.dependencies]
+jsonpath-ng = ">=1.5.0"
+jsonpointer = ">=3.0.0"
+pydantic = ">=2.0.0"
+pyyaml = ">=6.0"
+requests = ">=2.28.0"
+
+[[package]]
 name = "ariadne-codegen"
 version = "0.19.0"
 description = "Generate fully typed GraphQL client from schema, queries and mutations!"
@@ -521,6 +540,18 @@ MarkupSafe = ">=2.0"
 
 [package.extras]
 i18n = ["Babel (>=2.7)"]
+
+[[package]]
+name = "jsonpath-ng"
+version = "1.16.0"
+description = "A final implementation of JSONPath for Python that aims to be standard compliant, including arithmetic and binary comparison operators and providing clear AST for metaprogramming."
+optional = false
+python-versions = ">=3.11"
+groups = ["main"]
+files = [
+    {file = "jsonpath_ng-1.16.0-py3-none-any.whl", hash = "sha256:c5e28ddd70ebcaeba9af3c2b880933fbfeb108b5e68c9edb84e1b57803091218"},
+    {file = "jsonpath_ng-1.16.0.tar.gz", hash = "sha256:a81066736e00d47d0c2b5c510d12b78d09b40fd1ec954e7beff1954a55606099"},
+]
 
 [[package]]
 name = "jsonpointer"
@@ -1711,4 +1742,4 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "acf6c2183682c923cbef6c8ed38b51b24cbe345faca1f436dc371be0fe96ebc9"
+content-hash = "3a925479b6215f98f6a72e6c582c5e7b149ca993f668e698b921c1d14c833f9f"

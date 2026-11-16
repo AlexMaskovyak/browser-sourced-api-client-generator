@@ -11,7 +11,8 @@ import yaml
 from .browser import BrowserError
 from .definitions import openapi_document
 
-METHODS = frozenset({'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'})
+from .capabilities import METHODS, resolved, request_features
+
 # Conservative known-value detection, not a universal secret detector.
 SENSITIVE = re.compile(r'@|(?:bearer\s+)|(?:[?&](?:token|signature|key|credential)=)|(?:AKIA[A-Z0-9]{16})|(?:eyJ[A-Za-z0-9_-]{12,}\.)|(?:[a-f0-9]{32,})|(?:\bSECRET\d+\b)|(?:CANARY|SYNTHETIC_(?:TOKEN|SECRET|CAPABILITY))', re.I)
 DROP = frozenset({'example', 'examples', 'default', 'description', 'summary', 'externalDocs', 'contact', 'license'})
@@ -35,23 +36,19 @@ def scrub_document(value, context=None):
     return value
 
 
-def resolved(document, value):
-    if isinstance(value, dict) and '$ref' in value:
-        reference = value['$ref']
-        if not isinstance(reference, str) or not reference.startswith('#/'):
-            raise ValueError('external_reference')
-        try:
-            return resolve_pointer(document, reference[1:])
-        except JsonPointerException:
-            raise ValueError('unresolved_reference') from None
-    return value
-
-
-def walk_contract(document, value, seen=None):
+def walk_contract(document, value, seen=None, context=None):
     """Follow only local references. Never allow a validator to fetch a URL."""
     seen = set() if seen is None else seen
     if isinstance(value, dict):
+        if context in {"properties", "patternProperties", "$defs", "definitions"}:
+            for key, item in value.items():
+                if sensitive(key):
+                    raise ValueError("sensitive_structure")
+                walk_contract(document, item, seen)
+            return
         for key, item in value.items():
+            if key in {'$id', '$dynamicRef', '$dynamicAnchor', '$recursiveRef', '$recursiveAnchor'}:
+                raise ValueError('unsupported_schema_reference')
             if sensitive(key) or (key in {'name', 'operationId', 'enum', 'const', 'url'} and sensitive(item)):
                 raise ValueError('sensitive_structure')
             if key == 'enum' and any(sensitive(v) for v in item):
@@ -62,32 +59,12 @@ def walk_contract(document, value, seen=None):
                 seen.add(item)
                 walk_contract(document, resolved(document, value), seen)
             else:
-                walk_contract(document, item, seen)
+                walk_contract(document, item, seen, key)
     elif isinstance(value, list):
         for item in value:
             walk_contract(document, item, seen)
     elif sensitive(value):
         raise ValueError("sensitive_structure")
-
-
-def request_features(document, path_item, operation):
-    parameters = [resolved(document, item) for item in path_item.get('parameters', []) + operation.get('parameters', [])]
-    # Operation definitions override matching path-level parameters.
-    parameters = {(item.get('in'), item.get('name')): item for item in parameters}
-    for item in parameters.values():
-        schema = resolved(document, item.get('schema', {}))
-        location, kind = item.get('in'), schema.get('type')
-        if any(key in schema for key in ('oneOf', 'anyOf', 'allOf', 'properties')) or isinstance(kind, list):
-            raise ValueError('unsupported_serialization')
-        style = item.get('style', 'form' if location in {'query', 'cookie'} else 'simple')
-        if 'content' in item or kind == 'object' or (kind == 'array' and location != 'query'):
-            raise ValueError('unsupported_serialization')
-        if location == 'query' and (style != 'form' or (kind == 'array' and item.get('explode', True) is False)):
-            raise ValueError('unsupported_serialization')
-        if location != 'query' and style not in {'form', 'simple'}:
-            raise ValueError('unsupported_serialization')
-    if operation.get('callbacks'):
-        raise ValueError('unsupported_callbacks')
 
 
 def prune_components(document):
@@ -177,7 +154,7 @@ def admit_openapi(source):
                     raise ValueError('unsupported_destination')
                 request_features(safe, path_item, operation)
             except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as error:
-                reason = str(error) if str(error) in {'external_reference', 'unresolved_reference', 'sensitive_structure', 'unsupported_serialization', 'unsupported_callbacks', 'unsupported_destination'} else 'invalid_contract'
+                reason = str(error) if str(error) in {'external_reference', 'unresolved_reference', 'sensitive_structure', 'unsupported_serialization', 'unsupported_callbacks', 'unsupported_destination', 'unsupported_schema_reference'} else 'invalid_contract'
             if reason:
                 exclusions.append({'operation': operation.get('operationId') if isinstance(operation, dict) and not sensitive(operation.get('operationId')) else None,
                                    'method': method.upper(), 'path': path if not sensitive(path) else '[omitted]', 'reason': reason})
