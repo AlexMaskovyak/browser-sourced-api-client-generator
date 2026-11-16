@@ -155,16 +155,26 @@ def _browser_input(url, *, browser='chrome', browser_path=None, login_handler=No
         initial_definitions = [selected for index in range(min(links.count(), 200))
                                if (selected := schema_url(session._url, links.nth(index).get_attribute('href'),
                                    advertised='service-desc' in (links.nth(index).get_attribute('rel') or '').split()))]
-        explorer = SiteExplorer(session, max_pages, max_actions, max_depth, duration_seconds, strict_origin=True, api_origins=allowed_origins)
+        explorer = SiteExplorer(session, max_pages, max_actions, max_depth, duration_seconds, strict_origin=True, api_origins=allowed_origins, credential_observer=credentials)
         explorer.prepare()
         discovery, report = SelfDiscovery(session, observer, explorer=explorer, autonomous=True, credential_observer=credentials,
                                           initial_definitions=initial_definitions, allowed_origins=allowed_origins).run()
         profiles = {}
+        cookie_exclusions = []
+        from .runtime_profile import scoped_state
+        state = session._context.storage_state()
         for api_origin, capture in credentials.captures.items():
             profile = _profile_id(api_origin)
-            save_browser_profile(session._context, profile, api_origin, capture.headers, capture.allowed_headers)
+            owned = credentials.cookies_for(api_origin)
+            suppressed = sum((cookie.get("name"), cookie.get("value")) not in owned for cookie in scoped_state(state, api_origin)["cookies"])
+            if suppressed:
+                cookie_exclusions.append({"reason": "cookie_origin_isolation", "count": suppressed})
+            save_browser_profile(session._context, profile, api_origin, capture.headers, capture.allowed_headers, owned_cookies=owned)
             profiles[api_origin] = profile
     manifest = _har_contract(discovery)
+    if cookie_exclusions:
+        report_artifact = Artifact.create("cookie-scope-report.json", Kind.REPORT, encoded({"exclusions": cookie_exclusions}), Source.REPORT)
+        manifest = replace(manifest, artifacts=manifest.artifacts + (report_artifact,))
     association = Artifact.create("runtime-associations.json", Kind.REPORT, encoded({"runtimeProfiles": profiles}), Source.REPORT)
     manifest = replace(manifest, artifacts=manifest.artifacts + (association,))
     from .privacy import safe_ui_report

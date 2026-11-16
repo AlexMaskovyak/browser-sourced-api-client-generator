@@ -54,11 +54,13 @@ class SiteExplorer:
         duration_seconds=DEFAULT_EXPLORE_SECONDS,
         strict_origin=False,
         api_origins=None,
+        credential_observer=None,
     ):
         validate_exploration(max_pages, max_actions, max_depth, duration_seconds)
         self.session = session
         self.strict_origin = strict_origin
         self.api_origins = api_origins if api_origins is not None else set()
+        self.credential_observer = credential_observer
         self.start_url = session.current_url()
         self.max_pages = max_pages
         self.max_actions = max_actions
@@ -121,6 +123,8 @@ class SiteExplorer:
             )
             route.abort("blockedbyclient")
         else:
+            if self.credential_observer is not None:
+                self.credential_observer.observe_request(route.request)
             route.continue_()
 
     def _websocket(self, socket):
@@ -169,6 +173,8 @@ class SiteExplorer:
         except Exception:
             document_in_tab = False
         if document_in_tab:
+            if self.credential_observer is not None and request_allowed(route.request, self.session._origin, self.strict_origin, self.api_origins) is None:
+                self.credential_observer.observe_request(route.request)
             route.continue_()
         else:
             self._guard(route)
@@ -187,6 +193,7 @@ class SiteExplorer:
             method=raw["method"],
             post_data=raw.get("postData"),
             resource_type=event.get("resourceType", "").lower(),
+            headers=raw.get("headers", {}),
             is_navigation_request=lambda: event.get("resourceType") == "Document",
             frame=self.session._page.main_frame
             if event.get("frameId") == self.main_frame_id
