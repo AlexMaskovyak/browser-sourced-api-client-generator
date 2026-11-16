@@ -1,0 +1,10 @@
+# Build-time registry access is allowed. Acceptance containers use network none.
+FROM node:22.16.0-bookworm-slim AS node
+FROM browser-sourced-api-client-generator-e2e AS generation
+USER root
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+USER tester
+RUN python -c 'from website_client.har_inference import backend_module; print(backend_module())'
+CMD ["xvfb-run", "-a", "python", "/work/docker/acceptance_generate.py"]
