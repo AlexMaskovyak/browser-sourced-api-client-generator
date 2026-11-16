@@ -89,3 +89,36 @@ Fresh-container tests must verify installed version, native null/omitted/nested 
 wire bytes, schema-disallowed null rejection and existing workflow regressions.
 The independent adversary reviewed this dependency/distribution design and found
 no material blocker subject to those packaging checks. The patch is not yet applied.
+
+## Developer quality acceptance
+
+The user's latest instruction makes reusable, understandable, open-sourceable code
+an explicit completion criterion. Apply it to all integration code already added as
+well as remaining work. Preserve the selected architecture and native API owners.
+
+Before further implementation handoff:
+
+1. Split autonomous orchestration into input, merge/quarantine, association,
+   per-service generation, coverage and persistence responsibilities. Keep the
+   public run API unchanged.
+2. Add validated dataclasses at integration boundaries: selected operation metadata,
+   source associations, file descriptors, execution/configuration summaries and
+   registries where useful. Keep upstream documents as their standard mappings;
+   do not duplicate OpenAPI, GraphQL, Arazzo or cookie domain models. Mark sensitive
+   documents, headers, cookies, payloads and file paths as excluded from repr.
+3. Share SDK/workflow profile session lifecycle code while preserving one driver,
+   sorted whole-job locks, cookie persistence and cleanup on failures.
+4. Separate workflow document/source/input/step/output admission, destination,
+   parameter/body checks and native execution/result classification into focused
+   helpers. Extract Pydantic/attrs conversion adapters from scalar dispatch.
+5. Format introduced/touched code with conventional spacing, public type hints and
+   concise rationale comments. Avoid long functions and dense one-line statements.
+   Do not turn this into an unrelated repository-wide rewrite.
+6. Commit coherent refactors after focused seam regressions, run the full relevant
+   suite before push, then have the independent reviewer assess maintainability as
+   well as correctness. Verify secret-safe repr, existing corrected cases and actual
+   documented usage. No author approves their own work.
+
+The reviewer identified concrete hotspots in autonomous.run, workflow admission and
+execution, duplicated profile lifecycle, native file conversion and source report
+parsing. These are bounded component refactors, not new architecture.
