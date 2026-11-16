@@ -95,8 +95,12 @@ def service():
                     files, note = [fields[key] for key in mapping], 'graphql'
                     if operation['operationName'] == 'NestedUpload':
                         assert len(files) == 2
-                        assert operation['variables']['input']['note'] == 'graphql'
-                        assert set(path for paths in mapping.values() for path in paths) == {'variables.input.files.0', 'variables.input.files.1'}
+                        from graphql import parse, get_operation_ast
+                        selected = get_operation_ast(parse(operation['query']), 'NestedUpload')
+                        argument = next(item for item in selected.selection_set.selections[0].arguments if item.name.value == 'input')
+                        variable = argument.value.name.value
+                        assert operation['variables'][variable]['note'] == 'graphql'
+                        assert set(path for paths in mapping.values() for path in paths) == {f'variables.{variable}.files.0', f'variables.{variable}.files.1'}
             if not files or any(item != PAYLOAD for item in files):
                 return self.send({'reason': 'wrong bytes'}, 422)
             receipt = {'sha256': hashlib.sha256(files[0]).hexdigest(), 'size': len(files[0]), 'note': note}
@@ -486,3 +490,34 @@ def test_sdk_closed_stdout_reports_local_output_failure_without_retry(native_pro
     assert summary == {'reason': 'local_output_failure', 'requestCompleted': True, 'effects': 'possible'}
     assert service[1].uploads == 1
     assert 'BrokenPipeError' not in result.stderr and 'SYNTHETIC_TOKEN' not in result.stderr
+
+
+def test_schema_only_native_upload_builders_and_generated_cli(tmp_path, service, profiles, monkeypatch):
+    url, server = service
+    provision(url)
+    output = tmp_path / 'schema-only-upload'
+    report = generate(output, 'schema-upload', schema=FIXTURES / 'schema.graphql', runtime_config={'endpoint': url + '/graphql', 'profileId': 'neutral'})
+    assert {'mutation_upload', 'mutation_submit'} <= set(report['operations'])
+    monkeypatch.syspath_prepend(str(output))
+    try:
+        package = importlib.import_module('schema_upload')
+        mutations = importlib.import_module('schema_upload.custom_mutations').Mutation
+        fields = importlib.import_module('schema_upload.custom_fields').ReceiptFields
+        upload = importlib.import_module('schema_upload.base_model').Upload
+        input_type = importlib.import_module('schema_upload.input_types').UploadInput
+        with ExitStack() as stack:
+            first = upload(filename='payload.bin', content=stack.enter_context((FIXTURES / 'payload.bin').open('rb')), content_type='application/octet-stream')
+            second = upload(filename='payload.bin', content=stack.enter_context((FIXTURES / 'payload.bin').open('rb')), content_type='application/octet-stream')
+            with package.client_context(allow_writes=True) as client:
+                selected = mutations.submit(input=input_type(files=[first, second], note='graphql')).fields(fields.sha_256, fields.size, fields.note)
+                assert client.mutation(selected, operation_name='NestedUpload')['submit']['size'] == 274
+        data = tmp_path / 'input.json'
+        data.write_text(json.dumps({'file': {'path': str(FIXTURES / 'payload.bin')}, 'note': 'graphql'}))
+        result = subprocess.run([sys.executable, '-m', 'schema_upload._cli', 'mutation_upload', '--confirm-write', 'mutation_upload', '--input', str(data)], cwd=output, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)['upload']['sha256'] == DIGEST
+        assert server.uploads == 2
+    finally:
+        for name in list(sys.modules):
+            if name == 'schema_upload' or name.startswith('schema_upload.'):
+                del sys.modules[name]
