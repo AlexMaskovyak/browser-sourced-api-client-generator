@@ -59,3 +59,8 @@ neutral local services. Findings live in `docs/autonomous-findings.md`.
 
 Plan and component integration map written. Adversarial design review pending.
 Application implementation has not started.
+
+Design clarifications: generated public Python calls need a default-profile factory
+or context as well as CLI injection (D6). Automatic admission must preserve usable
+operations when another operation cannot be generated upstream (D7), with explicit
+coverage reasons rather than suppressed diagnostics. These are required tests.
