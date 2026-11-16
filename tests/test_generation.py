@@ -279,3 +279,24 @@ def test_generated_cli_bounds_header_bytes_without_echoing_credentials(
     assert "Headers exceed 64 KiB" in result.stderr
     assert credential_marker not in result.stdout + result.stderr
     assert counts == {"reads": 0, "writes": 0}
+
+
+def test_optional_nullable_body_invalid_native_output_excludes_only_affected_sdk_operation(tmp_path):
+    import ast
+    source = tmp_path / 'openapi.json'
+    source.write_text(json.dumps({'openapi': '3.0.3', 'info': {'title': 'Optional nullable JSON', 'version': '1'}, 'servers': [{'url': 'https://fixture.invalid'}], 'paths': {
+        '/read': {'get': {'operationId': 'read', 'responses': {'200': {'description': 'ok'}}}},
+        '/nullable': {'post': {'operationId': 'nullable', 'requestBody': {'required': False, 'content': {'application/json': {'schema': {'type': 'string', 'nullable': True}}}}, 'responses': {'200': {'description': 'ok'}}}},
+    }}))
+    output = tmp_path / 'client'
+    report = generate(output, 'optional-nullable', openapi=source)
+    assert report['operations'] == ['read']
+    exclusion = next(item for item in report['coverage']['exclusions'] if item['operation'] == 'nullable')
+    assert exclusion['reason'] == 'upstream_generation_warning'
+    assert exclusion['diagnostics'][0]['type'] == 'SyntaxError'
+    assert '/nullable' in json.loads((output / 'source-openapi.json').read_text())['paths']
+    assert not (output / 'optional_nullable' / 'api' / 'default' / 'nullable.py').exists()
+    for path in output.rglob('*.py'):
+        ast.parse(path.read_text())
+    import compileall
+    assert compileall.compile_dir(output / 'optional_nullable', quiet=1)
