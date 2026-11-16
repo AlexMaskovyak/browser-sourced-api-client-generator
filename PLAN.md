@@ -60,7 +60,9 @@ neutral local services. Findings live in `docs/autonomous-findings.md`.
 Planning and independent adversarial design review completed at `032072a`.
 Milestone 1 implemented at `35dc531`, corrected at `7d90c49` and independently
 reviewed/probed with no remaining material M1 findings. Full suite: 227 passed.
-Milestone 2 assigned next; workflow and clean-container acceptance remain pending.
+Milestone 2 independently reviewed and completed at `d9d4d07`; full suite: 270
+passed. Milestone 3 restricted workflow execution and source associations are next.
+Clean-container distribution acceptance remains pending.
 
 Design clarifications: generated public Python calls need a default-profile factory
 or context as well as CLI injection (D6). Automatic admission must preserve usable

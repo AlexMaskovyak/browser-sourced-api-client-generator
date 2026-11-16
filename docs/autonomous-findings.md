@@ -190,3 +190,28 @@ the generated native client CLI with closed stdin sends no cookie and fails with
 `authentication_required`. Valid final-response cookie renewal must survive initial
 profile handoff without another outgoing read. The writer is correcting this exact
 case while preserving cross-port isolation; no broad probe extension is pending.
+
+## Milestone 2 closure at d9d4d07
+
+F13 resolved through selected-origin native Set-Cookie issuance evidence, including
+the final response. Shared-jar transmission does not transfer issuance ownership;
+multiple issuers stay ambiguous and excluded. The runtime still uses native cookie
+renewal in isolated request contexts.
+
+- Author affected browser/profile check: 74 passed in 28.90s.
+- Full `work/poetry-env/bin/poetry run pytest -q`: **270 passed in 58.80s**.
+- Independent ownership/cross-origin/handoff check: 11 passed in 11.62s.
+- Reviewer's original real-browser OLD-to-NEW reproduction now saves NEW and the
+  generated closed-stdin CLI succeeds after browser closure.
+- Adversary's bounded browser probe passed at the same revision: positive traversal,
+  blocked writes, output canaries and single initial-login callback.
+- `git diff --check` passed. No configured project lint/type command exists.
+- Coordinator executed the actual README OpenAPI and schema-only SDL commands against
+  committed fixtures with new scratch outputs; both returned complete reports and
+  exited 0. Actual `run --help` matches the documented syntax.
+
+F4-F13 are resolved within M2. M2 is complete. Its coherent application commits are
+`1ba7924`, `7e5ac73`, `3343dff`, `d67e393`, `ee385ea`, and `d9d4d07`.
+M3 must preserve explicit supplied/discovered workflow source associations, implement
+the restricted runner and validate actual responses before dependent requests.
+M4 installed console/wheel and clean-container acceptance remain incomplete.
