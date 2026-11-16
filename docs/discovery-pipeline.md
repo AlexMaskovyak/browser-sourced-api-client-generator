@@ -36,7 +36,21 @@ To use named GraphQL operations instead of schema-only defaults, supply
 `--operations tests/fixtures/operations.graphql` as an initial input. For a HAR,
 pass its filename as SOURCE. A saved discovery directory supplies its manifest.
 Repeat `--input FILE` when combining manifests or supplying bundled workflow sources.
-Workflow documents are currently retained; packaged workflow execution is still in progress.
+Declared local workflow sources within the supplied bundle are loaded automatically.
+Exact advertised source URLs enter the existing bounded discovery queue. Missing or
+conflicting sources exclude the affected workflow without selecting a nearby file.
+
+This additional offline example uses the committed three-step workflow and its
+declared sibling OpenAPI file:
+
+```sh
+poetry run website-client run tests/fixtures/workflow/workflow.json --name workflow-example --output ./workflow-example
+```
+
+Expected result: a service project under `services/` and a workflow project under
+`workflows/workflow-example-workflows/`. Generation sends no request to the fixture's
+declared destination. This is a packaging example; executing it requires a matching
+service and private login profile, which the offline command does not create.
 
 ## Read coverage and install packages
 
@@ -45,6 +59,12 @@ reasons. Separate service projects are under `services/`; their names are determ
 Install each project you need with `python -m pip install PROJECT_DIRECTORY`, then use
 that project's console command with `--help`. Installation may download declared
 runtime dependencies. Help sends no service request.
+
+Workflow projects also need the included native companion wheel. Their README gives
+the command that supplies both that wheel and the project to pip. When distributing
+built wheels, supply both sibling wheel paths. A nested wheel resource alone cannot
+satisfy pip's dependency resolution. `coverage.json` identifies the workflow package
+under `workflowPackage`; its console help lists executable workflow IDs.
 
 Coverage reports describe available evidence. A successful generation is not live API
 verification, and a complete report is not a claim that bounded browser traversal
