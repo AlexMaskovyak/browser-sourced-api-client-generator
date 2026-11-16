@@ -16,6 +16,7 @@ import yaml
 
 from .browser import BrowserError, origin
 from .definitions import graphql_schema, openapi_document
+from .admission import sensitive
 
 MAX_BODY = 1024 * 1024
 MAX_HAR = 32 * 1024 * 1024
@@ -32,6 +33,7 @@ def route(url):
     segments, parameters = [], []
     for index, raw in enumerate(parsed.path.split("/")):
         segment = unquote(raw)
+        if sensitive(segment): raise ValueError()
         if re.fullmatch(r"\{id_\d+\}", segment):
             segments.append(segment)
             parameters.append(segment[1:-1])
@@ -46,7 +48,7 @@ def route(url):
 
 
 def safe_query(url):
-    return sorted({key for key, _value in parse_qsl(urlsplit(url).query) if FIELD.fullmatch(key) and not AUTH.search(key)})
+    return sorted(key for key, _value in parse_qsl(urlsplit(url).query) if FIELD.fullmatch(key) and not AUTH.search(key) and not sensitive(key))
 
 
 def mime(value):
@@ -66,13 +68,13 @@ def shape(value, depth=0):
         items = {} if not types else json.loads(next(iter(types))) if len(types) == 1 else {"anyOf": [json.loads(item) for item in sorted(types)]}
         return {"type": "array", "items": items}
     if isinstance(value, dict):
-        return {"type": "object", "properties": {key: shape(item, depth + 1) for key, item in list(value.items())[:100] if FIELD.fullmatch(key)}}
+        return {"type": "object", "properties": {key: shape(item, depth + 1) for key, item in list(value.items())[:100] if FIELD.fullmatch(key) and not sensitive(key)}}
     return {}
 
 
 def redact(value, depth=0):
     if depth > 16: return None
-    if isinstance(value, dict): return {key: redact(item, depth + 1) for key, item in list(value.items())[:100] if FIELD.fullmatch(key)}
+    if isinstance(value, dict): return {key: redact(item, depth + 1) for key, item in list(value.items())[:100] if FIELD.fullmatch(key) and not sensitive(key)}
     if isinstance(value, list): return [redact(item, depth + 1) for item in value[:20]]
     if isinstance(value, bool): return False
     if isinstance(value, int): return 0

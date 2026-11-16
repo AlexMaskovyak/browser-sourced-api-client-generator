@@ -7,3 +7,5 @@ dist/
 captures/
 generated/
 *.har
+
+/work/

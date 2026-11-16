@@ -2,12 +2,16 @@
 
 import ast
 from dataclasses import dataclass
+from copy import deepcopy
+from contextlib import redirect_stdout, redirect_stderr
+import io
 import hashlib
 import importlib.metadata
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 from string import Template
 import subprocess
 import sys
@@ -47,6 +51,7 @@ class GeneratedProject:
     package_name: str
     operations: dict
     generator_name: str
+    coverage: dict | None = None
 
 
 def write_json(path, value):
@@ -153,45 +158,69 @@ def configure_openapi_package(project, name, package):
     metadata_path.write_text(metadata)
 
 
-def generate_openapi_project(stage, name, package, source):
-    """Run openapi-python-client in staging, then add shared CLI packaging.
-
-    Reject backend warnings and disable post-generation shell hooks. Publication
-    is the caller's responsibility after metadata extraction succeeds."""
-    spec = openapi_document(source)
-    definition_path = stage / "openapi.json"
-    configuration_path = stage / "config.json"
-    project = stage / "project"
+def _openapi_backend(stage, name, package, spec, project):
+    """Use the pinned public API so warnings are structured, never terminal text."""
+    from openapi_python_client import generate as upstream_generate
+    from openapi_python_client.config import Config, ConfigFile, MetaType
+    stage.mkdir(parents=True, exist_ok=True)
+    definition_path = stage / "definition.json"
     write_json(definition_path, spec)
-    write_json(
-        configuration_path,
-        {
-            "project_name_override": name,
-            "package_name_override": package,
-            # The wrapper supplies its own runtime; no shell hooks are needed.
-            "post_hooks": [],
-        },
+    config = Config.from_sources(
+        ConfigFile(project_name_override=name, package_name_override=package, post_hooks=[]),
+        MetaType.POETRY, definition_path, "utf-8", False, project,
     )
-    run_generator(
-        "openapi_python_client",
-        [
-            "generate",
-            "--path",
-            str(definition_path),
-            "--output-path",
-            str(project),
-            "--config",
-            str(configuration_path),
-            "--meta",
-            "poetry",
-            "--fail-on-warning",
-        ],
-        stage,
-    )
+    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        errors = upstream_generate(config=config)
+    return [{"reason": "upstream_generation_warning", "type": type(item).__name__,
+             "level": item.level.value} for item in errors]
+
+
+def generate_openapi_project(stage, name, package, source):
+    """Keep independent usable methods when admission or the backend excludes others."""
+    from .admission import METHODS, admit_openapi, prune_components
+    safe, spec, exclusions = admit_openapi(source)
+    project = stage / "project"
+    if not spec["paths"]:
+        raise BrowserError("unsupported: no executable OpenAPI operations")
+    diagnostics = _openapi_backend(stage / "backend", name, package, spec, project)
+    if diagnostics:
+        # A backend warning may drop part of a model while leaving a callable method.
+        # Test each dependency closure through that same backend before packaging it.
+        shutil.rmtree(project, ignore_errors=True)
+        admitted = deepcopy(spec)
+        admitted["paths"] = {}
+        for index, (path, method, operation) in enumerate(
+            (path, method, operation) for path, item in spec["paths"].items()
+            for method, operation in item.items() if method in METHODS
+        ):
+            candidate = deepcopy(spec)
+            candidate["paths"] = {path: {key: deepcopy(value) for key, value in spec["paths"][path].items() if key not in METHODS}}
+            candidate["paths"][path][method] = deepcopy(operation)
+            prune_components(candidate)
+            probe = stage / ("probe-" + str(index))
+            warnings = _openapi_backend(probe, name, package, candidate, probe / "project")
+            if warnings:
+                exclusions.append({"operation": operation.get("operationId"), "method": method.upper(),
+                                   "path": path, "reason": "upstream_generation_warning", "diagnostics": warnings})
+            else:
+                selected = admitted["paths"].setdefault(path, {key: deepcopy(value) for key, value in spec["paths"][path].items() if key not in METHODS})
+                selected[method] = deepcopy(operation)
+        spec = admitted
+        prune_components(spec)
+        if not spec["paths"]:
+            raise BrowserError("unsupported: no executable OpenAPI operations")
+        final_warnings = _openapi_backend(stage / "final", name, package, spec, project)
+        if final_warnings:
+            raise BrowserError("unsupported: conflicting upstream generation inputs")
     operations = operation_metadata(project, package)
+    expected = sum(method in METHODS for item in spec['paths'].values() for method in item)
+    if len(operations) != expected:
+        raise BrowserError("unsupported: upstream omitted operations without attributable diagnostics")
     configure_openapi_package(project, name, package)
     write_json(project / "openapi.json", spec)
-    return GeneratedProject(project, package, operations, "openapi-python-client")
+    write_json(project / "source-openapi.json", safe)
+    return GeneratedProject(project, package, operations, "openapi-python-client",
+                            {"exclusions": exclusions, "diagnostics": diagnostics})
 
 
 def validated_graphql_operations(schema_sdl, operations_path):
@@ -353,6 +382,8 @@ def write_generation_report(project, source, operations_source=None, lineage=Non
         report["generatedOperationsSha256"] = hashlib.sha256(
             (project.directory / "operations.graphql").read_bytes()
         ).hexdigest()
+    if project.coverage is not None:
+        report["coverage"] = project.coverage
     if lineage is not None:
         report["lineage"] = lineage
     write_json(project.directory / "generation.json", report)
