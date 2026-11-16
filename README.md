@@ -142,9 +142,31 @@ Runtime results intentionally returned to callers are separate from saved discov
 
 ```sh
 poetry check
+poetry run ruff check
+poetry run ruff format --check
 poetry run pytest -q
 poetry build
 ```
 
-These commands validate the project, run local tests and build distributions. The clean-container acceptance command is still being implemented. Unit or fixture success does not establish compatibility with an
-arbitrary production website.
+These commands validate the project, check the integration modules, run local tests
+and build distributions. No static type checker is configured.
+
+With Docker Engine running and Python 3 available on the host, run the complete
+container acceptance from the repository root:
+
+```sh
+scripts/test-docker.sh
+```
+
+Image builds download declared dependencies. The checks then run without external
+network access, using neutral local services. They cover the full test suite and
+HTTPS browser compatibility, followed by generated wheels installed in a separate
+runtime image. Private fixture profiles use a separate writable volume and are
+removed afterward. The standalone service uses explicit loopback HTTP; its run
+does not establish TLS compatibility. The final line prints the machine-readable
+report path. Any failed assertion exits nonzero; correct the reported failure and
+rerun the command. `scripts/test-docker.sh --help` explains prerequisites without
+building images.
+
+The complete standalone run is still being verified on this branch. Unit or fixture
+success does not establish compatibility with an arbitrary production website.
