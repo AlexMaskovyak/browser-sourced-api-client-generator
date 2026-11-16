@@ -171,8 +171,15 @@ def upload_console(rest: dict, gql: dict, before: int) -> None:
 
 def verify_workflows(workflow: dict, rest: dict, payload: bytes) -> int:
     workflows = module(workflow["package"])
+    before = len(state()["journal"])
     result = workflows.execute_workflow("upload", {"file": payload})
     assert result["status"] == "success", result
+    assert result["requests"] == result["responses"] == 3
+    assert [entry["path"] for entry in state()["journal"][before:]] == [
+        "/prepare",
+        "/binary",
+        "/finish",
+    ]
     program(
         [workflow["console"], "upload", "--file", "file=" + str(ROOT / "payload.bin")]
     )
@@ -187,10 +194,13 @@ def verify_workflows(workflow: dict, rest: dict, payload: bytes) -> int:
         ("omitted", b""),
         ("nested", b'{"value": null}'),
     ]:
+        before = len(state()["journal"])
         result = workflows.execute_workflow(name, {})
+        assert len(state()["journal"]) == before + 1
         assert result["status"] == "success", result
         assert bytes.fromhex(state()["journal"][-1]["body_hex"]) == expected
         program([workflow["console"], name])
+        assert len(state()["journal"]) == before + 2
         assert bytes.fromhex(state()["journal"][-1]["body_hex"]) == expected
     count = len(state()["journal"])
     result = workflows.execute_workflow("disallowed", {"value": None})
@@ -318,6 +328,21 @@ def verify_final_privacy() -> None:
                     ), (str(path), member)
 
 
+def request_journal() -> list[dict]:
+    """Keep independent byte evidence without retaining credentials or API bodies."""
+    result = []
+    for request in state()["journal"]:
+        entry = {key: value for key, value in request.items() if key != "body_hex"}
+        if request.get("body_hex") is not None:
+            entry["body_sha256"] = hashlib.sha256(
+                bytes.fromhex(request["body_hex"])
+            ).hexdigest()
+            if request["path"] in {"/nullable", "/nested"}:
+                entry["body_hex"] = request["body_hex"]
+        result.append(entry)
+    return result
+
+
 def main() -> None:
     verify_environment()
     catalog = json.loads((ROOT / "catalog.json").read_text())
@@ -371,6 +396,8 @@ def main() -> None:
         "expiration_closed_stdin": True,
         "excluded_no_dispatch": True,
         "journal_count": len(state()["journal"]),
+        "request_journal": request_journal(),
+        "api_attempt_count": state()["api_attempts"],
         "generated_tests": generated_tests,
         "no_generator_browser_node": True,
     }
