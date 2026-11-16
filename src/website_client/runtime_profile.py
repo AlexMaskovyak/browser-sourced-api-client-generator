@@ -133,15 +133,20 @@ def scoped_state(state: dict[str, Any], endpoint: str) -> dict[str, Any]:
     }
 
 
+def profile_identifier(identifier: str) -> str:
+    """Validate a nonsecret machine-local profile name without opening storage."""
+    if not isinstance(identifier, str) or not re.fullmatch(
+        r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", identifier
+    ):
+        raise ProfileError("invalid_profile_identifier")
+    return identifier
+
+
 class ProfileStore:
     """Serialize the complete load, call/job, cookie-save cycle with a file lock."""
 
     def __init__(self, identifier: str, endpoint: str) -> None:
-        if not isinstance(identifier, str) or not re.fullmatch(
-            r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", identifier
-        ):
-            raise ProfileError("invalid_profile_identifier")
-        self.identifier = identifier
+        self.identifier = profile_identifier(identifier)
         self.origin = service_origin(endpoint)
         self.root = profile_directory()
         module_directory = Path(__file__).resolve().parent
