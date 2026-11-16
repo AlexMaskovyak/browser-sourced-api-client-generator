@@ -7,8 +7,9 @@ Installed clients run from Python, their console commands or a scheduler. No age
 or model API is required.
 
 This branch is under active implementation in [draft PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12).
-The authenticated runtime and autonomous service generation are verified. Packaged
-workflow execution and clean-container acceptance remain in progress.
+The authenticated runtime, autonomous service generation and packaged workflow
+execution pass local tests. Independent packaging review and clean-container
+acceptance remain in progress.
 
 ## Install
 
@@ -75,7 +76,7 @@ to call. An initial `--endpoint` is needed only when the input lacks that fact.
 | GraphQL SDL or complete introspection | Ariadne named-operation generation when `--operations FILE` is supplied; otherwise native builders with bounded default leaf selections. |
 | Named GraphQL operations without a schema | Existing operation compiler with declared-variable validation and narrower response typing. |
 | Saved discovery manifests | Existing readers and merge rules; all unambiguous usable services are packaged. |
-| Arazzo plus bundled OpenAPI | Eligible individual methods are generated; workflow evidence is retained while the restricted runner is being packaged. |
+| Arazzo plus bundled OpenAPI | Eligible individual methods and explicitly mapped linear workflows receive standalone projects. |
 
 Repeat `--input FILE` for additional initial manifests or bundled definitions.
 Unsupported references or encodings exclude affected operations automatically.
@@ -120,6 +121,22 @@ Privacy filtering removes credentials, raw samples and known sensitive examples 
 structure before persistence. It cannot perfectly anonymize arbitrary unknown input.
 Destructive filtering is reported, and essential ambiguity excludes an operation.
 Runtime results intentionally returned to callers are separate from saved discovery.
+
+## Install a generated workflow package
+
+When explicit supported workflows are present, `coverage.json` includes
+`workflowPackage.directory`. That directory contains its own README, standalone
+project and companion native dependency wheel. Install both together from that
+directory using its documented `python -m pip install ./arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl .`
+command. The companion fixes a reproduced upstream JSON-null serialization defect;
+its patch, source hash and license notices are included.
+
+The workflow console command lists actual workflow IDs in `--help`. It accepts an
+ordinary JSON input file and repeated `--file NAME=PATH` binary inputs. The generated
+Python package exports `execute_workflow(workflow_id, inputs=None)`. Both use fixed
+bundled destinations and private profile defaults without prompts. Invoking a
+workflow authorizes its declared steps, which may write remote data. No automatic
+retry occurs. The generated README explains the result fields and exit codes.
 
 ## Verify changes
 
