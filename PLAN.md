@@ -62,8 +62,10 @@ Planning and independent adversarial design review completed at `032072a`.
 Milestone 1 implemented at `35dc531`, corrected at `7d90c49` and independently
 reviewed/probed with no remaining material M1 findings. Full suite: 227 passed.
 Milestone 2 independently reviewed and completed at `d9d4d07`; full suite: 270
-passed. Milestone 3 restricted workflow execution and source associations are next.
-Clean-container distribution acceptance remains pending.
+passed. Milestone 3 native guarded execution and the versioned JSON-null fix pass independent
+probes. Typed source association and workflow distribution are active next steps.
+The explicit quality refactor is independently accepted at `32ad5ea`; full suite:
+323 passed. Clean-container distribution acceptance remains pending.
 
 Design clarifications: generated public Python calls need a default-profile factory
 or context as well as CLI injection (D6). Automatic admission must preserve usable
@@ -88,7 +90,9 @@ actual METADATA for exact version requirements, with no workstation file URLs.
 Fresh-container tests must verify installed version, native null/omitted/nested JSON
 wire bytes, schema-disallowed null rejection and existing workflow regressions.
 The independent adversary reviewed this dependency/distribution design and found
-no material blocker subject to those packaging checks. The patch is not yet applied.
+no material blocker subject to those packaging checks. The patch is applied at `b54e3e6` and its native wire behavior and portable generator
+metadata are independently verified. Fresh companion-wheel installation remains
+required in milestone 4.
 
 ## Developer quality acceptance
 
