@@ -35,6 +35,8 @@ target-version = "py311"
 include = [
     "src/website_client/cli.py",
     "src/website_client/generation.py",
+    "src/website_client/operation_generation.py",
+    "src/website_client/project_metadata.py",
     "src/website_client/self_discovery.py",
     "src/website_client/bundle_capture.py",
     "src/website_client/admission.py",

@@ -154,7 +154,9 @@ def generate_operation_client(
         generated = GeneratedProject(
             project, package, metadata, "browser-sourced-api-client-generator"
         )
-        write_runtime_files(generated, {"endpoint": target.endpoint, **(runtime_config or {})})
+        write_runtime_files(
+            generated, {"endpoint": target.endpoint, **(runtime_config or {})}
+        )
         sources = project / "operations"
         sources.mkdir()
         for operation in operations:
@@ -169,6 +171,9 @@ def generate_operation_client(
             "The CLI requires `--confirm-write OPERATION`. No automatic retries occur.\n"
         )
         write_project_readme(generated, name)
+        from .project_metadata import write_distribution_support
+
+        write_distribution_support(project, package, name, ())
         # Source hashes describe what was generated. They cannot establish server
         # compatibility, and operation documents cannot validate unknown server types.
         report = {

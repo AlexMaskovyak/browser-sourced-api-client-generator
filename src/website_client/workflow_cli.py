@@ -8,7 +8,7 @@ import sys
 from typing import Any, NoReturn
 
 from .authenticated_http import LIMIT
-from .runtime import execute_workflow, workflow_index
+from .runtime import execute_workflow, workflow_index, workflow_inputs
 from .result_output import write_result_text
 from .workflow_admission import IDENTIFIER
 from .workflow_runtime import ExecutionSummary
@@ -49,10 +49,31 @@ class _ArgumentParser(argparse.ArgumentParser):
         raise SystemExit(2)
 
 
+def _input_help() -> str:
+    lines = ["Workflow inputs (unknown types are not inferred):"]
+    for workflow, inputs in sorted(workflow_inputs().items()):
+        lines.append("  " + workflow + ":")
+        if not inputs:
+            lines.append("    no inputs")
+        for item in inputs:
+            required = "required" if item["required"] else "optional"
+            binary = (
+                "; binary file: --file " + item["name"] + "=PATH"
+                if item["binary"]
+                else ""
+            )
+            lines.append(
+                "    " + item["name"] + ": " + required + "; " + item["type"] + binary
+            )
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Show installed workflow IDs locally; help sends no service requests."""
     parser = _ArgumentParser(
-        description="Run a declared workflow. Steps may write remote data; no automatic retries occur."
+        description="Run a declared workflow. Steps may write remote data; no automatic retries occur.",
+        epilog=_input_help(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("workflow_id", choices=sorted(workflow_index()))
     parser.add_argument(

@@ -565,6 +565,11 @@ def generate(
             project = generate_graphql_project(stage, name, package, source, operations)
         write_runtime_files(project, runtime_config)
         write_project_readme(project, name)
+        from .project_metadata import write_distribution_support
+
+        write_distribution_support(
+            project.directory, project.package_name, name, (project.generator_name,)
+        )
         report = write_generation_report(project, source, operations_source, lineage)
         publish_tree(project.directory, output)
         return report

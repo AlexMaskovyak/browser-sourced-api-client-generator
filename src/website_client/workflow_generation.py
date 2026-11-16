@@ -29,6 +29,11 @@ from .workflow_binding import (
     report_bindings,
 )
 from .workflow_schema import WorkflowRejected
+from .workflow_inputs import (
+    workflow_input_inventory,
+    inventory_markdown,
+    inventory_example,
+)
 
 RUNTIME_SOURCES = {
     name: name
@@ -265,7 +270,9 @@ def _write_companion(project: Path) -> None:
 def _write_readme(
     project: Path, name: str, package: str, entries: list[WorkflowEntry]
 ) -> None:
-    first = entries[0].public_id
+    inventory = workflow_input_inventory(entries)
+    table = inventory_markdown(inventory)
+    example, explanation = inventory_example(inventory, name, entries[0].public_id)
     text = f"""# Run the packaged workflows
 
 These declared workflows may write remote data using the bundled destinations and
@@ -294,12 +301,20 @@ profile association uses an anonymous request context. Missing/expired associate
 credentials stop without prompting. Run the generator again from the original website
 sign-in URL with a new output directory to renew that machine's stable origin profiles.
 
-For a workflow requiring ordinary inputs, create a JSON object file containing its
-input names and values. For binary inputs, use `--file NAME=PATH`; files must be regular
-and at most 8 MiB. Example syntax (supply your own actual input files):
+The following inventory comes from declared input schemas and explicit whole input
+references. Unknown types are not inferred. A referenced input is required before any
+request. The bundled schema still owns validation; declared defaults are not persisted.
+
+{table}
+
+For ordinary inputs, create a JSON object file and pass `--input inputs.json`. A binary
+input marked in the table accepts `--file NAME=PATH`, reading a regular file up to 8 MiB.
+Only an explicit binary request mapping whose input subschema accepts bytes is marked; the complete input schema still validates every call.
+
+{explanation}
 
 ```sh
-{name} {first} --input inputs.json --file file=payload.bin
+{example}
 ```
 
 A workflow that needs no inputs can omit both flags. Python accepts bounded bytes
@@ -313,6 +328,20 @@ environment, mount its protected profile directory separately from this package.
 Another machine needs its own initial browser login. Runtime execution needs neither
 Node, a browser executable, nor the generator; the installed Playwright request driver
 handles HTTP requests.
+
+## Offline package checks
+
+Optional developer checks require pytest 8 or 9 in this Python environment:
+
+```sh
+python -m pip install 'pytest>=8,<10'
+python -m pytest -q tests
+```
+
+These checks validate installed source associations, the native dependency version,
+file-object rejection and component notices. They send no service requests and do not
+establish live compatibility. Verify intended operations against your service separately.
+Installed notice files are in `{package}/_notices`; the source project includes `NOTICE.md`.
 """
     (project / "README.md").write_text(text)
 
@@ -331,11 +360,17 @@ def generate_workflow_client(
         (module / "__init__.py").write_text("from .runtime import execute_workflow\n")
         copy_runtime_sources(module, RUNTIME_SOURCES)
         metadata = _write_entries(module, entries)
+        write_json(module / "_inputs.json", workflow_input_inventory(entries))
         (project / "pyproject.toml").write_text(
             render_template("workflows_pyproject.toml.tmpl", name=name, package=package)
         )
         _write_companion(project)
         _write_readme(project, name, package, entries)
+        from .project_metadata import write_distribution_support
+
+        write_distribution_support(
+            project, package, name, ("arazzo-runner",), workflow=True
+        )
         report = {
             "generator": "browser-sourced-api-client-generator",
             "generationMode": "native-arazzo-workflows",

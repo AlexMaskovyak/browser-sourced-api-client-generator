@@ -36,6 +36,17 @@ def workflow_index() -> dict[str, dict]:
     return value
 
 
+def workflow_inputs() -> dict[str, list[dict[str, Any]]]:
+    """Read the installed declared-input inventory used by local command help."""
+    raw = files(__package__).joinpath("_inputs.json").read_bytes()
+    if len(raw) > LIMIT:
+        raise WorkflowRejected("invalid_workflow_package")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise WorkflowRejected("invalid_workflow_package")
+    return value
+
+
 def execute_workflow(
     workflow_id: str, inputs: dict[str, Any] | None = None
 ) -> dict[str, Any]:

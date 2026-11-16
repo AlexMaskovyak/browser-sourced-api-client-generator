@@ -1,0 +1,63 @@
+"""Offline checks for installed metadata and native command entry points.
+
+Run with `python -m pytest -q tests`. These checks send no service requests and do
+not establish live compatibility. Verify intended operations against your service separately.
+"""
+
+import importlib.metadata
+from importlib.resources import files
+import json
+
+import pytest
+
+from $package import _cli, client_context
+from $package.runtime import RuntimeConfig
+
+
+def packaged_metadata() -> tuple[dict, dict]:
+    root = files("$package")
+    return json.loads(root.joinpath("_operations.json").read_text()), json.loads(
+        root.joinpath("_runtime.json").read_text()
+    )
+
+
+def test_every_packaged_operation_has_a_loadable_native_signature() -> None:
+    operations, defaults = packaged_metadata()
+    assert operations
+    RuntimeConfig.from_mapping(defaults)
+    _, functions = _cli.build_parser(operations, defaults)
+    assert functions.keys() == operations.keys()
+    assert callable(client_context)
+    for function in functions.values():
+        assert isinstance(_cli.describe_inputs(function), str)
+
+
+def test_unknown_input_is_rejected_before_any_client_or_profile_is_opened(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*_args, **_kwargs) -> None:
+        raise AssertionError("Input validation opened a client or credential profile")
+
+    monkeypatch.setattr(_cli, "enter_generated_client", forbidden)
+    operations, _ = packaged_metadata()
+    for operation in operations.values():
+        function = _cli.load_operation_function(operation)
+        parameters = _cli.input_parameters(function)
+        unknown = "_unknown_input"
+        while unknown in parameters:
+            unknown += "_"
+        with pytest.raises(ValueError, match="unknown fields"):
+            _cli.bind_input_arguments(function, {unknown: "not sent"})
+
+
+def test_installed_console_entry_and_runtime_notices_are_present() -> None:
+    distribution = importlib.metadata.distribution("$name")
+    assert any(
+        entry.group == "console_scripts"
+        and entry.name == "$name"
+        and entry.value == "$package._cli:entrypoint"
+        for entry in distribution.entry_points
+    )
+    notices = files("$package").joinpath("_notices")
+    assert "MIT License" in notices.joinpath("LICENSE.website-client").read_text()
+    assert notices.joinpath("NOTICE.md").read_text()
