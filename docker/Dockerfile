@@ -9,6 +9,7 @@ ENV POETRY_NO_INTERACTION=1
 ENV POETRY_REQUESTS_TIMEOUT=120
 ENV POETRY_INSTALLER_MAX_WORKERS=4
 COPY pyproject.toml poetry.lock poetry.toml README.md LICENSE ./
+COPY src/website_client/native_dependencies/*.whl ./src/website_client/native_dependencies/
 RUN --mount=type=cache,target=/root/.cache/pypoetry poetry sync --with dev --no-root
 COPY docker/cache_client_dependencies.py ./docker/cache_client_dependencies.py
 RUN --mount=type=cache,target=/root/.cache/pip python docker/cache_client_dependencies.py

@@ -28,8 +28,35 @@ subprocess.run(
         str(constraints),
         *(
             f"{name}=={versions[name]}"
-            for name in ("httpx", "attrs", "pydantic", "playwright", "graphql-core")
+            for name in (
+                "httpx",
+                "attrs",
+                "pydantic",
+                "playwright",
+                "graphql-core",
+                "jsonschema",
+                "platformdirs",
+                "filelock",
+                "requests",
+                "jsonpointer",
+                "openapi-schema-validator",
+                "pytest",
+                "poetry-core",
+                "pdm-backend",
+            )
         ),
+    ],
+    check=True,
+)
+subprocess.run(
+    [
+        sys.executable,
+        "-m",
+        "pip",
+        "download",
+        "--dest",
+        "/opt/client-wheels",
+        "src/website_client/native_dependencies/arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl",
     ],
     check=True,
 )
