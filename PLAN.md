@@ -57,8 +57,8 @@ neutral local services. Findings live in `docs/autonomous-findings.md`.
 
 ## Status
 
-Plan and component integration map written. Adversarial design review pending.
-Application implementation has not started.
+Planning and independent adversarial design review completed at `032072a`.
+Milestone 1 assigned to the implementer. Implementation review and acceptance pending.
 
 Design clarifications: generated public Python calls need a default-profile factory
 or context as well as CLI injection (D6). Automatic admission must preserve usable
