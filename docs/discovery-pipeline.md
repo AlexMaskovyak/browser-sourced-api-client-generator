@@ -9,8 +9,10 @@ available for existing producers and diagnostic work; they are not prerequisites
 
 Install the project through Poetry as described in the [README](../README.md#install).
 URL discovery needs a browser and one initial sign-in. HAR inference needs Node 20+
-and npm. Supplied standard definitions and saved manifests need neither a browser
-nor Node. Output directories must be new. Source files are read without alteration.
+and npm. Saved inputs need no browser. Supplied standard definitions and manifests
+with converted executable contracts need no Node. A saved capture manifest that
+still needs HAR inference requires Node/npm. Output directories must be new. Source
+files are read without alteration.
 
 An endpoint comes from a definition's server URL, an existing manifest, or the initial
 `--endpoint URL` argument when the input cannot supply it. GraphQL operations come
