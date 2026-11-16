@@ -90,3 +90,20 @@ M1 complete within its runtime integration scope. M4 installed console/container
 acceptance remains required. D1 automatic discovery capture, D3-D5 and D7 admission
 remain M2 obligations. D2 private runtime and D6 public Python factory are implemented
 and independently reviewed; complete autonomous URL integration is still pending.
+
+## Milestone 2 intermediate review at 1ba7924
+
+First slice implements HAR/admission seams and selectively applies `0775d8c` with
+its regressions. Author and independent reviewer each ran
+`poetry run pytest tests/test_admission.py tests/test_generation.py tests/test_self_discovery.py tests/test_discovery.py -q`:
+55 passed in 5.65s. Reviewer used an isolated fixed-revision archive. This is not
+acceptance of the still-incomplete autonomous orchestration or all privacy surfaces.
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F4 | `admission.prune_components` | A response references `#/components/schemas/Outer/properties/safe`, but unrelated `Outer.unrelated` has a remote ref. Retaining the whole component makes final validation reject the otherwise usable method. | Preserve only required reference dependencies, without silently changing executable wire semantics. | Pending correction. |
+| F5 | `admission` security handling | Unused sensitive security-scheme name/header excludes an independent unauthenticated read. | Check actual effective security requirements per operation; remove unused sensitive structures from saved/executable definitions. | Pending correction. |
+| F6 | `admission.admit_openapi` | A malformed `post: null` raises AttributeError and prevents usable independent reads from generating. | Bounded invalid-contract exclusion for malformed operation entries. | Pending correction. |
+
+All findings reproduced locally without target fetches. Implementer notified; final
+M2 schema-only, orchestration, privacy and route acceptance remain pending.
