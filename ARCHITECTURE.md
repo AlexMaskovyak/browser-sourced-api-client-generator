@@ -68,3 +68,25 @@ CLI must both load default endpoint/profile without browser or agent at runtime.
 Clean container acceptance must mount credentials separately and use built wheels,
 not generator imports. Privacy heuristics cannot guarantee universal anonymization;
 destructive filtering reports missing information and excludes essential ambiguity.
+
+## Required native JSON-null correction
+
+The selected Arazzo 0.9.6 executor conflates an explicit nullable JSON body with an
+absent body. The implementation reproduced an empty request body and HTTP 422 from
+a neutral service that requires the JSON bytes `null`. Nested JSON null succeeds.
+The upstream choice changes only for this reproduced incompatibility, as permitted
+by the specification.
+
+The correction belongs in a separately versioned native dependency wheel,
+`arazzo-runner==0.9.6+websiteclient.1`. The project records a minimal upstream patch,
+source hash, build procedure, wheel hash and Apache modification notices. Arazzo
+continues to build requests; the prepared-request adapter sends its exact bytes.
+Runtime code neither patches installed modules nor installs dependencies.
+
+The companion wheel must be a sibling install artifact, not only a resource inside
+a wheel pip has not installed. Poetry can resolve the repository-local dependency,
+but built METADATA must require the exact version and contain no workstation file
+URL. The documented pip command supplies both product and companion wheels. The
+generator also carries the companion as data for packaging later workflow clients.
+SDK-only clients retain their existing runtime dependencies. Clean acceptance must
+verify the actual installed dependency and all affected native wire cases.

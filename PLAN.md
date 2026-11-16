@@ -43,7 +43,8 @@ reviewer reviews fixed commits; adversary reviews design and runs isolated probe
 Implement one milestone, run focused checks, commit coherently, independently review
 and probe fixed revision, resolve confirmed findings and re-review affected changes.
 Then run full relevant suite and clean acceptance. Unrun/failed required acceptance
-remains incomplete. No PR, merge, external write or message is authorized.
+remains incomplete. The latest user request authorizes pushing this branch and opening a draft PR.
+Merges, real external service writes and messages to others remain unauthorized.
 
 ## Verification and boundaries
 
@@ -68,3 +69,23 @@ Design clarifications: generated public Python calls need a default-profile fact
 or context as well as CLI injection (D6). Automatic admission must preserve usable
 operations when another operation cannot be generated upstream (D7), with explicit
 coverage reasons rather than suppressed diagnostics. These are required tests.
+
+## Reproduced native dependency incompatibility
+
+Arazzo 0.9.6 sends an empty body for explicit JSON payload null. A neutral wire
+test returned 422 where the schema allows null and the required bytes are `null`.
+Nested null works. This remains a required case; an automatic exclusion is only
+temporary protection, not completion. The permitted exception for reproduced
+upstream incompatibility applies.
+
+Build an explicitly versioned upstream dependency `0.9.6+websiteclient.1` with the
+minimal native HTTPExecutor fix. Preserve omitted-body behavior. Store the small
+patch, hash-pinned source/build provenance, rebuild procedure and Apache notices.
+Use a prebuilt companion wheel and lock it in Poetry; no runtime source patching.
+Ship the companion beside generator/workflow wheels and as a generator resource
+for future packaging. Normal pip installation must offer both wheel paths. Inspect
+actual METADATA for exact version requirements, with no workstation file URLs.
+Fresh-container tests must verify installed version, native null/omitted/nested JSON
+wire bytes, schema-disallowed null rejection and existing workflow regressions.
+The independent adversary reviewed this dependency/distribution design and found
+no material blocker subject to those packaging checks. The patch is not yet applied.
