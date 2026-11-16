@@ -40,6 +40,9 @@ are reported for this branch. Installed clean-container acceptance passed. Its J
 records exact commands, versions, image IDs, wheel hashes and a credential-free
 request journal. The standalone fixture uses explicit loopback HTTP; HTTPS trust
 is tested separately by the preserved compatibility program.
+The exact [standalone acceptance JSON](verification/standalone-acceptance.json)
+is checked in with the tested revision, image identifiers and credential-free
+execution evidence. Later delivery commits change documentation only.
 
 ## Resolved findings
 
