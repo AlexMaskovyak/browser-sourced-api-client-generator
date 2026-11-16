@@ -185,59 +185,47 @@ def _har_contract(discovery: Discovery) -> Manifest:
     return Manifest.create(tuple(artifacts), tuple(services))
 
 
-def _saved_input(path, *, endpoint=None, operations=None):
-    """Classify the supplied file only; no target or referenced URL is fetched."""
-    from .pipeline import import_definition
-    from .definitions import MAX_DOCUMENT
-    from .discovery_manifest import read_text
+def _captured_manifest(manifest: Manifest) -> Manifest:
+    """Reuse converted evidence, replacing only the obsolete legacy HAR inference."""
+    manifest = sanitized_manifest(manifest)
+    har_contracts = []
+    converted = any(
+        item.kind is Kind.OPENAPI
+        and any(producer.name == "har2sdk" for producer in item.provenance.producers)
+        for item in manifest.artifacts
+    )
+    for item in manifest.artifacts:
+        if item.kind is Kind.HAR and not converted:
+            discovery = Discovery()
+            for entry in json.loads(item.content)["log"]["entries"]:
+                discovery.add(entry)
+            har_contracts.append(sanitized_manifest(_har_contract(discovery)))
+    if har_contracts:
+        by_id = {item.id: item for item in manifest.artifacts}
+        targets = tuple(
+            target
+            for target in manifest.services
+            if not (
+                target.confidence is Confidence.INFERRED
+                and target.schema_artifact in by_id
+                and by_id[target.schema_artifact].name.startswith("openapi-inferred")
+            )
+        )
+        manifest = merge_manifests(
+            (replace(manifest, services=targets), *har_contracts)
+        )
+    return manifest
 
-    text = read_text(path, 32 * 1024 * 1024)
-    try:
-        value = yaml.safe_load(text)
-    except yaml.YAMLError:
-        value = None
-    if isinstance(value, dict) and value.get("format") == "website-client-discovery":
-        manifest = sanitized_manifest(Manifest.from_dict(value))
-        har_contracts = []
-        converted = any(
-            item.kind is Kind.OPENAPI
-            and any(
-                producer.name == "har2sdk" for producer in item.provenance.producers
-            )
-            for item in manifest.artifacts
-        )
-        for item in manifest.artifacts:
-            if item.kind is Kind.HAR and not converted:
-                discovery = Discovery()
-                for entry in json.loads(item.content)["log"]["entries"]:
-                    discovery.add(entry)
-                har_contracts.append(sanitized_manifest(_har_contract(discovery)))
-        if har_contracts:
-            by_id = {item.id: item for item in manifest.artifacts}
-            targets = tuple(
-                target
-                for target in manifest.services
-                if not (
-                    target.confidence is Confidence.INFERRED
-                    and target.schema_artifact in by_id
-                    and by_id[target.schema_artifact].name.startswith(
-                        "openapi-inferred"
-                    )
-                )
-            )
-            manifest = merge_manifests(
-                (replace(manifest, services=targets), *har_contracts)
-            )
-        return manifest
-    if isinstance(value, dict) and isinstance(value.get("log"), dict):
-        return _har_contract(import_har(path))
-    if len(text.encode()) > MAX_DOCUMENT:
-        raise BrowserError("unsupported: definition exceeds 8 MiB")
-    if isinstance(value, dict) and "arazzo" in value:
-        item = Artifact.create(
-            "workflow.json", Kind.ARAZZO, encoded(safe_workflow(value)), Source.EXTERNAL
-        )
-        return Manifest.create((item,), ())
+
+def _definition_input(
+    path: str | Path,
+    text: str,
+    value: Any,
+    endpoint: str | None,
+    operations: str | Path | None,
+) -> Manifest:
+    from .pipeline import import_definition
+
     options = SimpleNamespace(
         openapi=None,
         graphql_schema=None,
@@ -258,6 +246,35 @@ def _saved_input(path, *, endpoint=None, operations=None):
         except BrowserError:
             options.operations = path
     return sanitized_manifest(import_definition(options))
+
+
+def _saved_input(
+    path: str | Path,
+    *,
+    endpoint: str | None = None,
+    operations: str | Path | None = None,
+) -> Manifest:
+    """Classify the supplied file only; never fetch a target or a referenced URL."""
+    from .definitions import MAX_DOCUMENT
+    from .discovery_manifest import read_text
+
+    text = read_text(path, 32 * 1024 * 1024)
+    try:
+        value = yaml.safe_load(text)
+    except yaml.YAMLError:
+        value = None
+    if isinstance(value, dict) and value.get("format") == "website-client-discovery":
+        return _captured_manifest(Manifest.from_dict(value))
+    if isinstance(value, dict) and isinstance(value.get("log"), dict):
+        return _har_contract(import_har(path))
+    if len(text.encode()) > MAX_DOCUMENT:
+        raise BrowserError("unsupported: definition exceeds 8 MiB")
+    if isinstance(value, dict) and "arazzo" in value:
+        item = Artifact.create(
+            "workflow.json", Kind.ARAZZO, encoded(safe_workflow(value)), Source.EXTERNAL
+        )
+        return Manifest.create((item,), ())
+    return _definition_input(path, text, value, endpoint, operations)
 
 
 def _capture_profiles(
@@ -309,6 +326,65 @@ def _initial_definitions(session: BrowserSession) -> list[str]:
     ]
 
 
+def _explore_session(
+    session: BrowserSession,
+    observer: Any,
+    credentials: OriginCaptures,
+    allowed_origins: set[str],
+    *,
+    max_pages: int,
+    max_actions: int,
+    max_depth: int,
+    duration_seconds: float,
+) -> tuple[Discovery, dict]:
+    from .self_discovery import SelfDiscovery
+    from .exploration import SiteExplorer
+
+    initial_definitions = _initial_definitions(session)
+    explorer = SiteExplorer(
+        session,
+        max_pages,
+        max_actions,
+        max_depth,
+        duration_seconds,
+        strict_origin=True,
+        api_origins=allowed_origins,
+        credential_observer=credentials,
+    )
+    explorer.prepare()
+    return SelfDiscovery(
+        session,
+        observer,
+        explorer=explorer,
+        autonomous=True,
+        credential_observer=credentials,
+        initial_definitions=initial_definitions,
+        allowed_origins=allowed_origins,
+    ).run()
+
+
+def _browser_manifest(
+    discovery: Discovery, profiles: dict[str, str], cookie_exclusions: list[dict]
+) -> Manifest:
+    manifest = _har_contract(discovery)
+    if cookie_exclusions:
+        report_artifact = Artifact.create(
+            "cookie-scope-report.json",
+            Kind.REPORT,
+            encoded({"exclusions": cookie_exclusions}),
+            Source.REPORT,
+        )
+        manifest = replace(manifest, artifacts=manifest.artifacts + (report_artifact,))
+    association = Artifact.create(
+        "runtime-associations.json",
+        Kind.REPORT,
+        encoded({"runtimeProfiles": profiles}),
+        Source.REPORT,
+    )
+    manifest = replace(manifest, artifacts=manifest.artifacts + (association,))
+    return sanitized_manifest(manifest)
+
+
 def _browser_input(
     url,
     *,
@@ -321,8 +397,7 @@ def _browser_input(
     max_depth=3,
     duration_seconds=120,
 ):
-    from .self_discovery import DiscoveryObserver, SelfDiscovery
-    from .exploration import SiteExplorer
+    from .self_discovery import DiscoveryObserver
     from .browser import origin
 
     allowed_origins = {origin(url)}
@@ -346,47 +421,21 @@ def _browser_input(
             )
         else:
             login_handler(session)
-        initial_definitions = _initial_definitions(session)
-        explorer = SiteExplorer(
-            session,
-            max_pages,
-            max_actions,
-            max_depth,
-            duration_seconds,
-            strict_origin=True,
-            api_origins=allowed_origins,
-            credential_observer=credentials,
-        )
-        explorer.prepare()
-        discovery, report = SelfDiscovery(
+        discovery, report = _explore_session(
             session,
             observer,
-            explorer=explorer,
-            autonomous=True,
-            credential_observer=credentials,
-            initial_definitions=initial_definitions,
-            allowed_origins=allowed_origins,
-        ).run()
-        profiles, cookie_exclusions = _capture_profiles(session, credentials)
-    manifest = _har_contract(discovery)
-    if cookie_exclusions:
-        report_artifact = Artifact.create(
-            "cookie-scope-report.json",
-            Kind.REPORT,
-            encoded({"exclusions": cookie_exclusions}),
-            Source.REPORT,
+            credentials,
+            allowed_origins,
+            max_pages=max_pages,
+            max_actions=max_actions,
+            max_depth=max_depth,
+            duration_seconds=duration_seconds,
         )
-        manifest = replace(manifest, artifacts=manifest.artifacts + (report_artifact,))
-    association = Artifact.create(
-        "runtime-associations.json",
-        Kind.REPORT,
-        encoded({"runtimeProfiles": profiles}),
-        Source.REPORT,
-    )
-    manifest = replace(manifest, artifacts=manifest.artifacts + (association,))
+        profiles, cookie_exclusions = _capture_profiles(session, credentials)
     from .privacy import safe_ui_report
 
-    return sanitized_manifest(manifest), safe_ui_report(report), profiles, set(profiles)
+    manifest = _browser_manifest(discovery, profiles, cookie_exclusions)
+    return manifest, safe_ui_report(report), profiles, set(profiles)
 
 
 @dataclass(frozen=True)
@@ -583,19 +632,8 @@ def _coverage_report(
     return coverage
 
 
-def _generate_service(
-    normalized: Manifest,
-    target: Service,
-    artifacts: dict[str, Artifact],
-    output: Path,
-    name: str,
-    profiles: dict[str, str],
-) -> tuple[dict, list]:
-    directory_name = name + "-" + hashlib.sha256(target.id.encode()).hexdigest()[:12]
-    config = {"endpoint": target.endpoint}
-    if service_origin(target.endpoint) in profiles:
-        config["profileId"] = profiles[service_origin(target.endpoint)]
-    lineage = {
+def _service_lineage(target: Service) -> dict[str, Any]:
+    return {
         "service": {"id": target.id, "endpoint": target.endpoint},
         "source": "traffic-har2sdk"
         if target.confidence is Confidence.INFERRED
@@ -611,7 +649,17 @@ def _generate_service(
             if ref
         ],
     }
-    destination = output / "services" / directory_name
+
+
+def _generate_target(
+    normalized: Manifest,
+    target: Service,
+    artifacts: dict[str, Artifact],
+    destination: Path,
+    directory_name: str,
+    lineage: dict,
+    config: dict,
+) -> dict:
     with tempfile.TemporaryDirectory(prefix="website-client-auto-") as temporary:
         root = Path(temporary)
         schema = artifacts.get(target.schema_artifact)
@@ -654,6 +702,26 @@ def _generate_service(
                     lineage=lineage,
                     runtime_config=config,
                 )
+    return report
+
+
+def _generate_service(
+    normalized: Manifest,
+    target: Service,
+    artifacts: dict[str, Artifact],
+    output: Path,
+    name: str,
+    profiles: dict[str, str],
+) -> tuple[dict, list]:
+    directory_name = name + "-" + hashlib.sha256(target.id.encode()).hexdigest()[:12]
+    config = {"endpoint": target.endpoint}
+    if service_origin(target.endpoint) in profiles:
+        config["profileId"] = profiles[service_origin(target.endpoint)]
+    lineage = _service_lineage(target)
+    destination = output / "services" / directory_name
+    report = _generate_target(
+        normalized, target, artifacts, destination, directory_name, lineage, config
+    )
     entry = {
         "id": target.id,
         "package": directory_name,
