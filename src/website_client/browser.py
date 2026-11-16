@@ -143,6 +143,7 @@ class BrowserSession:
         self._url = url
         self._executable = find_browser(browser, browser_path)
         self._profile = self._connection = self._playwright = None
+        self._browser = None
         self._context = self._page = None
         self._signals = {}
         self._cancelled = False
@@ -168,21 +169,19 @@ class BrowserSession:
             if threading.current_thread() is threading.main_thread():
                 for event in (signal.SIGINT, signal.SIGTERM):
                     self._signals[event] = signal.signal(event, self._cancel)
-            self._profile = tempfile.TemporaryDirectory(
-                prefix="website-client-browser-"
-            )
             self._playwright = sync_playwright().start()
-            self._context = self._playwright.chromium.launch_persistent_context(
-                self._profile.name,
+            self._browser = self._playwright.chromium.launch(
                 executable_path=self._executable,
                 headless=False,
                 chromium_sandbox=True,
-                accept_downloads=False,
-                service_workers="block" if self._block_service_workers else "allow",
                 timeout=BROWSER_START_TIMEOUT_MILLISECONDS,
                 handle_sigint=False,
                 handle_sigterm=False,
                 handle_sighup=False,
+            )
+            self._context = self._browser.new_context(
+                accept_downloads=False,
+                service_workers="block" if self._block_service_workers else "allow",
             )
             self._page = (
                 self._context.pages[0]
@@ -304,6 +303,7 @@ class BrowserSession:
         try:
             for resource, action in (
                 (self._context, "close"),
+                (self._browser, "close"),
                 (self._playwright, "stop"),
                 (self._profile, "cleanup"),
             ):
@@ -313,6 +313,7 @@ class BrowserSession:
                     except Exception:
                         pass
         finally:
+            self._browser = None
             self._connection = self._context = self._page = self._playwright = (
                 self._profile
             ) = None
