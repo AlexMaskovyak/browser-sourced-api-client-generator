@@ -33,6 +33,7 @@ arazzo-runner = { path = "src/website_client/native_dependencies/arazzo_runner-0
 [tool.ruff]
 target-version = "py311"
 include = [
+    "src/website_client/cli.py",
     "src/website_client/admission.py",
     "src/website_client/privacy.py",
     "src/website_client/graphql_admission.py",
