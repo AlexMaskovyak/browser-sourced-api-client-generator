@@ -14,7 +14,7 @@ from .admission import admit_openapi, METHODS
 from .browser import BrowserError, BrowserSession
 from .discovery import import_har, new_output, publish, Discovery
 from .discovery_manifest import encoded, read_manifest, merge_manifests
-from .discovery_manifest.records import Artifact, Confidence, Kind, Manifest, Protocol, Service, Source
+from .discovery_manifest.records import Artifact, Confidence, Kind, Manifest, Producer, Protocol, Service, Source
 from .generation import generate, package_name_for
 from .normalization import normalize_manifest
 from .privacy import sanitized_manifest, safe_operations, safe_schema, safe_workflow
@@ -57,7 +57,14 @@ def _har_contract(discovery):
         artifacts.append(Artifact.create('capture-loss.json', Kind.REPORT, encoded({'exclusions': [{'reason': 'privacy_or_capture_omission', 'count': discovery.omitted + discovery.capture_failures}]}), Source.REPORT))
     for group_index, (api_origin, group) in enumerate(sorted(groups.items())):
         safe_har = json.dumps({'log': {'version': '1.2', 'entries': group}})
-        spec, diagnostics = infer_har(safe_har)
+        try:
+            spec, diagnostics = infer_har(safe_har)
+        except BrowserError as error:
+            if str(error).startswith('har_dependency_required') and services:
+                artifacts.append(Artifact.create(f'har-dependency-{group_index:04d}.json', Kind.REPORT,
+                    encoded({'exclusions': [{'reason': 'har_dependency_required'}]}), Source.REPORT))
+                continue
+            raise
         safe, executable, exclusions = admit_openapi(spec)
         unknown = {(item['path'], item['method'].lower()): ('sensitive_structure' if item.get('privacyUnmodeled') else 'unknown_request_body') for item in discovery.endpoints.values() if item.get('requestBodyUnmodeled') or item.get('privacyUnmodeled')}
         for (path, method), reason in unknown.items():
@@ -69,7 +76,7 @@ def _har_contract(discovery):
         unknown_responses = sum('text' not in entry['response'].get('content', {}) for entry in group)
         if unknown_responses:
             exclusions.append({'reason': 'response_body_unknown', 'count': unknown_responses})
-        artifact = Artifact.create(f'har2sdk-openapi-{group_index:04d}.json', Kind.OPENAPI, encoded(executable), Source.INFERRED)
+        artifact = Artifact.create(f'har2sdk-openapi-{group_index:04d}.json', Kind.OPENAPI, encoded(executable), Source.INFERRED, producer=Producer('har2sdk', '0.6.15'))
         artifacts.append(artifact)
         if executable['paths']:
             for server in executable.get('servers', []):
@@ -91,7 +98,22 @@ def _saved_input(path, *, endpoint=None, operations=None):
     except yaml.YAMLError:
         value = None
     if isinstance(value, dict) and value.get('format') == 'website-client-discovery':
-        return sanitized_manifest(Manifest.from_dict(value))
+        manifest = sanitized_manifest(Manifest.from_dict(value))
+        har_contracts = []
+        converted = any(item.kind is Kind.OPENAPI and any(producer.name == "har2sdk" for producer in item.provenance.producers) for item in manifest.artifacts)
+        for item in manifest.artifacts:
+            if item.kind is Kind.HAR and not converted:
+                discovery = Discovery()
+                for entry in json.loads(item.content)['log']['entries']:
+                    discovery.add(entry)
+                har_contracts.append(sanitized_manifest(_har_contract(discovery)))
+        if har_contracts:
+            by_id = {item.id: item for item in manifest.artifacts}
+            targets = tuple(target for target in manifest.services if not (
+                target.confidence is Confidence.INFERRED and target.schema_artifact in by_id
+                and by_id[target.schema_artifact].name.startswith('openapi-inferred')))
+            manifest = merge_manifests((replace(manifest, services=targets), *har_contracts))
+        return manifest
     if isinstance(value, dict) and isinstance(value.get('log'), dict):
         return _har_contract(import_har(path))
     if len(text.encode()) > MAX_DOCUMENT:
@@ -143,6 +165,8 @@ def _browser_input(url, *, browser='chrome', browser_path=None, login_handler=No
             save_browser_profile(session._context, profile, api_origin, capture.headers, capture.allowed_headers)
             profiles[api_origin] = profile
     manifest = _har_contract(discovery)
+    association = Artifact.create("runtime-associations.json", Kind.REPORT, encoded({"runtimeProfiles": profiles}), Source.REPORT)
+    manifest = replace(manifest, artifacts=manifest.artifacts + (association,))
     from .privacy import safe_ui_report
     return sanitized_manifest(manifest), safe_ui_report(report), profiles, set(profiles)
 
@@ -159,6 +183,9 @@ def run(source, output, *, name='service-client', inputs=(), endpoint=None, oper
     if len(inputs) > 19:
         raise BrowserError("invalid_input_count")
     package_name_for(name)
+    from .runtime_profile import profile_directory
+    if profile_directory().resolve().is_relative_to(output.resolve()):
+        raise BrowserError("profile_inside_output")
     profiles, allowed, discovery_report = {}, None, None
     manifests = []
     if urlsplit(str(source)).scheme in {'http', 'https'}:
@@ -190,7 +217,7 @@ def run(source, output, *, name='service-client', inputs=(), endpoint=None, oper
                     artifacts[artifact.id] = artifact
             for target in item.services:
                 prior = targets.get(target.id)
-                if prior and (prior.schema_artifact, prior.operation_artifacts) != (target.schema_artifact, target.operation_artifacts):
+                if prior and (prior.protocol, prior.endpoint, prior.schema_artifact, prior.operation_artifacts) != (target.protocol, target.endpoint, target.schema_artifact, target.operation_artifacts):
                     conflicts.append({'service': target.id, 'reason': 'conflicting_contracts'})
                 else:
                     targets[target.id] = target
@@ -208,6 +235,16 @@ def run(source, output, *, name='service-client', inputs=(), endpoint=None, oper
         for conflict in conflicts:
             targets.pop(conflict['service'], None)
         manifest = Manifest.create(tuple(artifacts.values()), tuple(targets.values()))
+    for artifact in manifest.artifacts:
+        if artifact.kind is Kind.REPORT:
+            try:
+                value = json.loads(artifact.content)
+                if isinstance(value, dict):
+                    for api_origin, profile_id in value.get('runtimeProfiles', {}).items():
+                        if profile_id == _profile_id(api_origin):
+                            profiles[service_origin(api_origin)] = profile_id
+            except (ValueError, TypeError):
+                pass
     normalized = normalize_manifest(manifest)
     artifacts = {item.id: item for item in normalized.artifacts}
     coverage = {'coverage': 'unsupported', 'reason': 'no_executable_operations', 'services': [], 'exclusions': conflicts,
@@ -253,6 +290,8 @@ def run(source, output, *, name='service-client', inputs=(), endpoint=None, oper
                         report = generate(destination, directory_name, openapi=path, lineage=lineage, runtime_config=config)
                     else:
                         compiled = artifacts.get(target.compiled_operations_artifact)
+                        if target.operation_artifacts and compiled is None:
+                            raise BrowserError("invalid_named_operations")
                         operation_path = root / 'operations.graphql' if compiled else None
                         if compiled:
                             operation_path.write_text(compiled.content)

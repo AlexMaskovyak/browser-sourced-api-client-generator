@@ -109,9 +109,12 @@ def import_definition(options) -> Manifest:
 
         if not options.endpoint:
             raise BrowserError("Operation import requires --endpoint.")
-        text = read_text(options.operations, MAX_DOCUMENT)
+        from .privacy import safe_operations
+        text, exclusions = safe_operations(read_text(options.operations, MAX_DOCUMENT), with_exclusions=True)
+        admission = Artifact.create("operation-admission.json", Kind.REPORT, encoded({"exclusions": exclusions}), Source.REPORT)
         try:
-            compile_operations((text,))
+            if text.strip():
+                compile_operations((text,))
         except ValueError as error:
             raise BrowserError("invalid_graphql_operations") from None
         producer = Producer(options.producer, options.producer_version)
@@ -121,7 +124,7 @@ def import_definition(options) -> Manifest:
             Source.EXTERNAL, locations=(endpoint,), producer=producer,
         )
         return Manifest.create(
-            (document,), (Service.create(Protocol.GRAPHQL, endpoint, operations=(document.id,)),),
+            (document, admission), (Service.create(Protocol.GRAPHQL, endpoint, operations=(document.id,)),),
             producer,
         )
     source_path = options.openapi or options.graphql_schema

@@ -77,6 +77,8 @@ def request_features(document, path_item, operation):
     for item in parameters.values():
         schema = resolved(document, item.get('schema', {}))
         location, kind = item.get('in'), schema.get('type')
+        if any(key in schema for key in ('oneOf', 'anyOf', 'allOf', 'properties')) or isinstance(kind, list):
+            raise ValueError('unsupported_serialization')
         style = item.get('style', 'form' if location in {'query', 'cookie'} else 'simple')
         if 'content' in item or kind == 'object' or (kind == 'array' and location != 'query'):
             raise ValueError('unsupported_serialization')

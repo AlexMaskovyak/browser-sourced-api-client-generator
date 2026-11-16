@@ -84,6 +84,10 @@ class ProfileStore:
         self.identifier = identifier
         self.origin = service_origin(endpoint)
         self.root = profile_directory()
+        module_directory = Path(__file__).resolve().parent
+        package_directory = module_directory.parent if (module_directory.parent / "pyproject.toml").is_file() else module_directory
+        if self.root.resolve().is_relative_to(package_directory):
+            raise ProfileError("profile_inside_package")
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         _private(self.root, directory=True)
         self.path = self.root / (identifier + '.json')

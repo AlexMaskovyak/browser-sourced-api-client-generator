@@ -286,7 +286,7 @@ class SelfDiscovery:
             else:
                 value = graphql_schema(text)
                 definition_kind = 'graphql-schema'
-        self.capture.discovery.record_definition(definition_kind, value, endpoint)
+        self.capture.discovery.record_definition(definition_kind, value, endpoint, __import__("hashlib").sha256(response.content).hexdigest())
         if kind == "graphql" and endpoint:
             self.capture.discovery.graphql_endpoints.add(endpoint)
         return definition_kind
@@ -303,6 +303,11 @@ class SelfDiscovery:
         )
         try:
             headers = self.observer.headers.get(origin(endpoint), {})
+            if self.autonomous and hasattr(self.credential_observer, "captures"):
+                from .runtime_profile import service_origin
+                capture = self.credential_observer.captures.get(service_origin(endpoint))
+                if capture is not None:
+                    headers = capture.headers
             if self.autonomous:
                 from .authenticated_http import AuthenticatedDispatch, SDKTransport
                 transport = SDKTransport(AuthenticatedDispatch(self.session._context.request, endpoint, headers))
