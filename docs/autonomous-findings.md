@@ -107,3 +107,20 @@ acceptance of the still-incomplete autonomous orchestration or all privacy surfa
 
 All findings reproduced locally without target fetches. Implementer notified; final
 M2 schema-only, orchestration, privacy and route acceptance remain pending.
+
+## Milestone 2 schema-only slice review at 7e5ac73
+
+Independent reviewer ran admission/schema-only/pipeline/generation checks in an
+isolated archive: 59 passed in 12.74s. F4-F6 corrections passed their reproductions.
+Native wire capture also verified missing required arguments reject and omitted
+optional arguments stay absent, preserving the server default. A custom GraphQL root
+type correctly uses Ariadne's generated Query builder.
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F7 | `graphql_admission.schema_operations` | Roots or leaves named `class`/`from` become native `class_`/`from_`; snake-case-only metadata breaks eager CLI loading, including other commands and help. | Use upstream naming behavior and reject ambiguous generated symbols automatically. | Pending correction and actual generated command checks. |
+| F8 | `graphql_admission.safe_schema` | Removing sensitive interface `CANARY_PRIVATE` leaves `Record implements CANARY_PRIVATE`, invalidating the schema and losing independent `Query.status`. | Close privacy exclusions across interface and inheritance references, preserving independent roots. | Pending correction. |
+
+SDL/introspection happy cases and abstract/leafless exclusions passed the author's
+slice checks. Final autonomous discovery, complete route and persistence checks are
+still pending; no complete M2 delivery is claimed by these intermediate reviews.
