@@ -175,6 +175,7 @@ class OriginCaptures:
     def __init__(self, endpoint):
         self.captures = {}
         self.cookie_owners = {}
+        self.cookie_issuers = {}
         self.declare(endpoint)
 
     def declare(self, endpoint, names=()):
@@ -213,6 +214,22 @@ class OriginCaptures:
         except Exception:
             return
 
+    def observe_response(self, url, set_cookie_headers):
+        """Native Set-Cookie evidence attributes renewal to its exact response origin."""
+        try:
+            selected = service_origin(url)
+            if selected not in self.captures:
+                return
+            for raw in set_cookie_headers:
+                cookies = SimpleCookie()
+                cookies.load(raw)
+                for name, item in cookies.items():
+                    self.cookie_issuers.setdefault((name, item.value), set()).add(selected)
+        except Exception:
+            return
+
     def cookies_for(self, api_origin):
         """Never seed a jar cookie observed at another origin or shared ambiguously."""
-        return {identity for identity, owners in self.cookie_owners.items() if owners == {api_origin}}
+        identities = self.cookie_owners.keys() | self.cookie_issuers.keys()
+        return {identity for identity in identities
+                if self.cookie_issuers.get(identity, self.cookie_owners.get(identity, set())) == {api_origin}}

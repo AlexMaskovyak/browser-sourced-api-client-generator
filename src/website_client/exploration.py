@@ -157,6 +157,15 @@ class SiteExplorer:
         self.session._connection = self.session.connection_for(self.session._page)
         old_page.close()
         context.on("page", self._popup)
+        if self.credential_observer is not None:
+            context.on("response", self._cookie_response)
+
+    def _cookie_response(self, response):
+        try:
+            self.credential_observer.observe_response(response.url, response.header_values("set-cookie"))
+        except Exception:
+            # Header/driver diagnostics cannot leave the credential capture boundary.
+            return
 
     def _popup(self, page):
         self._record(self.skipped, {"kind": "popup", "reason": "popup_not_explored"})
@@ -553,4 +562,6 @@ class SiteExplorer:
                 self.session._context.unroute("**/*", self._http_guard)
                 self._context_guard_installed = False
             self.session._context.remove_listener("page", self._popup)
+            if self.credential_observer is not None:
+                self.session._context.remove_listener("response", self._cookie_response)
             self._guard_installed = False

@@ -242,7 +242,8 @@ class SelfDiscovery:
                             if len(self.reference_documents) >= 12:
                                 return deepcopy(value)
                             headers = self.observer.headers.get(origin(address), {})
-                            status, _, body = AuthenticatedDispatch(self.session._context.request, address, headers).send('GET', address, {}, b'')
+                            status, response_headers, body = AuthenticatedDispatch(self.session._context.request, address, headers).send('GET', address, {}, b'')
+                            self.credential_observer.observe_response(address, [value for name, value in response_headers if name.lower() == 'set-cookie'])
                             if not 200 <= status < 300 or len(body) > MAX_BODY:
                                 return deepcopy(value)
                             self.reference_documents[address] = yaml.safe_load(body)
@@ -322,6 +323,8 @@ class SelfDiscovery:
                     else client.build_request(method, endpoint)
                 )
                 response = client.send(request)
+            if self.autonomous and self.credential_observer is not None:
+                self.credential_observer.observe_response(endpoint, response.headers.get_list("set-cookie"))
             attempt["status"] = response.status_code
             self.capture.discovery.add(
                 {

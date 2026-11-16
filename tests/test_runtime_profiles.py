@@ -103,3 +103,21 @@ def test_initial_cookie_ownership_is_not_shared_between_origin_ports(tmp_path, m
         save_browser_profile(context, identifier, endpoint, owned_cookies=captures.cookies_for(endpoint))
         with ProfileStore(identifier, endpoint).locked() as store:
             assert store.load()['storage_state']['cookies'] == []
+
+
+def test_response_owned_renewal_needs_no_followup_request():
+    from website_client.runtime_profile import OriginCaptures
+    first, second = 'http://127.0.0.1:8101', 'http://127.0.0.1:8102'
+    captures = OriginCaptures(first)
+    captures.declare(second)
+    captures.observe_request(Mock(url=first, all_headers=lambda: {'cookie': 'sid=OLD'}))
+    captures.observe_response(first, ['sid=NEW; Path=/; HttpOnly'])
+    assert ('sid', 'NEW') in captures.cookies_for(first)
+    assert ('sid', 'NEW') not in captures.cookies_for(second)
+    # A shared jar subsequently sending it elsewhere does not transfer issuance.
+    captures.observe_request(Mock(url=second, all_headers=lambda: {'cookie': 'sid=NEW'}))
+    assert ('sid', 'NEW') in captures.cookies_for(first)
+    assert ('sid', 'NEW') not in captures.cookies_for(second)
+    captures.observe_response(second, ['sid=NEW; Path=/; HttpOnly'])
+    assert ('sid', 'NEW') not in captures.cookies_for(first)
+    assert ('sid', 'NEW') not in captures.cookies_for(second)
