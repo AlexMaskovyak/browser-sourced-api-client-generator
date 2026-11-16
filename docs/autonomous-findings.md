@@ -2,8 +2,9 @@
 
 The authenticated runtime and autonomous discovery/generation are complete. The
 restricted workflow engine and its native JSON-null correction pass local and
-independent probes. Workflow source association, generated workflow distribution,
-and clean-container acceptance remain unfinished. Draft [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12)
+independent probes. Workflow source association and generated workflow distribution
+are implemented and under independent review. Clean-container acceptance remains
+unfinished. Draft [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12)
 shows the committed work; it is not ready to merge.
 
 ## Current verification
@@ -24,6 +25,9 @@ installation described in the README.
 | `32ad5ea` | `poetry run pytest -q` | Latest quality checkpoint: 323 passed in 68.93s. |
 | `32ad5ea` | `poetry check`; `poetry run ruff check`; `poetry run ruff format --check` | Passed. Ruff is a direct development dependency and checks 16 specified integration modules. |
 | `32ad5ea` | Independent CLI/browser/discovery/pipeline and failure checks | 87 passed; actual autonomous generation, schema-only generation and help passed. |
+| `85019f9` | Fixed-archive full pytest | Explicit source associations: 330 passed in 68.08s. |
+| `f6072a1` | Fixed-archive full pytest | Standalone workflow integration: 342 passed in 81.83s. |
+| `f6072a1` | Author package tests; Poetry check; Ruff lint/format | 12 package tests passed, including installed Python/CLI and separate origins. Poetry and Ruff checks passed for 23 integration files. |
 
 The independent review accepted the implemented code's reusable components,
 validated dataclasses, private-safe representations, comments, spacing and function
@@ -100,16 +104,14 @@ installation and runtime-container verification remain required in milestone 4.
 
 ## Remaining completion criteria
 
-1. Preserve explicit supplied/discovered workflow-source associations in saved
-   manifests and consume them offline, without proximity/name/value inference.
-2. Generate the workflow distribution, Python entry point and installed CLI with
-   private profile defaults, bounded files and correct local-output-failure reporting.
-3. Include generated-package tests, useful help, notices and the companion artifact
+1. Complete independent review of the implemented source associations and workflow
+   distribution, including installed Python/CLI, bounded files and failure reporting.
+2. Include generated-package tests, useful help, notices and the companion artifact
    with a portable documented installation command.
-4. Run the checked-in clean acceptance command: initial fixture login only, stdin
+3. Run the checked-in clean acceptance command: initial fixture login only, stdin
    closed, browser closure, automatic generation/build/install, separate runtime
    container, actual Python/console calls, expiry, privacy and deterministic source.
-5. Complete full relevant checks and independent final review. Unrun acceptance is
+4. Complete full relevant checks and independent final review. Unrun acceptance is
    incomplete, not an accepted risk.
 
 Only local neutral services have received mutation probes. Existing reviewed
