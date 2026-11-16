@@ -28,6 +28,8 @@ installation described in the README.
 | `85019f9` | Fixed-archive full pytest | Explicit source associations: 330 passed in 68.08s. |
 | `f6072a1` | Fixed-archive full pytest | Standalone workflow integration: 342 passed in 81.83s. |
 | `f6072a1` | Author package tests; Poetry check; Ruff lint/format | 12 package tests passed, including installed Python/CLI and separate origins. Poetry and Ruff checks passed for 23 integration files. |
+| `a2037ab` | Fixed-archive full pytest | Corrected workflow integration: 347 passed in 87.57s. |
+| `a2037ab` | Independent correction checks | Reviewer: 30 passed in 24.36s; adversary: 5 passed in 3.07s; Ruff lint/format passed for 24 files. |
 
 The independent review accepted the implemented code's reusable components,
 validated dataclasses, private-safe representations, comments, spacing and function
@@ -67,17 +69,17 @@ all-ready-service generation, schema-only native builders, private profiles,
 public Python defaults and usable-operation survival after upstream warnings.
 Those constraints remain in the architecture and passing milestone tests.
 
-## Workflow packaging findings under correction
+## Resolved workflow packaging findings
 
 Independent review of `f6072a1` passed 19 focused checks and Ruff's 23 integration
-files. Bounded adversarial probes then established the following defects. These
-remain open until the corrected installed commands/source selection are rechecked.
+files. Bounded adversarial probes then established the following defects. All three
+are corrected and independently rechecked at `a2037ab`.
 
-| ID | Location and reproduction | Impact | Required correction |
+| ID | Location and reproduction | Impact | Correction and verification |
 | --- | --- | --- | --- |
-| F19 | `workflow_cli._write_result`: close an installed command's stdout pipe, then execute a successful workflow. Three requests and one commit finish; interpreter shutdown raises BrokenPipeError and exits 120. | The local output stage loses its machine-readable remote outcome and promised exit code. | Flush within the guarded output stage, prevent a second shutdown flush, preserve outcome on stderr and exit 1 without retry. |
-| F20 | `workflow_cli._exit_code`: invoke an installed workflow without its required file input. It reports missing_input with zero requests, but exits 1. | Caller input error disagrees with exit-2 help and the required convention. | Classify rejected caller inputs before dispatch as usage errors; retain exit 1 for workflow/remote failures. |
-| F21 | `workflow_binding._resolve_sources`: supply a workflow's exact declared local OpenAPI file and a saved report pointing that source name at a different OpenAPI file. The saved report wins without an exclusion. | Contradictory contract evidence selects the wrong destination. | Quarantine combined saved-report and exact current-source conflicts, while retaining unrelated services and workflows. |
+| F19 | `workflow_cli._write_result`: close an installed command's stdout pipe, then execute a successful workflow. Three requests and one commit finish; interpreter shutdown raises BrokenPipeError and exits 120. | The local output stage loses its machine-readable remote outcome and promised exit code. | Shared typed `result_output` flushes within the guarded stage and prevents a second shutdown failure. Installed SDK/workflow probes exit 1, preserve the completed remote outcome and make no retry. Corrected at `2926d63`. |
+| F20 | `workflow_cli._exit_code`: invoke an installed workflow without its required file input. It reports missing_input with zero requests, but exits 1. | Caller input error disagrees with exit-2 help and the required convention. | Predispatch caller-input rejections return 2; workflow/remote failures retain 1. Installed missing-file probe verifies zero requests/effects. Corrected at `2926d63`. |
+| F21 | `workflow_binding._resolve_sources`: supply a workflow's exact declared local OpenAPI file and a saved report pointing that source name at a different OpenAPI file. The saved report wins without an exclusion. | Contradictory contract evidence selects the wrong destination. | Combined candidate conflicts are quarantined and preserved through sanitization/offline regeneration; compatible same-document endpoint overrides remain usable. Independent probes pass. Corrected at `a2037ab`. |
 
 The wrong-origin private-profile adversarial probe passed with no dispatch. These
 findings concern the new packaging integration, not a change to the selected native
@@ -95,8 +97,8 @@ Autonomous collection, merge/quarantine, generation, coverage and persistence no
 have focused helpers. SDK/workflow profile lifecycle code is shared. Native model
 adapters, privacy handlers, admission checks and CLI parsing/handlers are separated
 by responsibility. Sensitive fields are excluded from repr. The independent review
-accepted the implemented scope at `32ad5ea`; new binding/package code must meet the
-same criteria before it is delivered.
+accepted the initial scope at `32ad5ea` and corrected binding/package components at
+`a2037ab`. New distribution code must meet the same criteria before delivery.
 
 ## Native dependency provenance
 
@@ -120,14 +122,12 @@ installation and runtime-container verification remain required in milestone 4.
 
 ## Remaining completion criteria
 
-1. Complete independent review of the implemented source associations and workflow
-   distribution, including installed Python/CLI, bounded files and failure reporting.
-2. Include generated-package tests, useful help, notices and the companion artifact
+1. Include generated-package tests, useful help, notices and the companion artifact
    with a portable documented installation command.
-3. Run the checked-in clean acceptance command: initial fixture login only, stdin
+2. Run the checked-in clean acceptance command: initial fixture login only, stdin
    closed, browser closure, automatic generation/build/install, separate runtime
    container, actual Python/console calls, expiry, privacy and deterministic source.
-4. Complete full relevant checks and independent final review. Unrun acceptance is
+3. Complete full relevant checks and independent final review. Unrun acceptance is
    incomplete, not an accepted risk.
 
 Only local neutral services have received mutation probes. Existing reviewed

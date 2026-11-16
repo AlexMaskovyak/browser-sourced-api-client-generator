@@ -64,8 +64,9 @@ reviewed/probed with no remaining material M1 findings. Full suite: 227 passed.
 Milestone 2 independently reviewed and completed at `d9d4d07`; full suite: 270
 passed. Milestone 3 native guarded execution and the versioned JSON-null fix pass independent
 probes. Typed source association and workflow distribution are implemented at
-`f6072a1`, with fixed-archive full verification: 342 passed in 81.83s. Independent
-packaging review and failure probes are in progress.
+`f6072a1` and independently accepted after corrections at `a2037ab`. Fixed-archive
+full verification: 347 passed in 87.57s. Independent reviewer correction checks:
+30 passed; adversary correction checks: 5 passed. No material M3 findings remain.
 The explicit quality refactor is independently accepted at `32ad5ea`; full suite:
 323 passed. Clean-container distribution acceptance remains pending.
 
