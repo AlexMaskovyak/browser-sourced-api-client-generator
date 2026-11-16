@@ -75,3 +75,18 @@ Scratch probe results remain under the chat workspace's `work/adversary-m1`:
 `results-35dc531.json` and `public-results-35dc531.json`. Required installed console
 commands, autonomous URL wiring, workflow guards and clean-container acceptance
 remain incomplete. Milestone 1 is not closed while F1-F3 remain unresolved.
+
+## Milestone 1 correction closure at 7d90c49
+
+F1-F3 resolved. Author focused five-file check: 52 passed in 20.34s; independent
+reviewer rerun: 52 passed in 20.31s. Full suite: 227 passed in 24.11s.
+`git diff --check` passed. Reviewer also independently injected credential-bearing
+fetch errors and verified safe exception/traceback, one call and no replay, and
+verified exact pre-call authentication reason JSON. All five independent adversary
+cases passed against the corrected revision; credential canaries were absent from
+disconnect exceptions/tracebacks while the server retained exactly one effect.
+
+M1 complete within its runtime integration scope. M4 installed console/container
+acceptance remains required. D1 automatic discovery capture, D3-D5 and D7 admission
+remain M2 obligations. D2 private runtime and D6 public Python factory are implemented
+and independently reviewed; complete autonomous URL integration is still pending.
