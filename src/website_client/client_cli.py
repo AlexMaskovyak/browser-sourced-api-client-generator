@@ -84,6 +84,9 @@ def load_operation_function(operation):
     if operation["kind"] == "openapi":
         module = importlib.import_module(operation["module"])
         return module.sync_detailed
+    if operation["kind"] == "graphql-custom":
+        builders = importlib.import_module(__package__ + ".custom_queries" if operation["operationType"] == "query" else __package__ + ".custom_mutations")
+        return getattr(getattr(builders, operation["builder"]), operation["field"])
     client_class = importlib.import_module(__package__ + ".client").Client
     return getattr(client_class, operation["method"])
 
@@ -387,6 +390,13 @@ def execute_operation(options, operation, function, arguments, headers, state):
                 return {"status": int(response.status_code)}
             return response.parsed
 
+        if operation["kind"] == "graphql-custom":
+            if any(value is None for value in arguments.values()):
+                raise ValueError("Input explicit null arguments are unsupported by the native builder")
+            field = function(**arguments)
+            if operation["selection"]:
+                field.fields(*(getattr(type(field), name) for name in operation["selection"]))
+            return getattr(client, operation["operationType"])(field, operation_name=options.operation)
         method = getattr(client, operation["method"])
         return method(**arguments)
 

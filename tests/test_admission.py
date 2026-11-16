@@ -99,3 +99,22 @@ def test_backend_warning_is_attributed_without_losing_independent_operation(tmp_
     assert set(operations) == {'read'}
     assert report['coverage']['exclusions'][0]['operation'] == 'unsupported'
     assert report['coverage']['exclusions'][0]['reason'] == 'upstream_generation_warning'
+
+
+def test_exact_subtree_reference_does_not_retain_remote_sibling():
+    spec = contract()
+    spec['components'] = {'schemas': {'Outer': {'type': 'object', 'properties': {'safe': {'type': 'string'}, 'unrelated': {'$ref': 'https://must-not-fetch.invalid'}}}}}
+    spec['paths']['/read']['get']['responses']['200']['content']['application/json']['schema'] = {'$ref': '#/components/schemas/Outer/properties/safe'}
+    safe, executable, excluded = admit_openapi(spec)
+    assert not excluded
+    assert executable['components']['schemas']['Outer']['properties'] == {'safe': {'type': 'string'}}
+
+
+def test_unused_sensitive_security_and_malformed_operation_do_not_block_read():
+    spec = contract()
+    spec['components'] = {'securitySchemes': {'CANARY_SECRET': {'type': 'apiKey', 'in': 'header', 'name': 'CANARY_HEADER'}}}
+    spec['paths']['/bad'] = {'post': None}
+    safe, executable, excluded = admit_openapi(spec)
+    assert set(executable['paths']) == {'/read'}
+    assert excluded == [{'operation': None, 'method': 'POST', 'path': '/bad', 'reason': 'invalid_contract'}]
+    assert 'CANARY' not in json.dumps(safe) + json.dumps(executable)
