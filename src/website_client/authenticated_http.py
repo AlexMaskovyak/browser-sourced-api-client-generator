@@ -13,6 +13,13 @@ class AuthenticationRequired(RuntimeError):
         super().__init__('authentication_required')
 
 
+class TransportFailure(RuntimeError):
+    """A request failed after dispatch; remote effects remain unknown."""
+
+    def __init__(self):
+        super().__init__('transport_failure: request may have succeeded; no automatic retry occurred')
+
+
 class AuthenticatedDispatch:
     def __init__(self, api, endpoint, headers=None):
         self.api = api
@@ -34,9 +41,14 @@ class AuthenticatedDispatch:
         # Profile credentials take precedence over a generated request's defaults.
         selected = {k: v for k, v in selected.items() if k.lower() not in self.headers}
         selected.update(self.headers)
-        response = self.api.fetch(str(url), method=method, headers=selected, data=body,
-                                  timeout=30000, max_redirects=0, max_retries=0,
-                                  fail_on_status_code=False)
+        try:
+            response = self.api.fetch(str(url), method=method, headers=selected, data=body,
+                                      timeout=30000, max_redirects=0, max_retries=0,
+                                      fail_on_status_code=False)
+        except Exception:
+            # Playwright call logs can contain all sent cookies and credentials.
+            # Neither the exception text nor its formatted chain may escape.
+            raise TransportFailure() from None
         try:
             status = response.status
             if status in {401, 403}:
@@ -49,8 +61,15 @@ class AuthenticatedDispatch:
             output_headers = [(h['name'], h['value']) for h in response.headers_array
                               if h['name'].lower() not in {'content-encoding', 'content-length', 'transfer-encoding'}]
             return status, output_headers, content
+        except (AuthenticationRequired, ProfileError):
+            raise
+        except Exception:
+            raise TransportFailure() from None
         finally:
-            response.dispose()
+            try:
+                response.dispose()
+            except Exception:
+                raise TransportFailure() from None
 
 
 class SDKTransport(httpx.BaseTransport):

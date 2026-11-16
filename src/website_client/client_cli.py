@@ -409,7 +409,9 @@ def show_failure(error, state):
 
     Distinguish pre-call validation from potentially completed requests. A transport
     error after execution starts must never imply that retrying a write is safe."""
-    if isinstance(error, ValueError) and not state.started:
+    if type(error).__name__ in {"AuthenticationRequired", "ProfileError"}:
+        print(json.dumps({"reason": str(error)}), file=sys.stderr)
+    elif isinstance(error, ValueError) and not state.started:
         # Model errors may echo private inputs. Only our own validation messages
         # are eligible for display; all other diagnostics stay bounded.
         message = str(error)
@@ -425,8 +427,6 @@ def show_failure(error, state):
             "No automatic retry occurred; check the service before retrying.",
             file=sys.stderr,
         )
-    elif type(error).__name__ in {"AuthenticationRequired", "ProfileError"}:
-        print(json.dumps({"reason": str(error)}), file=sys.stderr)
     elif type(error).__name__ == "BrowserError":
         print(str(error), file=sys.stderr)
     elif not state.started:

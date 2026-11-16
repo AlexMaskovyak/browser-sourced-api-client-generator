@@ -4,6 +4,7 @@ import ast
 from datetime import date, datetime
 from enum import Enum
 import inspect
+import importlib
 import os
 from pathlib import Path
 import stat
@@ -64,6 +65,18 @@ def _attrs_aliases(annotation, names):
     return aliases
 
 
+def _native_file_type(annotation):
+    """Identify the pinned upstream runtime class, excluding same-named models."""
+    if not inspect.isclass(annotation):
+        return False
+    module_name = annotation.__module__
+    expected_module = {'File': 'types', 'Upload': 'base_model'}.get(annotation.__name__)
+    if expected_module is None or module_name.rsplit('.', 1)[-1] != expected_module:
+        return False
+    module = importlib.import_module(module_name)
+    return getattr(module, annotation.__name__, None) is annotation
+
+
 def convert(value, annotation, stack=None):
     """Use upstream model constructors and serializers with exact typed leaves."""
     if annotation in {typing.Any, inspect.Parameter.empty}:
@@ -105,7 +118,7 @@ def convert(value, annotation, stack=None):
         return value
     if inspect.isclass(annotation) and issubclass(annotation, Enum):
         return annotation(value)
-    if inspect.isclass(annotation) and annotation.__name__ in {'File', 'Upload'}:
+    if _native_file_type(annotation):
         return _file(value, annotation, stack)
     if hasattr(annotation, 'model_fields'):
         if not isinstance(value, dict):
