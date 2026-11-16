@@ -71,6 +71,8 @@ def service(tmp_path, monkeypatch):
                     del value['ticket']
                 if server.mode == 'null':
                     value['ticket'] = None
+                if server.mode == 'object':
+                    value['ticket'] = {'nested': 'object'}
                 if server.mode == 'malformed':
                     value = b'{broken'
                 return self.send(value, cookie='sid=ROTATED; Path=/; HttpOnly')
@@ -83,6 +85,8 @@ def service(tmp_path, monkeypatch):
                 complete = value == {'ticket': 'neutral-ticket'} and server.stored == PAYLOAD
                 assert complete
                 return self.send({'complete': 1 if server.mode == 'integer' else False if server.mode == 'false' else True})
+            if self.path.startswith('/resource/'):
+                return self.send({'value': self.path.rsplit('/', 1)[-1]})
             if self.path == '/upload':
                 message = email.parser.BytesParser(policy=email.policy.default).parsebytes(('Content-Type: ' + self.headers['Content-Type'] + '\r\n\r\n').encode() + body)
                 parts = {part.get_param('name', header='content-disposition'): part for part in message.iter_parts()}
@@ -195,3 +199,81 @@ def test_native_flat_multipart_retains_filename_media_type_and_bytes(service):
     result = execute_document(document, sources, 'multipart', {'file': PAYLOAD}, {url: 'neutral'})
     assert result['status'] == 'success', result
     assert len(server.calls) == 1
+
+
+@pytest.mark.parametrize('kind', ['literal', 'input', 'step-output'])
+def test_multipart_wrong_scalar_is_rejected_before_native_string_coercion(service, kind):
+    url, server = service
+    document, sources = documents(url)
+    multipart = {'stepId': 'send', 'operationId': 'upload_file', 'requestBody': {'contentType': 'multipart/form-data', 'payload': {'file': {'content': '$inputs.file', 'file_name': 'payload.bin', 'contentType': 'application/x-neutral'}, 'note': {'nested': 'object'}}}}
+    sources['api']['paths']['/upload']['post']['requestBody']['content']['multipart/form-data']['encoding'] = {'file': {'contentType': 'application/x-neutral'}}
+    inputs = {'file': PAYLOAD}
+    if kind == 'input':
+        multipart['requestBody']['payload']['note'] = '$inputs.note'
+        inputs['note'] = {'nested': 'object'}
+    elif kind == 'step-output':
+        server.mode = 'object'
+        multipart['requestBody']['payload']['note'] = '$steps.prepare.ticket'
+    steps = ([document['workflows'][0]['steps'][0]] if kind == 'step-output' else []) + [multipart]
+    document['workflows'] = [{'workflowId': 'invalid', 'steps': steps}]
+    result = execute_document(document, sources, 'invalid', inputs, {url: 'neutral'})
+    assert result['reason'] == 'invalid_request', result
+    assert [call[1] for call in server.calls] == (['/prepare'] if kind == 'step-output' else [])
+    assert not any(call[1] == '/upload' for call in server.calls)
+
+
+def test_quiet_runner_overlapping_threads_do_not_leak_and_restore_state():
+    import io
+    import logging
+    import sys
+    first_entered, second_attempted, second_entered, release_first = (threading.Event() for _ in range(4))
+    logger = logging.getLogger('arazzo-runner')
+    original_handlers, original_propagate = logger.handlers, logger.propagate
+    original_stdout, original_stderr = sys.stdout, sys.stderr
+    captured = io.StringIO()
+    observer = logging.StreamHandler(captured)
+    logger.handlers, logger.propagate = [observer], False
+    try:
+        def first():
+            with quiet_runner():
+                first_entered.set()
+                assert release_first.wait(5)
+                logger.error('CREDENTIAL_CANARY_FIRST')
+        def second():
+            assert first_entered.wait(5)
+            second_attempted.set()
+            with quiet_runner():
+                second_entered.set()
+                logger.error('CREDENTIAL_CANARY_SECOND')
+        a, b = threading.Thread(target=first), threading.Thread(target=second)
+        a.start()
+        b.start()
+        assert second_attempted.wait(5)
+        assert not second_entered.wait(0.1)
+        release_first.set()
+        a.join(5)
+        b.join(5)
+        assert not a.is_alive() and not b.is_alive()
+        assert second_entered.is_set()
+        assert 'CREDENTIAL_CANARY' not in captured.getvalue()
+        assert logger.handlers == [observer] and logger.propagate is False
+        assert sys.stdout is original_stdout and sys.stderr is original_stderr
+    finally:
+        release_first.set()
+        logger.handlers, logger.propagate = original_handlers, original_propagate
+
+
+@pytest.mark.parametrize('identifier', ['part/other', 'part?command=create', 'part#fragment', '%2F', '..', 'has space', 'good_1'])
+def test_path_values_needing_unproven_encoding_are_rejected_before_dispatch(service, identifier):
+    url, server = service
+    document, sources = documents(url)
+    sources['api']['paths']['/resource/{id}'] = {'get': {'operationId': 'resource', 'parameters': [{'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}], 'responses': {'200': {'description': 'ok'}}}}
+    document['workflows'] = [{'workflowId': 'resource', 'steps': [{'stepId': 'read', 'operationId': 'resource', 'parameters': [{'name': 'id', 'in': 'path', 'value': '$inputs.id'}], 'outputs': {'value': '$response.body#/value'}}], 'outputs': {'value': '$steps.read.value'}}]
+    result = execute_document(document, sources, 'resource', {'id': identifier}, {url: 'neutral'})
+    if identifier == 'good_1':
+        assert result['status'] == 'success', result
+        assert result['outputs'] == {'value': 'good_1'}
+        assert len(server.calls) == 1
+    else:
+        assert result['reason'] == 'unsupported_path_value', result
+        assert not server.calls

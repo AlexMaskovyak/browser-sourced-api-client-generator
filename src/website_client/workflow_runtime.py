@@ -8,6 +8,8 @@ import json
 import logging
 import math
 import re
+import threading
+from copy import deepcopy
 from urllib.parse import parse_qs, urlsplit
 
 from jsonpointer import JsonPointer, JsonPointerException
@@ -31,6 +33,9 @@ def job_dispatches(endpoints):
             if selected in association and association[selected] != identifier:
                 raise WorkflowRejected('profile_origin_mismatch')
             association[selected] = identifier
+        used_profiles = [identifier for identifier in association.values() if identifier is not None]
+        if len(used_profiles) != len(set(used_profiles)):
+            raise WorkflowRejected("profile_origin_mismatch")
         for selected, identifier in sorted(association.items(), key=lambda item: (item[1] or '', item[0])):
             if identifier is not None:
                 store = locks.enter_context(ProfileStore(identifier, selected).locked())
@@ -69,21 +74,25 @@ class _Discard(io.TextIOBase):
         return len(text)
 
 
+_QUIET_LOCK = logging.getLogger("website-client.workflow.quiet").__dict__.setdefault("credential_output_lock", threading.RLock())
+
+
 @contextmanager
 def quiet_runner():
-    """Keep native state dumps and third-party diagnostics out of caller logs."""
+    """Serialize native suppression across copied runtimes and restore global state."""
     from contextlib import redirect_stderr, redirect_stdout
-    saved = []
-    for name in ('arazzo-runner', 'arazzo_runner'):
-        logger = logging.getLogger(name)
-        saved.append((logger, logger.handlers, logger.propagate))
-        logger.handlers, logger.propagate = [logging.NullHandler()], False
-    try:
-        with redirect_stdout(_Discard()), redirect_stderr(_Discard()):
-            yield
-    finally:
-        for logger, handlers, propagate in saved:
-            logger.handlers, logger.propagate = handlers, propagate
+    with _QUIET_LOCK:
+        saved = []
+        try:
+            for name in ('arazzo-runner', 'arazzo_runner'):
+                logger = logging.getLogger(name)
+                saved.append((logger, logger.handlers, logger.propagate))
+                logger.handlers, logger.propagate = [logging.NullHandler()], False
+            with redirect_stdout(_Discard()), redirect_stderr(_Discard()):
+                yield
+        finally:
+            for logger, handlers, propagate in saved:
+                logger.handlers, logger.propagate = handlers, propagate
 
 
 def bounded_values(value, depth=0):
@@ -135,10 +144,76 @@ class WorkflowGuard:
         self.failure = None
         self.writes = False
         self.completed = []
+        self.runner = None
+        self.sources = None
+        self.expected_payload = None
 
     def start(self, execution_id, workflow_id, step_id):
         self.active = next(step for step in self.workflow['steps'] if step['stepId'] == step_id)
         self.step_requests = 0
+        try:
+            self._before_coercion(self.runner.execution_states[execution_id])
+        except Exception as error:
+            # Native callbacks swallow exceptions. Retain the failure so the adapter
+            # blocks dispatch even if the builder subsequently stringifies a value.
+            self.failure = error if isinstance(error, WorkflowRejected) else WorkflowRejected('invalid_request')
+
+    def _before_coercion(self, state):
+        from arazzo_runner.evaluator import ExpressionEvaluator
+        info = self.operations[self.active['stepId']]
+        from arazzo_runner.executor.parameter_processor import ParameterProcessor
+        parameter_values = ParameterProcessor(self.sources).prepare_parameters(self.active, state)
+        for (location, name), definition in self._parameters(info).items():
+            if name in parameter_values.get(location, {}):
+                value = parameter_values[location][name]
+                if location == 'path' and (not re.fullmatch(r'[A-Za-z0-9._~-]+', str(value)) or str(value) in {'.', '..'}):
+                    raise WorkflowRejected('unsupported_path_value')
+                bounded_values(value)
+                self._validate(value, definition.get('schema', {}), info, 'invalid_request')
+        step_body = self.active.get('requestBody')
+        if step_body is None or 'payload' not in step_body:
+            self.expected_payload = None
+            return
+        payload = step_body['payload']
+        if isinstance(payload, dict):
+            payload = ExpressionEvaluator.process_object_expressions(payload, state, self.sources)
+        elif isinstance(payload, list):
+            payload = ExpressionEvaluator.process_array_expressions(payload, state, self.sources)
+        elif isinstance(payload, str) and payload.startswith('$'):
+            payload = ExpressionEvaluator.evaluate_expression(payload, state, self.sources)
+        bounded_values(payload)
+        self.expected_payload = deepcopy(payload)
+        body_definition = resolved(info['document'], info['operation'].get('requestBody', {}))
+        media = step_body['contentType']
+        contract = body_definition.get('content', {}).get(media, {})
+        schema = resolved(info['document'], contract.get('schema', {}))
+        if media == 'multipart/form-data':
+            if not isinstance(payload, dict):
+                raise WorkflowRejected('unsupported_multipart')
+            values = {}
+            for name, value in payload.items():
+                field = resolved(info['document'], schema.get('properties', {}).get(name, {}))
+                if field.get('format') == 'binary':
+                    content = value.get('content') if isinstance(value, dict) else value
+                    if not isinstance(content, bytes):
+                        raise WorkflowRejected('invalid_multipart_file')
+                    if isinstance(value, dict) and (set(value) - {'content', 'file_name', 'contentType'} or not isinstance(value.get('file_name'), str) or not isinstance(value.get('contentType', 'application/octet-stream'), str)):
+                        raise WorkflowRejected('invalid_multipart_file')
+                    values[name] = ''
+                else:
+                    if value is not None and type(value) not in {str, int, float, bool}:
+                        raise WorkflowRejected('invalid_request')
+                    self._validate(value, field, info, 'invalid_request')
+                    values[name] = value
+            self._validate(values, schema, info, 'invalid_request')
+        elif 'json' in media:
+            self._validate(payload, schema, info, 'invalid_request')
+            try:
+                json.dumps(payload, allow_nan=False)
+            except (TypeError, ValueError):
+                raise WorkflowRejected('invalid_request') from None
+        elif not isinstance(payload, bytes):
+            raise WorkflowRejected('invalid_binary_input')
 
     def _parameters(self, info):
         values = [resolved(info['document'], item) for item in info['path_item'].get('parameters', []) + info['operation'].get('parameters', [])]
@@ -201,7 +276,10 @@ class WorkflowGuard:
                     raise WorkflowRejected('unsupported_content_type')
                 schema = resolved(info['document'], contract.get('schema', {}))
                 if 'json' in media:
-                    self._validate(strict_json(raw, 'malformed_request_json'), schema, info, 'invalid_request')
+                    value = strict_json(raw, 'malformed_request_json')
+                    self._validate(value, schema, info, 'invalid_request')
+                    if json.dumps(value, sort_keys=True, allow_nan=False) != json.dumps(self.expected_payload, sort_keys=True, allow_nan=False):
+                        raise WorkflowRejected('unsupported_native_mapping')
                 elif media == 'multipart/form-data':
                     self._multipart(raw, header_values['content-type'], schema, contract, info)
                 elif schema.get('type') != 'string' or schema.get('format') != 'binary':
@@ -232,6 +310,12 @@ class WorkflowGuard:
                     raise WorkflowRejected('invalid_multipart_media')
                 # Binary's native wire representation is bytes, not a JSON string.
                 # Requiredness and the rest of the object are still checked below.
+                expected_value = self.expected_payload.get(name)
+                expected_content = expected_value.get('content') if isinstance(expected_value, dict) else expected_value
+                if content != expected_content:
+                    raise WorkflowRejected('invalid_multipart_file')
+                if isinstance(expected_value, dict) and (part.get_filename() != expected_value['file_name'] or part.get_content_type() != expected_value.get('contentType', 'application/octet-stream')):
+                    raise WorkflowRejected('invalid_multipart_file')
                 values[name] = ''
             else:
                 if part.get_filename() is not None:
@@ -281,6 +365,8 @@ class WorkflowGuard:
 
     def send(self, method, url, headers, body):
         try:
+            if self.failure is not None:
+                raise self.failure
             self.request(method, url, headers, body)
             selected = service_origin(url)
             if selected not in self.dispatches:
@@ -331,6 +417,7 @@ def execute_document(document, sources, workflow_id, inputs=None, profiles=None)
             with workflow_session(guard) as session:
                 runner = ArazzoRunner(arazzo_doc=document, source_descriptions=sources, http_client=session,
                                       auth_provider=_no_external_credentials(), blob_store=None)
+                guard.runner, guard.sources = runner, sources
                 runner.register_callback('step_start', guard.start)
                 execution = runner.start_workflow(workflow_id, supplied)
                 event = None
@@ -362,6 +449,6 @@ def execute_document(document, sources, workflow_id, inputs=None, profiles=None)
         result.update(status='failure' if guard and guard.requests else 'rejected', reason='workflow_runtime_failure')
     if guard is not None:
         result.update(requests=guard.requests, responses=guard.responses, assertions=guard.assertions)
-        if guard.writes and result['effects'] != 'unknown':
-            result['effects'] = 'possible'
+        if guard.writes:
+            result['effects'] = 'unknown' if guard.requests > guard.responses else 'possible'
     return result
