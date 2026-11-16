@@ -68,7 +68,12 @@ probes. Typed source association and workflow distribution are implemented at
 full verification: 347 passed in 87.57s. Independent reviewer correction checks:
 30 passed; adversary correction checks: 5 passed. No material M3 findings remain.
 The explicit quality refactor is independently accepted at `32ad5ea`; full suite:
-323 passed. Clean-container distribution acceptance remains pending.
+323 passed. Milestone 4 completed and independently accepted at `2b9c062`.
+`scripts/test-docker.sh` exited 0 with clean, unchanged source: 351 tests in
+114.73s, the original HTTPS compatibility program, and standalone runtime
+acceptance. Nine generated installed-package checks passed, 75 source/configuration
+files matched, and 44 wheel hashes were verified. Host full suite at `d27827c`:
+351 passed in 93.98s. No material findings remain unresolved.
 
 Design clarifications: generated public Python calls need a default-profile factory
 or context as well as CLI injection (D6). Automatic admission must preserve usable
@@ -94,8 +99,8 @@ Fresh-container tests must verify installed version, native null/omitted/nested 
 wire bytes, schema-disallowed null rejection and existing workflow regressions.
 The independent adversary reviewed this dependency/distribution design and found
 no material blocker subject to those packaging checks. The patch is applied at `b54e3e6` and its native wire behavior and portable generator
-metadata are independently verified. Fresh companion-wheel installation remains
-required in milestone 4.
+metadata are independently verified. Fresh sibling-wheel installation and actual
+native version/wire checks passed in milestone 4 at `2b9c062`.
 
 ## Developer quality acceptance
 
