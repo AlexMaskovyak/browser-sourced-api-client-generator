@@ -190,6 +190,22 @@ def _openapi_backend(stage, name, package, spec, project):
     ]
 
 
+def _generated_python_diagnostics(project: Path, package: str) -> list[dict[str, str]]:
+    """Reject malformed upstream output without exposing source lines in diagnostics."""
+    for path in (project / package).rglob("*.py"):
+        try:
+            ast.parse(path.read_text())
+        except SyntaxError:
+            return [
+                {
+                    "reason": "upstream_generation_warning",
+                    "type": "SyntaxError",
+                    "level": "warning",
+                }
+            ]
+    return []
+
+
 def generate_openapi_project(stage, name, package, source):
     """Keep independent usable methods when admission or the backend excludes others."""
     from .admission import METHODS, admit_openapi, prune_components
@@ -199,6 +215,7 @@ def generate_openapi_project(stage, name, package, source):
     if not spec["paths"]:
         raise BrowserError("unsupported: no executable OpenAPI operations")
     diagnostics = _openapi_backend(stage / "backend", name, package, spec, project)
+    diagnostics.extend(_generated_python_diagnostics(project, package))
     if diagnostics:
         # A backend warning may drop part of a model while leaving a callable method.
         # Test each dependency closure through that same backend before packaging it.
@@ -225,6 +242,7 @@ def generate_openapi_project(stage, name, package, source):
             warnings = _openapi_backend(
                 probe, name, package, candidate, probe / "project"
             )
+            warnings.extend(_generated_python_diagnostics(probe / "project", package))
             if warnings:
                 exclusions.append(
                     {
@@ -250,6 +268,7 @@ def generate_openapi_project(stage, name, package, source):
         if not spec["paths"]:
             raise BrowserError("unsupported: no executable OpenAPI operations")
         final_warnings = _openapi_backend(stage / "final", name, package, spec, project)
+        final_warnings.extend(_generated_python_diagnostics(project, package))
         if final_warnings:
             raise BrowserError("unsupported: conflicting upstream generation inputs")
     operations = operation_metadata(project, package)
