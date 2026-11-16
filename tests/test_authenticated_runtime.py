@@ -10,6 +10,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import socket
+import traceback
 import sys
 import threading
 from unittest.mock import Mock
@@ -17,7 +19,7 @@ from unittest.mock import Mock
 import httpx
 import pytest
 
-from website_client.authenticated_http import AuthenticatedDispatch, AuthenticationRequired, SDKTransport, profile_dispatch, workflow_session
+from website_client.authenticated_http import AuthenticatedDispatch, AuthenticationRequired, TransportFailure, SDKTransport, profile_dispatch, workflow_session
 from website_client.generation import generate
 from website_client.native_files import convert
 from website_client.runtime_profile import HeaderCapture, ProfileError, ProfileStore, save_browser_profile
@@ -73,6 +75,11 @@ def service():
             if self.path == '/read':
                 return self.send({'ok': True})
             if self.path == '/binary':
+                if server.disconnect:
+                    server.commits += 1
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.connection.close()
+                    return
                 files, note = [body], 'binary'
             else:
                 message = email.parser.BytesParser(policy=email.policy.default).parsebytes(('Content-Type: ' + self.headers['Content-Type'] + '\r\n\r\n').encode() + body)
@@ -101,6 +108,7 @@ def service():
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.calls, server.expired, server.sid, server.uploads = [], False, 'SYNTHETIC_INITIAL', 0
     server.rotations = 0
+    server.disconnect, server.commits = False, 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f'http://127.0.0.1:{server.server_port}', server
@@ -396,3 +404,67 @@ def test_encoded_request_limit_stops_native_multipart_before_dispatch():
         with pytest.raises(ProfileError, match='request_exceeds_8_mib'):
             client.post('https://neutral.invalid/upload', files={'file': ('full.bin', BytesIO(b'x' * (8 * 1024 * 1024)), 'application/octet-stream')})
     api.fetch.assert_not_called()
+
+
+def test_disconnect_masks_driver_credentials_and_keeps_one_effect(native_projects, service):
+    rest = importlib.import_module('wire_rest')
+    binary = importlib.import_module('wire_rest.api.default.put_binary')
+    file_type = importlib.import_module('wire_rest.types').File
+    url, server = service
+    server.disconnect = True
+    with ExitStack() as stack:
+        value = convert({'path': str(FIXTURES / 'payload.bin')}, file_type, stack)
+        with pytest.raises(Exception) as failure:
+            with rest.client_context() as client:
+                binary.sync(client=client, body=value)
+                # This must never dispatch after the failed committed write.
+                binary.sync(client=client, body=value)
+    assert type(failure.value).__name__ == 'TransportFailure'
+    formatted = ''.join(traceback.format_exception(failure.value))
+    assert 'request may have succeeded' in str(failure.value)
+    assert 'no automatic retry occurred' in str(failure.value)
+    for secret in ('SYNTHETIC_TOKEN', 'SYNTHETIC_INITIAL'):
+        assert secret not in str(failure.value)
+        assert secret not in formatted
+    assert server.commits == 1
+    assert len(server.calls) == 1
+
+
+def test_cli_missing_profile_reports_machine_reason_before_request(native_projects, service, profiles, tmp_path):
+    rest, _ = native_projects
+    (profiles / 'neutral.json').unlink()
+    input_path = tmp_path / 'input.json'
+    input_path.write_text(json.dumps({'body': {'path': str((FIXTURES / 'payload.bin').resolve())}}))
+    environment = {key: value for key, value in os.environ.items() if key != 'PYTHONPATH'}
+    arguments = [sys.executable, '-m', 'wire_rest._cli', 'put_binary', '--confirm-write', 'put_binary', '--input', str(input_path)]
+    result = subprocess.run(arguments, cwd=rest, env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 1
+    assert json.loads(result.stderr) == {'reason': 'authentication_required'}
+    assert service[1].calls == []
+    provision('https://different.invalid')
+    result = subprocess.run(arguments, cwd=rest, env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 1
+    assert json.loads(result.stderr) == {'reason': 'profile_origin_mismatch'}
+    assert service[1].calls == []
+
+
+def test_json_models_named_file_and_upload_keep_native_model_semantics(tmp_path, monkeypatch):
+    source = json.loads((FIXTURES / 'openapi.json').read_text())
+    for name in ('File', 'Upload'):
+        source['components']['schemas'][name] = {'type': 'object', 'required': ['name'], 'properties': {'name': {'type': 'string'}}}
+        source['paths']['/' + name.lower() + '-model'] = {'post': {'operationId': 'create_' + name.lower() + '_model', 'requestBody': {'required': True, 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/' + name}}}}, 'responses': {'204': {'description': 'Stored'}}}}
+    definition = tmp_path / 'models.json'
+    definition.write_text(json.dumps(source))
+    output = tmp_path / 'models'
+    generate(output, 'named-models', openapi=definition)
+    monkeypatch.syspath_prepend(str(output))
+    for name in ('File', 'Upload'):
+        native_model = getattr(importlib.import_module('named_models.models.' + name.lower()), name)
+        value = convert({'name': 'ordinary JSON object'}, native_model)
+        assert type(value) is native_model
+        assert value.to_dict() == {'name': 'ordinary JSON object'}
+    native_file = importlib.import_module('named_models.types').File
+    with ExitStack() as stack:
+        file = convert({'path': str(FIXTURES / 'payload.bin')}, native_file, stack)
+        assert file.payload.read() == PAYLOAD
+    assert file.payload.closed

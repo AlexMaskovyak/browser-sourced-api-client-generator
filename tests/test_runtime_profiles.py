@@ -61,3 +61,25 @@ def test_context_saves_cookie_renewal_on_failure_and_disposes(tmp_path, monkeypa
     assert driver.request.new_context.call_args.kwargs['ignore_https_errors'] is False
     with ProfileStore('neutral', 'https://neutral.invalid').locked() as store:
         assert store.load()['storage_state']['cookies'][0]['value'] == 'ROTATED'
+
+
+@pytest.mark.parametrize('stage', ['fetch', 'body', 'dispose'])
+def test_dispatch_driver_errors_never_expose_credential_logs(stage):
+    import traceback
+    from website_client.authenticated_http import TransportFailure
+    api, response = Mock(), Mock()
+    api.fetch.return_value = response
+    response.status, response.headers_array = 200, []
+    response.body.return_value = b'{}'
+    private_error = RuntimeError('Call log: Cookie: sid=COOKIE_CANARY; Authorization: Bearer BEARER_CANARY')
+    getattr(api if stage == 'fetch' else response, stage).side_effect = private_error
+    dispatch = AuthenticatedDispatch(api, 'https://neutral.invalid', {'authorization': 'Bearer BEARER_CANARY'})
+    with pytest.raises(TransportFailure) as failure:
+        dispatch.send('POST', 'https://neutral.invalid/write', {}, b'one write')
+    formatted = ''.join(traceback.format_exception(failure.value))
+    for secret in ('COOKIE_CANARY', 'BEARER_CANARY'):
+        assert secret not in str(failure.value)
+        assert secret not in formatted
+    assert api.fetch.call_count == 1
+    if stage != 'fetch':
+        response.dispose.assert_called_once()
