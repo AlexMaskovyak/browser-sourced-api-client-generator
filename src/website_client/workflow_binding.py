@@ -166,8 +166,8 @@ def referenced_local_files(path: str | Path) -> list[Path]:
 
 
 def openapi_source(artifact: Artifact) -> dict | None:
-    """Recognize native OpenAPI data, including the retained safe source report."""
-    if artifact.kind not in {Kind.OPENAPI, Kind.REPORT}:
+    """Recognize an executable OpenAPI artifact admitted by the shared policy."""
+    if artifact.kind is not Kind.OPENAPI:
         return None
     try:
         value = yaml.safe_load(artifact.content)
@@ -182,14 +182,10 @@ def register_definition(
     registry: InputRegistry,
     endpoint: str | None = None,
 ) -> None:
-    originals = [
-        item.id
-        for item in manifest.artifacts
-        if item.kind is Kind.REPORT and openapi_source(item) is not None
-    ]
-    selected = originals or [
-        item.id for item in manifest.artifacts if item.kind is Kind.OPENAPI
-    ]
+    # Source reports retain evidence after destructive filtering. Runtime binding
+    # must use admitted OpenAPI artifacts so excluded essential structure cannot
+    # reappear as a weakened executable request schema.
+    selected = [item.id for item in manifest.artifacts if item.kind is Kind.OPENAPI]
     if len(selected) == 1:
         address = Path(path).resolve().as_uri()
         registry.documents.setdefault(address, set()).add(
@@ -273,6 +269,13 @@ def _report_candidates(manifest: Manifest) -> dict[tuple[str, str], set[SourceBi
     return candidates
 
 
+def binding_conflicts(manifest: Manifest) -> set[tuple[str, str]]:
+    """Return source names with contradictory validated saved associations."""
+    return {
+        key for key, targets in _report_candidates(manifest).items() if len(targets) > 1
+    }
+
+
 def report_bindings(manifest: Manifest) -> dict[str, dict[str, SourceBinding]]:
     """Read only known source identities with a single unambiguous association."""
     bindings = {}
@@ -336,9 +339,7 @@ def bind_sources(manifest: Manifest, registry: InputRegistry | None = None) -> M
     registry = registry or InputRegistry()
     available = _available_sources(manifest, registry)
     bindings = report_bindings(manifest)
-    conflicts = {
-        key for key, targets in _report_candidates(manifest).items() if len(targets) > 1
-    }
+    conflicts = binding_conflicts(manifest)
     artifacts = list(manifest.artifacts)
     for index, artifact in enumerate(artifacts):
         if artifact.kind is not Kind.ARAZZO:

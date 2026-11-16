@@ -118,7 +118,8 @@ def test_workflow_json_literal_metadata_names_remain_unchanged(tmp_path):
     definition.write_text(json.dumps(spec()))
     result = run(source, tmp_path / 'output', inputs=[definition])
     assert len(result['services']) == 1
-    assert result['workflows'][0]['status'] == 'retained_for_runner'
+    assert result['workflows'][0]['status'] == 'excluded'
+    assert any(item['reason'] == 'unsupported_workflow_structure' for item in result['exclusions'])
 
 
 def test_real_url_traversal_collects_definitions_traffic_and_profile(tmp_path, monkeypatch):
@@ -276,7 +277,8 @@ def test_conflicting_artifact_identity_quarantines_affected_service_only(tmp_pat
     result = run(sources[0], tmp_path / 'output', inputs=sources[1:])
     assert len(result['services']) == 1
     assert result['coverage'] == 'partial'
-    assert sum(item['reason'] == 'conflicting_artifact_identity' for item in result['exclusions']) == 2
+    assert sum(item['reason'] == 'conflicting_artifact_identity' and 'service' in item for item in result['exclusions']) == 2
+    assert sum(item['reason'] == 'conflicting_artifact_identity' and 'artifact' in item for item in result['exclusions']) == 1
     project = tmp_path / 'output' / result['services'][0]['directory']
     assert json.loads((project / 'openapi.json').read_text())['servers'][0]['url'] == 'https://unrelated.invalid'
 

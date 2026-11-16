@@ -226,7 +226,7 @@ def _run_command(options: argparse.Namespace) -> int:
         duration_seconds=options.explore_seconds,
     )
     print(json.dumps(result))
-    return 0 if result["services"] else 1
+    return 0 if result["services"] or result.get("workflowPackage") else 1
 
 
 def _offline_command(options: argparse.Namespace) -> int:

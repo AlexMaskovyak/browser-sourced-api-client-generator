@@ -16,7 +16,7 @@ requires-poetry = ">=2.2,<3.0"
 packages = [{ include = "website_client", from = "src" }]
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "pdm-backend (==2.5.0)", "ruff (==0.15.22)"]
+dev = ["pytest>=8,<10", "pdm-backend (==2.5.0)", "ruff (==0.15.22)", "poetry-core (==2.5.0)"]
 
 [project.scripts]
 website-client = "website_client.cli:entrypoint"
@@ -34,6 +34,9 @@ arazzo-runner = { path = "src/website_client/native_dependencies/arazzo_runner-0
 target-version = "py311"
 include = [
     "src/website_client/cli.py",
+    "src/website_client/generation.py",
+    "src/website_client/self_discovery.py",
+    "src/website_client/bundle_capture.py",
     "src/website_client/admission.py",
     "src/website_client/privacy.py",
     "src/website_client/graphql_admission.py",

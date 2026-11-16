@@ -7,9 +7,15 @@ from urllib.parse import urljoin
 from .browser import BrowserError
 from .discovery_manifest import observed_endpoint, sha256
 from .discovery_manifest.records import (
-    Artifact, Confidence, Kind, Manifest, Protocol, Service, Source,
+    Artifact,
+    Confidence,
+    Kind,
+    Manifest,
+    Protocol,
+    Service,
+    Source,
 )
-from .definitions import openapi_document, graphql_schema
+from .definitions import graphql_schema
 
 
 def locations(values):
@@ -32,22 +38,35 @@ def capture_manifest(discovery, files) -> Manifest:
         if name.startswith("openapi-"):
             kind = Kind.OPENAPI
             from .admission import admit_openapi
+
             safe_source, spec, exclusions = admit_openapi(content)
             inferred = bool(spec.get("x-discovery-inferred"))
             source = Source.INFERRED if inferred else Source.DOWNLOADED
             canonical = content
             content = json.dumps(spec, indent=2) + "\n"
             if exclusions:
-                report = Artifact.create("admission-" + sha256(canonical)[:12] + ".json", Kind.REPORT, json.dumps({"exclusions": exclusions}) + "\n", Source.REPORT)
+                report = Artifact.create(
+                    "admission-" + sha256(canonical)[:12] + ".json",
+                    Kind.REPORT,
+                    json.dumps({"exclusions": exclusions}) + "\n",
+                    Source.REPORT,
+                )
                 artifacts[report.id] = report
-                original = Artifact.create("source-" + sha256(canonical)[:12] + ".json", Kind.REPORT, canonical, Source.REPORT)
+                original = Artifact.create(
+                    "source-" + sha256(canonical)[:12] + ".json",
+                    Kind.REPORT,
+                    canonical,
+                    Source.REPORT,
+                )
                 artifacts[original.id] = original
             sources = locations(
-                discovery.definition_sources.get(("openapi", sha256(content)), ())
+                discovery.definition_sources.get(("openapi", sha256(canonical)), ())
             )
         elif name.startswith("arazzo-"):
             kind, source = Kind.ARAZZO, Source.DOWNLOADED
-            sources = locations(discovery.definition_sources.get(("arazzo", sha256(content)), ()))
+            sources = locations(
+                discovery.definition_sources.get(("arazzo", sha256(content)), ())
+            )
         elif name.startswith("graphql-schema-"):
             kind, source = Kind.GRAPHQL_SCHEMA, Source.DOWNLOADED
             sources = locations(
@@ -65,9 +84,13 @@ def capture_manifest(discovery, files) -> Manifest:
             kind = Kind.HAR if name.endswith(".har") else Kind.REPORT
         item = Artifact.create(name, kind, content, source, locations=tuple(sources))
         if kind is Kind.GRAPHQL_OPERATIONS and declarations:
-            item = replace(item, provenance=replace(
-                item.provenance, locations=tuple(sorted(set(sources + declarations))),
-            ))
+            item = replace(
+                item,
+                provenance=replace(
+                    item.provenance,
+                    locations=tuple(sorted(set(sources + declarations))),
+                ),
+            )
         artifacts[item.id] = item
         if kind is Kind.OPENAPI:
             # Published server URLs own the API address; relative URLs require
@@ -82,7 +105,9 @@ def capture_manifest(discovery, files) -> Manifest:
                             Protocol.OPENAPI,
                             endpoint,
                             item.id,
-                            confidence=Confidence.INFERRED if inferred else Confidence.PUBLISHED,
+                            confidence=Confidence.INFERRED
+                            if inferred
+                            else Confidence.PUBLISHED,
                         )
                     except (BrowserError, KeyError, ValueError):
                         continue
@@ -90,9 +115,13 @@ def capture_manifest(discovery, files) -> Manifest:
                     if prior and prior.schema_artifact != target.schema_artifact:
                         if prior.confidence is Confidence.INFERRED and not inferred:
                             targets[target.id] = target
-                        elif not inferred and prior.confidence is not Confidence.INFERRED:
+                        elif (
+                            not inferred and prior.confidence is not Confidence.INFERRED
+                        ):
                             # Preserve both versions as explicit choices.
-                            target = replace(target, id=target.id + "-" + item.sha256[:8])
+                            target = replace(
+                                target, id=target.id + "-" + item.sha256[:8]
+                            )
                             targets[target.id] = target
                     else:
                         targets[target.id] = target
@@ -105,7 +134,9 @@ def capture_manifest(discovery, files) -> Manifest:
         if not schemas:
             schemas = [None]
         for schema in schemas:
-            bound = tuple(item.id for item, sources in operations if endpoint in sources)
+            bound = tuple(
+                item.id for item, sources in operations if endpoint in sources
+            )
             target = Service.create(
                 Protocol.GRAPHQL,
                 endpoint,
@@ -120,7 +151,8 @@ def capture_manifest(discovery, files) -> Manifest:
     for item in tuple(artifacts.values()):
         if item.name == "operations.graphql":
             artifacts[item.id] = replace(
-                item, provenance=replace(item.provenance, derived_from=individual_ids),
+                item,
+                provenance=replace(item.provenance, derived_from=individual_ids),
             )
     return Manifest.create(tuple(artifacts.values()), tuple(targets.values()))
 

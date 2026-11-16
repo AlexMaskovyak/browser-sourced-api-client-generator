@@ -511,6 +511,38 @@ def _initial_paths(request: RunRequest) -> list[str | Path]:
     return paths
 
 
+def _supplied_file(
+    request: RunRequest, path: str | Path, registry: InputRegistry, index: int
+) -> Manifest:
+    explicit = [*request.inputs]
+    if urlsplit(str(request.source)).scheme not in {"http", "https"}:
+        explicit.append(request.source)
+    initially_supplied = any(
+        Path(item).resolve() == Path(path).resolve() for item in explicit
+    )
+    try:
+        manifest = _saved_input(
+            path,
+            endpoint=request.endpoint,
+            operations=request.operations if str(path) == str(request.source) else None,
+            bindings=registry,
+        )
+        if not initially_supplied and not any(
+            item.kind is Kind.OPENAPI for item in manifest.artifacts
+        ):
+            raise BrowserError("unresolved_source")
+        return manifest
+    except Exception:
+        if initially_supplied:
+            raise
+        # An unreadable or invalid declared OpenAPI source excludes its dependent
+        # workflow, while separately supplied valid services remain available.
+        report = _report_artifact(
+            f"workflow-source-loss-{index:04d}.json", [{"reason": "unresolved_source"}]
+        )
+        return Manifest.create((report,), ())
+
+
 def _collect_inputs(request: RunRequest) -> CollectedInputs:
     collected = CollectedInputs([])
     if urlsplit(str(request.source)).scheme in {"http", "https"}:
@@ -531,16 +563,9 @@ def _collect_inputs(request: RunRequest) -> CollectedInputs:
             profiles,
             allowed,
         )
-    for path in _initial_paths(request):
+    for index, path in enumerate(_initial_paths(request)):
         collected.manifests.append(
-            _saved_input(
-                path,
-                endpoint=request.endpoint,
-                operations=request.operations
-                if str(path) == str(request.source)
-                else None,
-                bindings=collected.bindings,
-            )
+            _supplied_file(request, path, collected.bindings, index)
         )
     if (
         sum(len(encoded(item.to_dict()).encode()) for item in collected.manifests)
@@ -552,6 +577,7 @@ def _collect_inputs(request: RunRequest) -> CollectedInputs:
 
 def _merge_inputs(manifests: list[Manifest]) -> tuple[Manifest, list[dict[str, str]]]:
     # Preserve distinct service namespaces, quarantining only conflicting owners.
+    conflicting_artifacts: set[str] = set()
     try:
         manifest = merge_manifests(tuple(manifests))
         conflicts = []
@@ -620,6 +646,15 @@ def _merge_inputs(manifests: list[Manifest]) -> tuple[Manifest, list[dict[str, s
         for conflict in conflicts:
             targets.pop(conflict["service"], None)
         manifest = Manifest.create(tuple(artifacts.values()), tuple(targets.values()))
+    if conflicting_artifacts:
+        report = _report_artifact(
+            "artifact-conflicts.json",
+            [
+                {"artifact": identifier, "reason": "conflicting_artifact_identity"}
+                for identifier in sorted(conflicting_artifacts)
+            ],
+        )
+        manifest = replace(manifest, artifacts=manifest.artifacts + (report,))
     return manifest, conflicts
 
 
@@ -766,21 +801,54 @@ def _generate_service(
     return entry, report.get("coverage", {}).get("exclusions", [])
 
 
-def _retain_workflows(normalized: Manifest, output: Path, coverage: dict) -> None:
-    for item in normalized.artifacts:
-        if item.kind is Kind.ARAZZO:
-            directory = output / "workflows"
-            directory.mkdir(mode=0o700, exist_ok=True)
-            path = directory / (item.sha256[:16] + ".json")
-            path.write_text(item.content)
-            path.chmod(0o600)
-            coverage["workflows"].append(
-                {"file": "workflows/" + path.name, "status": "retained_for_runner"}
-            )
+def _package_workflows(
+    normalized: Manifest,
+    output: Path,
+    name: str,
+    profiles: dict[str, str],
+    coverage: dict,
+) -> None:
+    from .workflow_generation import collect_workflows, generate_workflow_client
+
+    documents = [item for item in normalized.artifacts if item.kind is Kind.ARAZZO]
+    if not documents:
+        return
+    directory = output / "workflows"
+    directory.mkdir(mode=0o700)
+    entries, exclusions = collect_workflows(normalized, profiles)
+    coverage["exclusions"].extend(exclusions)
+    for item in documents:
+        path = directory / (item.sha256[:16] + ".json")
+        path.write_text(item.content)
+        path.chmod(0o600)
+        selected = [
+            entry.public_id for entry in entries if entry.artifact_id == item.id
+        ]
+        rejected = [
+            record for record in exclusions if record.get("artifact") == item.id
+        ]
+        coverage["workflows"].append(
+            {
+                "file": "workflows/" + path.name,
+                "artifact": item.id,
+                "status": ("partial" if rejected else "ready")
+                if selected
+                else "excluded",
+                "workflows": selected,
+            }
+        )
+    if entries:
+        package = name + "-workflows"
+        report = generate_workflow_client(directory / package, package, entries)
+        coverage["workflowPackage"] = {
+            "package": package,
+            "directory": "workflows/" + package,
+            "workflows": report["workflows"],
+        }
 
 
 def _finish_coverage(coverage: dict, discovery_report: dict | None) -> None:
-    if coverage["services"]:
+    if coverage["services"] or coverage.get("workflowPackage"):
         incomplete = bool(
             coverage["exclusions"]
             or discovery_report
@@ -875,7 +943,7 @@ def run(
             coverage["exclusions"].append(
                 {"service": target.id, "reason": "unsupported_contract"}
             )
-    _retain_workflows(normalized, request.output, coverage)
+    _package_workflows(normalized, request.output, request.name, profiles, coverage)
     _finish_coverage(coverage, collected.discovery_report)
     _persist_evidence(normalized, request.output, coverage)
     return coverage

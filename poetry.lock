@@ -1045,6 +1045,18 @@ files = [
 ]
 
 [[package]]
+name = "poetry-core"
+version = "2.5.0"
+description = "Poetry PEP 517 Build Backend"
+optional = false
+python-versions = "<4.0,>=3.10"
+groups = ["dev"]
+files = [
+    {file = "poetry_core-2.5.0-py3-none-any.whl", hash = "sha256:98ee465b66f7e14bb9fbe68fb5e00d0cff184f036993ec94610ae4b5612f3add"},
+    {file = "poetry_core-2.5.0.tar.gz", hash = "sha256:81d04c9253b19d0604718268d781867c8f7b2128e5b25bbf1e84141eec6b89c4"},
+]
+
+[[package]]
 name = "pydantic"
 version = "2.14.2"
 description = "Data validation using Python type hints"
@@ -1757,4 +1769,4 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "59b39b2feafef675095ec29a6d99ebd3a9b6334a3d24787f17a4f11110b68440"
+content-hash = "e9abf396092bb6a2fc2627abdd5757b12da6af3ce82803a38202604a42053b2a"
