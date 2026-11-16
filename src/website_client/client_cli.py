@@ -54,54 +54,10 @@ class RequestState:
     started: bool = False
 
 
-def convert(value, annotation):
-    """Convert JSON into the explicit Python type accepted by an upstream SDK method.
-
-    Support scalars, unions, enums and the upstream model adapters. Reject unsupported
-    types instead of coercing arbitrary input or introducing a competing schema."""
-    if annotation in {typing.Any, inspect.Parameter.empty}:
-        return value
-    base = typing.get_origin(annotation)
-    if base in {typing.Union, types.UnionType}:
-        for member in typing.get_args(annotation):
-            try:
-                return convert(value, member)
-            except (TypeError, ValueError, KeyError):
-                pass
-        raise ValueError("Input does not match its declared type")
-    if annotation is type(None):
-        if value is not None:
-            raise ValueError()
-        return None
-    if base is list:
-        if not isinstance(value, list):
-            raise ValueError()
-        return [convert(item, typing.get_args(annotation)[0]) for item in value]
-    if base is dict:
-        if not isinstance(value, dict):
-            raise ValueError()
-        return value
-    if base is typing.Literal:
-        if value not in typing.get_args(annotation):
-            raise ValueError()
-        return value
-    if annotation in {date, datetime}:
-        if not isinstance(value, str):
-            raise ValueError()
-        return annotation.fromisoformat(value)
-    if annotation in {str, int, float, bool}:
-        if type(value) is not annotation and not (
-            annotation is float and type(value) is int
-        ):
-            raise ValueError()
-        return value
-    if inspect.isclass(annotation) and issubclass(annotation, Enum):
-        return annotation(value)
-    if hasattr(annotation, "model_validate"):
-        return annotation.model_validate(value)
-    if hasattr(annotation, "from_dict") and isinstance(value, dict):
-        return annotation.from_dict(value)
-    raise ValueError("Unsupported input type; use the generated Python API")
+def convert(value, annotation, stack=None):
+    """Convert through the native input adapter; optional stack owns opened files."""
+    from .native_files import convert as native_convert
+    return native_convert(value, annotation, stack)
 
 
 def serialize(value):
@@ -177,7 +133,6 @@ def add_operation_arguments(command):
     """Add runtime input, authentication, output and write-confirmation flags."""
     command.add_argument(
         "--url",
-        required=True,
         help="Service base URL for OpenAPI; exact endpoint URL for GraphQL.",
     )
     command.add_argument(
@@ -229,7 +184,7 @@ def add_operation_arguments(command):
     )
 
 
-def build_parser(operations):
+def build_parser(operations, defaults=None):
     """Build one endpoint subcommand per packaged operation without sending requests."""
     parser = argparse.ArgumentParser(
         description="Call generated endpoint methods. Help is local and sends no requests."
@@ -252,6 +207,7 @@ def build_parser(operations):
             ),
         )
         add_operation_arguments(command)
+        command.set_defaults(url=(defaults or {}).get("endpoint"), profile_id=(defaults or {}).get("profileId"), runtime_endpoint=(defaults or {}).get("endpoint"))
     return parser, functions
 
 
@@ -272,6 +228,8 @@ def validate_execution_options(options, operation):
     if options.login and not sys.stdin.isatty():
         raise ValueError("Browser login requires an interactive terminal")
 
+    if not options.url:
+        raise ValueError("Input requires --url or a packaged service endpoint")
     validate_service_url(options.url)
     if options.output and os.path.lexists(options.output):
         raise ValueError("Output already exists")
@@ -334,7 +292,7 @@ def read_runtime_headers(enabled):
     return headers
 
 
-def bind_input_arguments(function, data):
+def bind_input_arguments(function, data, stack=None):
     """Convert JSON into the upstream method's scalars, enums and typed models.
 
     The generated signatures define required fields. Their model adapters own
@@ -346,7 +304,7 @@ def bind_input_arguments(function, data):
 
     hints = typing.get_type_hints(function)
     arguments = {
-        name: convert(value, hints.get(name, typing.Any))
+        name: convert(value, hints.get(name, typing.Any), stack)
         for name, value in data.items()
     }
     for name, parameter in parameters.items():
@@ -358,6 +316,10 @@ def bind_input_arguments(function, data):
 def enter_browser_transport(stack, options, operation):
     """Open a one-request authenticated browser transport only when --login is selected."""
     if not options.login:
+        if getattr(options, "profile_id", None) or getattr(options, "runtime_endpoint", None):
+            from .authenticated_http import profile_dispatch, SDKTransport
+            dispatch = stack.enter_context(profile_dispatch(options.profile_id, options.url))
+            return SDKTransport(dispatch)
         return None
     from .session_http import BrowserLoginTransport
 
@@ -386,8 +348,10 @@ def enter_generated_client(stack, options, operation, headers, transport):
             client.set_httpx_client(
                 httpx.Client(
                     base_url=options.url,
+                    headers=headers,
                     transport=transport,
                     follow_redirects=False,
+                    trust_env=False,
                 )
             )
     else:
@@ -396,7 +360,7 @@ def enter_generated_client(stack, options, operation, headers, transport):
             import httpx
 
             client_options["http_client"] = stack.enter_context(
-                httpx.Client(transport=transport, follow_redirects=False)
+                httpx.Client(transport=transport, headers=headers, follow_redirects=False, trust_env=False)
             )
         if operation["kind"] == "graphql-operation":
             client_options["allow_writes"] = operation["write"]
@@ -461,6 +425,8 @@ def show_failure(error, state):
             "No automatic retry occurred; check the service before retrying.",
             file=sys.stderr,
         )
+    elif type(error).__name__ in {"AuthenticationRequired", "ProfileError"}:
+        print(json.dumps({"reason": str(error)}), file=sys.stderr)
     elif type(error).__name__ == "BrowserError":
         print(str(error), file=sys.stderr)
     elif not state.started:
@@ -480,26 +446,28 @@ def show_failure(error, state):
 def main(args=None):
     """Validate CLI inputs, execute one generated operation and return a process exit code."""
     operations = json.loads(files(__package__).joinpath("_operations.json").read_text())
-    parser, functions = build_parser(operations)
+    defaults = json.loads(files(__package__).joinpath("_runtime.json").read_text())
+    parser, functions = build_parser(operations, defaults)
     options = parser.parse_args(args)
     operation = operations[options.operation]
     function = functions[options.operation]
     state = RequestState()
 
     try:
-        validate_execution_options(options, operation)
-        data = read_input_json(options.input)
-        headers = read_runtime_headers(options.headers_stdin)
-        arguments = bind_input_arguments(function, data)
-        if operation["kind"] == "graphql-operation":
-            from .operation_runtime import validate_arguments
+        with ExitStack() as command_stack:
+            validate_execution_options(options, operation)
+            data = read_input_json(options.input)
+            headers = read_runtime_headers(options.headers_stdin)
+            arguments = bind_input_arguments(function, data, command_stack)
+            if operation["kind"] == "graphql-operation":
+                from .operation_runtime import validate_arguments
 
-            validate_arguments(__package__, options.operation, arguments)
-        result = execute_operation(
-            options, operation, function, arguments, headers, state
-        )
-        write_result(result, options.output)
-        return 0
+                validate_arguments(__package__, options.operation, arguments)
+            result = execute_operation(
+                options, operation, function, arguments, headers, state
+            )
+            write_result(result, options.output)
+            return 0
     except KeyboardInterrupt:
         print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
         if state.started:

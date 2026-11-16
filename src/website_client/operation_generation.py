@@ -63,7 +63,7 @@ def operation_docstring(operation):
 
 
 def generate_operation_client(
-    manifest: Manifest, target: Service, output, name, lineage
+    manifest: Manifest, target: Service, output, name, lineage, runtime_config=None
 ):
     """Publish a standalone SDK from one service's captured operation documents.
 
@@ -154,7 +154,7 @@ def generate_operation_client(
         generated = GeneratedProject(
             project, package, metadata, "browser-sourced-api-client-generator"
         )
-        write_runtime_files(generated)
+        write_runtime_files(generated, {"endpoint": target.endpoint, **(runtime_config or {})})
         sources = project / "operations"
         sources.mkdir()
         for operation in operations:

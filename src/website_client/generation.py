@@ -12,6 +12,7 @@ from string import Template
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 from graphql import build_schema, parse, print_ast, validate
 
@@ -29,6 +30,10 @@ RUNTIME_SOURCES = {
     "_cli.py": "client_cli.py",
     "browser.py": "browser.py",
     "session_http.py": "session_http.py",
+    "runtime_profile.py": "runtime_profile.py",
+    "authenticated_http.py": "authenticated_http.py",
+    "runtime.py": "client_runtime.py",
+    "native_files.py": "native_files.py",
 }
 
 
@@ -142,7 +147,7 @@ def configure_openapi_package(project, name, package):
     metadata += f'\n[tool.poetry.scripts]\n{name} = "{package}._cli:entrypoint"\n'
     metadata = metadata.replace(
         "[tool.poetry.dependencies]\n",
-        '[tool.poetry.dependencies]\nplaywright = ">=1.58,<2"\n',
+        '[tool.poetry.dependencies]\nplaywright = "==1.64.1"\nplatformdirs = ">=4.3,<5"\nfilelock = ">=3.20,<4"\n',
         1,
     )
     metadata_path.write_text(metadata)
@@ -254,7 +259,7 @@ def write_graphql_configuration(stage, project, package, schema_sdl, document):
         f"target_package_name = {json.dumps(package)}",
         f"target_package_path = {json.dumps(str(project))}",
         "async_client = false",
-        "multipart_uploads = false",
+        "multipart_uploads = true",
         'include_comments = "none"',
     ]
     configuration_path.write_text("\n".join(configuration))
@@ -294,7 +299,7 @@ def generate_graphql_project(stage, name, package, source, operations_path):
     return GeneratedProject(project, package, operations, "ariadne-codegen")
 
 
-def write_runtime_files(project):
+def write_runtime_files(project, runtime_config=None):
     """Copy only the standalone runtime, never the generator implementation."""
     target = project.directory / project.package_name
     for output_name, source_name in RUNTIME_SOURCES.items():
@@ -302,6 +307,20 @@ def write_runtime_files(project):
             Path(__file__).with_name(source_name).read_text()
         )
     write_json(target / "_operations.json", project.operations)
+    config = {"kind": next(iter(project.operations.values()))["kind"]}
+    config.update(runtime_config or {})
+    if config.get("endpoint"):
+        from .runtime_profile import service_origin
+        config["origin"] = service_origin(config["endpoint"])
+        if urlsplit(config["endpoint"]).query:
+            raise BrowserError("Runtime endpoints cannot contain query values.")
+    if set(config) - {"kind", "endpoint", "origin", "profileId"}:
+        raise BrowserError("Invalid non-secret runtime configuration.")
+    if config.get("profileId") is not None and (not isinstance(config["profileId"], str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", config["profileId"])):
+        raise BrowserError("Invalid runtime profile identifier.")
+    write_json(target / "_runtime.json", config)
+    with (target / "__init__.py").open("a") as stream:
+        stream.write("\nfrom .runtime import client_context\n")
 
 
 def write_project_readme(project, name):
@@ -371,6 +390,7 @@ def generate(
     schema=None,
     operations=None,
     lineage=None,
+    runtime_config=None,
 ):
     """Generate a schema-backed client, then publish it into a new directory.
 
@@ -395,7 +415,7 @@ def generate(
             project = generate_openapi_project(stage, name, package, source)
         else:
             project = generate_graphql_project(stage, name, package, source, operations)
-        write_runtime_files(project)
+        write_runtime_files(project, runtime_config)
         write_project_readme(project, name)
         report = write_generation_report(project, source, operations_source, lineage)
         publish_tree(project.directory, output)
