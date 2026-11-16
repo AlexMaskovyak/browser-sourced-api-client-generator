@@ -55,11 +55,11 @@ def installed_target(project, tmp_path):
     return target
 
 
-def installed_cli(target, name, arguments, tmp_path):
+def installed_cli(target, name, arguments, tmp_path, *, stdout=subprocess.PIPE):
     # Launch pip's actual installed entry script in a fresh isolated interpreter.
     # Dependencies come from this test environment; clean containers are M4 acceptance.
     bootstrap = 'import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); runpy.run_path(sys.argv.pop(1),run_name="__main__")'
-    return subprocess.run([sys.executable, '-I', '-c', bootstrap, str(target), str(target / 'bin' / name), *arguments], cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=40)
+    return subprocess.run([sys.executable, '-I', '-c', bootstrap, str(target), str(target / 'bin' / name), *arguments], cwd=tmp_path, stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.PIPE, text=True, timeout=40)
 
 
 def test_run_build_install_python_cli_rotation_and_local_output_failure(tmp_path, service):
@@ -395,3 +395,42 @@ def test_installed_cli_cancellation_preserves_unknown_write_effect(tmp_path, ser
         if process.poll() is None:
             process.kill()
             process.communicate()
+
+
+def test_closed_stdout_reports_completed_workflow_as_local_output_failure(tmp_path, service):
+    import os
+    url, server = service
+    source = supplied_bundle(tmp_path, url)
+    output = tmp_path / 'output'
+    report = run(source, output, name='pipe', inputs=[runtime_association(tmp_path, url)])
+    target = installed_target(output / report['workflowPackage']['directory'], tmp_path)
+    payload = tmp_path / 'payload.bin'
+    payload.write_bytes(PAYLOAD)
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        result = installed_cli(target, 'pipe-workflows', ['upload', '--file', 'file=' + str(payload)], tmp_path, stdout=write_end)
+    finally:
+        os.close(write_end)
+    assert result.returncode == 1, result.stderr
+    summary = json.loads(result.stderr)
+    assert summary['status'] == 'success' and summary['reason'] == 'workflow_completed'
+    assert summary['output']['reason'] == 'local_output_failure'
+    assert summary['effects'] == 'possible'
+    assert summary['requests'] == summary['responses'] == 3
+    assert server.commits == 1 and len(server.calls) == 3
+    assert 'BrokenPipeError' not in result.stderr and 'SYNTHETIC_TOKEN' not in result.stderr
+
+
+def test_missing_cli_required_input_is_usage_error_before_any_request(tmp_path, service):
+    url, server = service
+    source = supplied_bundle(tmp_path, url)
+    output = tmp_path / 'output'
+    report = run(source, output, name='usage', inputs=[runtime_association(tmp_path, url)])
+    target = installed_target(output / report['workflowPackage']['directory'], tmp_path)
+    result = installed_cli(target, 'usage-workflows', ['upload'], tmp_path)
+    assert result.returncode == 2, result.stderr
+    summary = json.loads(result.stdout)
+    assert summary['status'] == 'rejected' and summary['reason'] == 'missing_input'
+    assert summary['requests'] == 0 and summary['effects'] == 'none'
+    assert not server.calls

@@ -15,6 +15,8 @@ import sys
 import typing
 from urllib.parse import urlsplit
 
+from .result_output import write_result_text
+
 BYTES_PER_KIBIBYTE = 1024
 BYTES_PER_MEBIBYTE = 1024 * BYTES_PER_KIBIBYTE
 # Bound user-controlled files and credential streams before model validation
@@ -52,6 +54,8 @@ class RequestState:
     """Track whether an endpoint method started so failure messages preserve uncertainty."""
 
     started: bool = False
+    completed: bool = False
+    write: bool = False
 
 
 def convert(
@@ -481,14 +485,7 @@ def execute_operation(
 def write_result(result: typing.Any, output_path: str | Path | None) -> None:
     """Serialize the result to stdout or an exclusively created private output file."""
     text = json.dumps(serialize(result)) + "\n"
-    if not output_path:
-        print(text, end="")
-        return
-    descriptor = os.open(
-        output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE
-    )
-    with os.fdopen(descriptor, "w") as stream:
-        stream.write(text)
+    write_result_text(text, output_path)
 
 
 def show_failure(error: Exception, state: RequestState) -> None:
@@ -496,7 +493,19 @@ def show_failure(error: Exception, state: RequestState) -> None:
 
     Distinguish pre-call validation from potentially completed requests. A transport
     error after execution starts must never imply that retrying a write is safe."""
-    if type(error).__name__ in {"AuthenticationRequired", "ProfileError"}:
+    if state.completed:
+        print(
+            json.dumps(
+                {
+                    "reason": "local_output_failure",
+                    "requestCompleted": True,
+                    "effects": "possible" if state.write else "none",
+                }
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+    elif type(error).__name__ in {"AuthenticationRequired", "ProfileError"}:
         print(json.dumps({"reason": str(error)}), file=sys.stderr)
     elif isinstance(error, ValueError) and not state.started:
         # Model errors may echo private inputs. Only our own validation messages
@@ -538,7 +547,7 @@ def main(args: list[str] | None = None) -> int:
     options = parser.parse_args(args)
     operation = operations[options.operation]
     function = functions[options.operation]
-    state = RequestState()
+    state = RequestState(write=operation["write"])
 
     try:
         with ExitStack() as command_stack:
@@ -553,6 +562,7 @@ def main(args: list[str] | None = None) -> int:
             result = execute_operation(
                 options, operation, function, arguments, headers, state
             )
+            state.completed = True
             write_result(result, options.output)
             return 0
     except KeyboardInterrupt:

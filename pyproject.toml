@@ -43,6 +43,7 @@ include = [
     "src/website_client/har_inference.py",
     "src/website_client/client_runtime.py",
     "src/website_client/client_cli.py",
+    "src/website_client/result_output.py",
     "src/website_client/autonomous.py",
     "src/website_client/authenticated_http.py",
     "src/website_client/capabilities.py",

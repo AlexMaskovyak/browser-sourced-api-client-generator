@@ -468,3 +468,21 @@ def test_json_models_named_file_and_upload_keep_native_model_semantics(tmp_path,
         file = convert({'path': str(FIXTURES / 'payload.bin')}, native_file, stack)
         assert file.payload.read() == PAYLOAD
     assert file.payload.closed
+
+
+def test_sdk_closed_stdout_reports_local_output_failure_without_retry(native_projects, service, tmp_path):
+    import os
+    rest, _ = native_projects
+    data = tmp_path / 'input.json'
+    data.write_text(json.dumps({'body': {'file': {'path': str(FIXTURES / 'payload.bin')}, 'note': 'rest'}}))
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        result = subprocess.run([sys.executable, '-m', 'wire_rest._cli', 'upload_file', '--confirm-write', 'upload_file', '--input', str(data)], cwd=rest, stdin=subprocess.DEVNULL, stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=30)
+    finally:
+        os.close(write_end)
+    assert result.returncode == 1, result.stderr
+    summary = json.loads(result.stderr)
+    assert summary == {'reason': 'local_output_failure', 'requestCompleted': True, 'effects': 'possible'}
+    assert service[1].uploads == 1
+    assert 'BrokenPipeError' not in result.stderr and 'SYNTHETIC_TOKEN' not in result.stderr

@@ -38,6 +38,7 @@ RUNTIME_SOURCES = {
     "authenticated_http.py": "authenticated_http.py",
     "runtime.py": "client_runtime.py",
     "native_files.py": "native_files.py",
+    "result_output.py": "result_output.py",
 }
 
 
