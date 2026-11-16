@@ -85,7 +85,7 @@ The wrong-origin private-profile adversarial probe passed with no dispatch. Thes
 findings concern the new packaging integration, not a change to the selected native
 upstream owners or the architecture.
 
-## Distribution finding under correction
+## Resolved native generation failure
 
 F22: The first standalone container run reached initial login, then the ordinary
 installed `website-client run URL` command returned its bounded unsupported-input
@@ -94,11 +94,18 @@ body in the fixture definition: OpenAPI Python Client emitted an API module with
 an empty `else` block, and `generation.operation_metadata` raised SyntaxError while
 parsing it. One unsupported native SDK operation aborted its entire service.
 
-The implementer is reproducing this boundary and preserving independent usable
-SDK operations with a named exclusion. The original source remains available to
-the workflow owner; required workflow literal-null semantics must remain supported.
-This is a confirmed failed acceptance condition, not an accepted risk. Correction
-and fixed installed-command/container verification are pending.
+The correction at `8999e1d` feeds a bounded syntax diagnostic into the existing
+per-operation native backend checks, excludes the unsupported SDK operation and
+regenerates the final project. No invalid Python module remains in the SDK. No
+serializer repair or upstream port was added.
+
+Independent verification passed two native-generation regressions and the native
+null/omitted/nested/schema-rejection workflow case. A separate integrated offline
+probe confirmed that the SDK keeps its usable read, the workflow retains its nullable
+operation/source, and supplied source bytes remain unchanged. Diagnostics contain
+only bounded reason/type/level fields. Ruff passed for 24 integration files. The
+subsequent standalone container iteration completed ordinary generator CLI and
+persistent-EOF public API generation; final complete acceptance remains pending.
 
 ## Quality review
 
