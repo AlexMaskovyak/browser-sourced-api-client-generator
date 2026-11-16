@@ -124,3 +124,20 @@ type correctly uses Ariadne's generated Query builder.
 SDL/introspection happy cases and abstract/leafless exclusions passed the author's
 slice checks. Final autonomous discovery, complete route and persistence checks are
 still pending; no complete M2 delivery is claimed by these intermediate reviews.
+
+## Integrated M2 review at 3343dff
+
+Author's seven-file focused run: 116 passed in 14.54s. Independent adversary's five
+finite offline cases passed: mixed local/inherited serialization and remote-ref
+exclusions without target fetches; output-wide definition canaries; two ready
+services; missing Node terminal reason; and schema-only scalar/object native execution.
+Supplied files were unchanged. This is not clean-container acceptance.
+
+| ID | Location | Demonstrated impact and reproduction | Disposition | Verification |
+| --- | --- | --- | --- | --- |
+| F9 | `admission.scrub_document`, `privacy.safe_workflow` | Coordinator reproduction: valid wire properties named description/default are rewritten or deleted as metadata; workflow literal payload values change too. | Context-aware metadata filtering, preserving non-sensitive wire property names and explicit JSON values. | Author regression added; independent final check pending. |
+| F10 | `autonomous.run` merge recovery | Same service ID and schema but different endpoints makes standard merge reject; fallback ignores endpoint/protocol, picks second endpoint and reports complete. Reviewer fixed-revision reproduction. | Quarantine conflicting ownership while preserving independent services; never silently select an endpoint. | Pending exact regression and correction. |
+
+Final M2 reference bundling, cross-origin profile wiring, HTML-only/traffic-only
+separation and complete regression review remain pending. No material finding is
+closed merely because other focused tests passed.
