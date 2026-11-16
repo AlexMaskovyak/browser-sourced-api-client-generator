@@ -174,3 +174,19 @@ failure is not waived by the focused results.
 M2 remains open until F11-F13 and the full relevant suite pass. Workflow source-file
 association is an explicit M3 integration obligation; retained workflow documents
 have not been advertised as executable before that work.
+
+## M2 correction re-review at ee385ea
+
+Author affected checks: 79 passed in 36.85s. Independent reviewer ran the affected
+fixed-archive suite: 51 passed in 33.20s. F11 orphan fragments and F12 captured GET
+conventions are corrected; exact two-port cookie-isolation case also passes.
+
+F13 is still open because the correction introduced a required cookie-renewal
+failure. Coordinator's direct state probe dropped the renewed cookie. Independent
+reviewer reproduced it with real Playwright: page issues sid=OLD; same-origin fetch
+sends OLD and response sets sid=NEW; browser state has NEW, but ownership filter
+still recognizes only OLD. Saved profile has zero cookies. After browser closure,
+the generated native client CLI with closed stdin sends no cookie and fails with
+`authentication_required`. Valid final-response cookie renewal must survive initial
+profile handoff without another outgoing read. The writer is correcting this exact
+case while preserving cross-port isolation; no broad probe extension is pending.
