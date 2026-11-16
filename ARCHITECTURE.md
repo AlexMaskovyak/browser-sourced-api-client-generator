@@ -1,115 +1,103 @@
-# How the generator is built
+# Autonomous client integration architecture
 
-The tool collects a website's requests and operation documents and turns them into a standalone
-Python client. For commands, start with the [README](README.md). This document
-explains where the work happens in the code.
+The supplied specification selects the architecture. This map assigns its seams to
+existing owners and describes the state and failure boundaries for implementation.
 
-## Data flow
+## Components and data flow
 
-```text
-Temporary browser session ─┐
-Existing HAR file ─────────┼─> discovery manifest JSON
-External API definitions ─┘             |
-                                   normalize
-                                       |
-                              select one API
-                                       |
-                                    generate
-                                       |
-                            standalone Python client
-```
-
-The manifest is the saved handoff between discovery and generation. It contains
-operation documents, optional definitions, supporting reports, endpoint associations
-and content hashes.
-Later steps can run from that file alone, without the browser or original capture
-directory. Its [format reference](docs/discovery-manifest-format.md) defines the
-versioned JSON contract.
-
-## Components
-
-Paths below are relative to `src/website_client/`.
-
-| Component | Responsibility |
+| Owner | Integration responsibility |
 | --- | --- |
-| `cli.py`, `pipeline.py` | Parse commands and connect discovery, import, normalization and generation. |
-| `browser.py` | Open a temporary browser through Playwright's Python API; close its session and profile. Playwright supplies the underlying browser driver. |
-| `capture.py`, `discovery.py` | Collect browser requests or import HAR traffic; extract routes, sample shapes and encountered definitions. |
-| `exploration.py`, `exploration_policy.py`, `contracts.py` | Walk pages and controls within explicit limits; classify requests and record declared forms and supported frontend operations. |
-| `self_discovery.py` | Look for published API definitions and request GraphQL schema introspection where applicable. |
-| `bundle_capture.py`, `discovery_manifest/` | Build the manifest; validate its version, hashes and references; read/write files and streams; combine producer inputs. |
-| `normalization.py`, `definitions.py` | Normalize validated, immutable dataclasses; check API definitions and assigned operations, preserve unresolved evidence, and calculate which APIs can generate. |
-| `operation_contracts.py`, `operation_requests.py` | Parse operation/variable contracts and preserve captured request methods and URL parameter conventions. |
-| `operation_generation.py`, `operation_runtime.py` | Generate callable methods without a schema; send bounded requests and enforce variable constraints and write permission. |
-| `generation.py`, `templates/` | Run the upstream code generators and package their output with endpoint commands and authentication support. |
-| `client_cli.py`, `session_http.py` | Supply the generated client's command interface and browser-authenticated HTTP transport. |
+| `cli`, `pipeline` | One URL/input-to-output command; import/normalize/generate compatibility; all unambiguous services and machine-readable complete/partial/unsupported coverage. |
+| `browser`, `exploration`, `self_discovery` | Non-persistent initial login; guarded deterministic existing traversal; advertised descriptions and observed traffic; explicit bounded origins. |
+| `capture`, `discovery`, manifests | Safe structure and provenance only; privacy before persistence; no raw credential HAR intermediates. |
+| har2sdk adapter | Python subprocess plus minimal Node generateFromHar call; structured OpenAPI/warnings/leak findings. Node generation-only; terminal affected-route dependency errors. |
+| `normalization`, `definitions`, capability checks | Standard validation and backend admission; preserve sources and exclude affected unsupported operations; saved inputs never fetch references. |
+| `generation`, existing templates/packaging | OpenAPI Python Client 0.29.1, Ariadne 0.19.0 multipart/custom builders, existing schema-less operation runtime; defaults, profile ID, tests/notices. |
+| private profile runtime | Protected platform directory outside outputs; origin-associated cookies/known headers; full-job file lock; atomic owner-only persistence. |
+| authenticated dispatch | Shared exact-byte APIRequestContext.fetch boundary; small HTTPX/prepared-requests adapters; upstream serializers remain authoritative. |
+| `workflow_binding`, `workflow_generation` | Exact supplied/advertised source associations, conflict quarantine, standalone workflow project and companion dependency. Saved inputs never fetch missing sources. |
+| `workflow_admission`, `workflow_schema`, `workflow_runtime` | Versioned native Arazzo public start_workflow/execute_next_step; narrow syntax and dialect/schema guards, no custom scheduler/expression evaluator. |
+| `workflow_api`, `workflow_cli` | One installed Python function and console command; ordinary inputs, bounded file bytes, noninteractive results and distinct local output failures. |
+| `workflow_inputs`, `project_metadata` | Input documentation from declared schemas/explicit references, installed offline contract tests and source/wheel notices. No inferred workflow connections. |
+| `result_output` | Shared flushed output boundary for SDK/workflow commands; local failure preserves the completed remote outcome without retry. |
+| `client_cli` | Command-scoped native files, default endpoint/profile; ordinary noninteractive invocation; native return values and bounded diagnostics. |
 
-Project code is Python. Poetry manages dependencies and builds. Generated packages
-have their own dependencies and can run independently of this repository.
+URL -> initial login -> guarded existing exploration -> safe manifest/definitions ->
+automatic capability filtering -> upstream generation -> existing standalone
+packaging -> installed Python/CLI execution via private profile and request driver.
+Supplied definitions/manifests enter offline normalization directly. HAR enters
+har2sdk; captured schema-less GraphQL keeps its separate existing compiler route.
 
-`discovery_manifest/records.py` supplies immutable dataclasses throughout capture,
-import, merging, normalization and generation. JSON is parsed or serialized at
-input/output; standard OpenAPI and HAR documents keep their native formats.
-Construction and replacement check field types and schema rules. Document hashes
-and manifest references are also validated. Nested collections are tuples;
-changes create new records rather than mutating producer data.
+Workflow documents reference sources by their declared URL or exact local file
+reference. The input registry records those facts in memory; saved report entries
+retain only manifest document IDs and optional public endpoint overrides. A source
+must be an admitted OpenAPI document. Conflicting reports or destructive loss of
+essential schema information exclude the affected workflow. No component infers a
+connection from filenames, field values, source proximity or request order.
 
-## HTTP discovery and supported API definitions
+## Systems of record and credentials
 
-| API | Generation input | Upstream generator |
-| --- | --- | --- |
-| REST/HTTP | Published OpenAPI 3.0/3.1, or inferred OpenAPI accepted after review. | `openapi-python-client` |
-| GraphQL | Named query/mutation documents; complete schema optional. | Operation-document client, or Ariadne Codegen when a schema is available. |
+Website is authoritative for authentication and application data. Standard documents
+and source hashes record executable contract provenance, not live verification.
+Coverage records exclusions/conflicts without claiming API completeness. Private
+profile is the local authentication record; generated config contains only endpoint,
+origin and profile ID. Another machine requires its own login/profile.
 
-Both use the same manifest and commands. Other contract formats need additional
-readers and generators. Observed routes and form fields alone may be insufficient
-to generate a usable client.
+Profile lock covers load, entire call/job, cookie renewal save and cleanup, including
+error paths. Separate origins use separate contexts/profiles. Restrict observed
+headers to known or declared authentication headers for configured origins. Reject
+URL credentials, profile/origin mismatch, insecure profile permissions and unsafe
+filesystem links. Persist atomically with owner-only modes. Never bundle profile
+files, raw secrets, target response samples or sensitive structural identifiers.
 
-During automatic exploration, request checks permit ordinary GET/HEAD, OPTIONS
-and recognized GraphQL queries, subject to navigation and action checks. Unknown
-POSTs and write methods are blocked; forms are inventoried without submission.
-Consequently a REST search using POST can be missed. OpenAPI does not currently
-control request authorization. This policy belongs to `exploration_policy.py`.
+## Mutation, failure and recovery
 
-## Authentication and service changes
+Discovery never invokes discovered writes/uploads. Initial operator-selected website
+and deterministic read conventions are not proof an untrusted server has no effects.
+Install guards before automatic actions, constrain background channels/navigation,
+report unknown actions. Do not infer connections from proximity/order/matching values.
 
-The website remains authoritative for authentication and business records. A
-human signs in through the temporary browser. Credentials remain in that browser
-or process memory; discovery exports sanitized evidence, not a reusable login.
+Runtime sends already-built requests to fixed configured origins, no redirects or
+automatic retries; bound time/body/files at 8 MiB, dispose responses and owned streams.
+Disable ambient proxy/netrc; TLS verification stays enabled. Authentication rejection
+ends with authentication_required without prompting. Cookie renewal persists; custom
+refresh/MFA is not inferred. Unknown effects after disconnect/output failure remain
+unknown; no retry or rollback claim. Later explicit login is recovery.
 
-Discovery and client execution are separate sessions. A generated client's
-`--login` operation opens a fresh browser. Its HTTPX adapter sends the typed
-method's request through that session, scoped to the selected API origin and
-method. Writes require explicit command confirmation. Redirects are not followed
-and failed requests are not retried automatically. Additional session header names
-are explicit command inputs. The adapter observes their values only for the API
-origin and holds them in memory. A caller sharing an existing browser session can
-supply the same bounded header selection without transferring browser ownership.
-HTTP rejection diagnostics report status codes without response bodies or tokens.
+Workflow admission implements only the supplied linear 1.0.0 profile and explicit
+whole-value references. Standard pointer/schema libraries guard producing responses
+before dependent dispatch. Required null outputs, empty pointer tokens, integer
+booleans, unsupported encodings/path values and unknown file objects are rejected.
+Use dialect-specific validators. Exclude non-exploded form query arrays in both
+SDK/workflow paths, preserving reasons and independent usable operations. No remote
+fetches offline; discovery resolves references only within explicit origin/bounds.
 
-Generated operation methods document the captured operation name, declared variable
-types, omission behavior and mutation permission. The generator supplies these
-from compiled contracts; it does not invent business descriptions from names.
-Shared runtime docstrings explain HTTP client ownership and failure behavior.
-Identical saved manifests and generator versions must produce identical output.
+## Verification boundaries
 
-## Failure and recovery
+Promote supplied local fixtures/probes into ordinary tests. Public Python and installed
+CLI must both load default endpoint/profile without browser or agent at runtime.
+Clean container acceptance must mount credentials separately and use built wheels,
+not generator imports. Privacy heuristics cannot guarantee universal anonymization;
+destructive filtering reports missing information and excludes essential ambiguity.
 
-A valid manifest can contain blocked APIs. Normalization records their issues;
-generation revalidates and requires one selected, usable API. Conflicting inputs
-are rejected or leave that API blocked rather than silently choosing a contract.
+## Required native JSON-null correction
 
-Commands preserve existing output. On failure, inspect any newly created partial
-output and retry with a new path. Browser cleanup runs on normal exit and
-cancellation; forced termination can leave temporary profile files. For an
-uncertain service write, check the service before retrying.
+The selected Arazzo 0.9.6 executor conflates an explicit nullable JSON body with an
+absent body. The implementation reproduced an empty request body and HTTP 422 from
+a neutral service that requires the JSON bytes `null`. Nested JSON null succeeds.
+The upstream choice changes only for this reproduced incompatibility, as permitted
+by the specification.
 
-The shell sequences commands. Pipes carry complete JSON documents, so an upstream
-failure after emitting valid JSON cannot undo downstream generation. Use staged
-files and `&&` when each command must succeed before the next starts. Runnable
-examples and recovery steps belong in the [pipeline guide](docs/discovery-pipeline.md).
+The correction belongs in a separately versioned native dependency wheel,
+`arazzo-runner==0.9.6+websiteclient.1`. The project records a minimal upstream patch,
+source hash, build procedure, wheel hash and Apache modification notices. Arazzo
+continues to build requests; the prepared-request adapter sends its exact bytes.
+Runtime code neither patches installed modules nor installs dependencies.
 
-Unit tests exercise parsing and policies. Docker installs the built wheel and
-checks browser login, discovery, command chaining and both generated client types
-against a local HTTPS fixture. Compatibility with a real service requires its
-own verification.
+The companion wheel must be a sibling install artifact, not only a resource inside
+a wheel pip has not installed. Poetry can resolve the repository-local dependency,
+but built METADATA must require the exact version and contain no workstation file
+URL. The documented pip command supplies both product and companion wheels. The
+generator also carries the companion as data for packaging later workflow clients.
+SDK-only clients retain their existing runtime dependencies. Clean acceptance must
+verify the actual installed dependency and all affected native wire cases.

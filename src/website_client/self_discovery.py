@@ -10,7 +10,7 @@ import httpx
 
 from .browser import BrowserError, origin
 from .capture import NetworkCapture
-from .definitions import graphql_schema, openapi_document
+from .definitions import graphql_schema
 from .discovery import AUTH, AUTH_OPERATION, MAX_BODY, route
 from .session_http import (
     BrowserLoginTransport,
@@ -50,7 +50,7 @@ def validate_settings(max_probes, observe_seconds, graphql_endpoints):
             )
 
 
-def schema_url(base_url, href):
+def schema_url(base_url, href, advertised=False):
     """Accept only same-origin definition links without query credentials."""
     try:
         candidate = urljoin(base_url, href)
@@ -61,7 +61,7 @@ def schema_url(base_url, href):
             or AUTH.search(parsed.path)
         ):
             return None
-        return candidate if SCHEMA_PATH.search(parsed.path) else None
+        return candidate if advertised or SCHEMA_PATH.search(parsed.path) else None
     except (BrowserError, ValueError, TypeError):
         return None
 
@@ -94,7 +94,8 @@ def graphql_request(request):
 class DiscoveryObserver:
     """Retain selected session headers by origin, never cookie or payload values."""
 
-    def __init__(self, url):
+    def __init__(self, url, allowed_origins=None):
+        self.allowed_origins = allowed_origins
         self.url = url
         self.origin = origin(url)
         self.headers = {}
@@ -110,13 +111,12 @@ class DiscoveryObserver:
                 return
             request = params["request"]
             target_origin = origin(request["url"])
-            if (
-                target_origin not in self.headers
-                and len(self.headers) >= MAX_AUTH_ORIGINS
+            selected = {}
+            for name, value in (
+                request.get("headers", {}).items()
+                if self.allowed_origins is None or target_origin in self.allowed_origins
+                else ()
             ):
-                return
-            selected = self.headers.setdefault(target_origin, {})
-            for name, value in request.get("headers", {}).items():
                 if (
                     name.lower() in DEFAULT_HEADERS
                     and isinstance(value, str)
@@ -125,6 +125,12 @@ class DiscoveryObserver:
                     and "\n" not in value
                 ):
                     selected[name.lower()] = value
+            # Static/analytics requests without session headers consume no slot.
+            # Exhausted credential storage must not suppress endpoint evidence.
+            if selected and (
+                target_origin in self.headers or len(self.headers) < MAX_AUTH_ORIGINS
+            ):
+                self.headers.setdefault(target_origin, {}).update(selected)
             if not self.discovering:
                 return
             parsed = urlsplit(request["url"])
@@ -167,6 +173,10 @@ class SelfDiscovery:
         observe_seconds=DEFAULT_OBSERVE_SECONDS,
         graphql_endpoints=(),
         explorer=None,
+        autonomous=False,
+        credential_observer=None,
+        initial_definitions=(),
+        allowed_origins=None,
     ):
         validate_settings(max_probes, observe_seconds, graphql_endpoints)
         self.session = session
@@ -179,9 +189,17 @@ class SelfDiscovery:
         self.explicit_endpoints = list(graphql_endpoints)
         self.attempts = []
         self.explorer = explorer
+        self.autonomous = autonomous
+        self.credential_observer = credential_observer
+        self.reference_documents = {}
+        self.initial_definitions = tuple(initial_definitions)
+        self.allowed_origins = allowed_origins
+        self.workflow_sources: list[str] = []
 
     def _event(self, method, params):
         self.observer.event(method, params)
+        if self.credential_observer is not None:
+            self.credential_observer.observe(method, params)
         self.capture.event(method, params)
         if self.explorer is not None:
             self.explorer.event(method, params)
@@ -194,7 +212,10 @@ class SelfDiscovery:
         links = self.session._page.locator("a[href], link[href]")
         for index in range(min(links.count(), MAX_LINKS)):
             value = schema_url(
-                self.session._url, links.nth(index).get_attribute("href")
+                self.session._url,
+                links.nth(index).get_attribute("href"),
+                advertised="service-desc"
+                in (links.nth(index).get_attribute("rel") or "").split(),
             )
             if value:
                 candidates.append(("definition", value))
@@ -205,19 +226,152 @@ class SelfDiscovery:
         ]
         return list(dict.fromkeys(candidates))
 
+    def _bundle_references(self, value, location, document=None, active=None):
+        """Resolve bounded same-origin definitions only; leave other refs for exclusion."""
+        from copy import deepcopy
+        from jsonpointer import resolve_pointer
+        import yaml
+        from .authenticated_http import AuthenticatedDispatch
+
+        document = value if document is None else document
+        active = set() if active is None else active
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if isinstance(reference, str) and (
+                not reference.startswith("#/") or location != self._definition_location
+            ):
+                address, fragment = __import__(
+                    "urllib.parse", fromlist=["urldefrag"]
+                ).urldefrag(urljoin(location, reference))
+                key = address + "#" + fragment
+                try:
+                    if (
+                        key in active
+                        or len(value) != 1
+                        or origin(address) != self.session._origin
+                        or urlsplit(address).query
+                        or AUTH.search(urlsplit(address).path)
+                    ):
+                        return deepcopy(value)
+                    if address == location:
+                        target_document = document
+                    else:
+                        if address not in self.reference_documents:
+                            if len(self.reference_documents) >= 12:
+                                return deepcopy(value)
+                            headers = self.observer.headers.get(origin(address), {})
+                            status, response_headers, body = AuthenticatedDispatch(
+                                self.session._context.request, address, headers
+                            ).send("GET", address, {}, b"")
+                            self.credential_observer.observe_response(
+                                address,
+                                [
+                                    value
+                                    for name, value in response_headers
+                                    if name.lower() == "set-cookie"
+                                ],
+                            )
+                            if not 200 <= status < 300 or len(body) > MAX_BODY:
+                                return deepcopy(value)
+                            self.reference_documents[address] = yaml.safe_load(body)
+                        target_document = self.reference_documents[address]
+                    target = (
+                        resolve_pointer(target_document, "/" + fragment.lstrip("/"))
+                        if fragment
+                        else target_document
+                    )
+                    return self._bundle_references(
+                        target, address, target_document, active | {key}
+                    )
+                except Exception:
+                    return deepcopy(value)
+            return {
+                key: self._bundle_references(item, location, document, active)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                self._bundle_references(item, location, document, active)
+                for item in value
+            ]
+        return value
+
+    def _workflow_source_links(self, document: dict, location: str) -> None:
+        """Queue only explicit same-origin OpenAPI descriptions under existing bounds."""
+        for source in document.get("sourceDescriptions", []):
+            if not isinstance(source, dict) or source.get("type") != "openapi":
+                continue
+            from .admission import sensitive
+
+            reference = source.get("url")
+            if not isinstance(reference, str) or sensitive(reference):
+                continue
+            address = schema_url(location, reference, advertised=True)
+            if (
+                address
+                and not urlsplit(address).fragment
+                and address not in self.workflow_sources
+                and len(self.workflow_sources) < MAX_CANDIDATES
+            ):
+                self.workflow_sources.append(address)
+
+    def _probe_workflow_sources(self) -> None:
+        attempted = {item["endpoint"] for item in self.attempts}
+        pending = [
+            address for address in self.workflow_sources if address not in attempted
+        ]
+        for address in pending[: max(0, self.max_probes - len(self.attempts))]:
+            self.session._check()
+            self._probe("definition", address)
+
     def _save_definition(self, response, kind, endpoint=None):
+        import yaml
+
         text = response.text
         if kind == "graphql":
             value = graphql_schema(text)
             definition_kind = "graphql-schema"
         else:
-            try:
-                value = json.dumps(openapi_document(text), indent=2) + "\n"
+            raw = yaml.safe_load(text)
+            if isinstance(raw, dict) and "arazzo" in raw:
+                if self.autonomous:
+                    self._workflow_source_links(raw, endpoint)
+                from .privacy import safe_workflow
+
+                value = json.dumps(safe_workflow(raw), indent=2) + "\n"
+                definition_kind = "arazzo"
+            elif isinstance(raw, dict) and "openapi" in raw:
+                from .admission import admit_openapi
+
+                self._definition_location = endpoint
+                if self.autonomous:
+                    raw = self._bundle_references(raw, endpoint)
+                safe, executable, exclusions = admit_openapi(raw)
+                if self.autonomous and self.allowed_origins is not None:
+                    for server in executable.get("servers", []):
+                        selected = urljoin(endpoint, server["url"])
+                        selected_origin = origin(selected)
+                        self.allowed_origins.add(selected_origin)
+                        names = [
+                            scheme["name"]
+                            for scheme in executable.get("components", {})
+                            .get("securitySchemes", {})
+                            .values()
+                            if scheme.get("type") == "apiKey"
+                            and scheme.get("in") == "header"
+                        ]
+                        self.credential_observer.declare(selected, names)
+                value = json.dumps(safe, indent=2) + "\n"
                 definition_kind = "openapi"
-            except BrowserError:
+            else:
                 value = graphql_schema(text)
                 definition_kind = "graphql-schema"
-        self.capture.discovery.record_definition(definition_kind, value, endpoint)
+        self.capture.discovery.record_definition(
+            definition_kind,
+            value,
+            endpoint,
+            __import__("hashlib").sha256(response.content).hexdigest(),
+        )
         if kind == "graphql" and endpoint:
             self.capture.discovery.graphql_endpoints.add(endpoint)
         return definition_kind
@@ -234,9 +388,26 @@ class SelfDiscovery:
         )
         try:
             headers = self.observer.headers.get(origin(endpoint), {})
-            transport = BrowserLoginTransport.for_session(
-                self.session, endpoint, method, headers
-            )
+            if self.autonomous and hasattr(self.credential_observer, "captures"):
+                from .runtime_profile import service_origin
+
+                capture = self.credential_observer.captures.get(
+                    service_origin(endpoint)
+                )
+                if capture is not None:
+                    headers = capture.headers
+            if self.autonomous:
+                from .authenticated_http import AuthenticatedDispatch, SDKTransport
+
+                transport = SDKTransport(
+                    AuthenticatedDispatch(
+                        self.session._context.request, endpoint, headers
+                    )
+                )
+            else:
+                transport = BrowserLoginTransport.for_session(
+                    self.session, endpoint, method, headers
+                )
             with httpx.Client(transport=transport, follow_redirects=False) as client:
                 request = (
                     client.build_request(method, endpoint, json=payload)
@@ -244,9 +415,15 @@ class SelfDiscovery:
                     else client.build_request(method, endpoint)
                 )
                 response = client.send(request)
+            if self.autonomous and self.credential_observer is not None:
+                self.credential_observer.observe_response(
+                    endpoint, response.headers.get_list("set-cookie")
+                )
             attempt["status"] = response.status_code
             self.capture.discovery.add(
                 {
+                    "_definitionProbe": True,
+                    "_skipDefinition": self.autonomous,
                     "request": {
                         "url": endpoint,
                         "method": method,
@@ -283,7 +460,7 @@ class SelfDiscovery:
                         if kind == "graphql"
                         else "invalid_definition"
                     )
-        except BrowserError:
+        except Exception:
             # No server diagnostics, response bodies or authentication values
             # belong in this report. A failed probe is never retried.
             pass
@@ -302,6 +479,12 @@ class SelfDiscovery:
                     "maxPostDataSize": MAX_BODY,
                 },
             )
+            for endpoint in self.initial_definitions[: self.max_probes]:
+                self._probe("definition", endpoint)
+            if self.autonomous:
+                # Definitions declare API origins before traversal acts on controls,
+                # so credential observations can be attributed without copying state.
+                self._probe_workflow_sources()
             exploration = None
             if self.explorer is not None:
                 exploration = self.explorer.run(self.capture, self.observer)
@@ -312,11 +495,35 @@ class SelfDiscovery:
                     self.session._check()
                     self.capture.drain()
             candidates = self._candidates()
+            if self.autonomous:
+                candidates += [
+                    ("definition", location)
+                    for (
+                        kind,
+                        _,
+                    ), locations in self.capture.discovery.definition_sources.items()
+                    if kind == "openapi"
+                    for location in sorted(locations)
+                ]
+                candidates = list(dict.fromkeys(candidates))
             if self.explorer is not None:
                 self.explorer.freeze()
-            for kind, endpoint in candidates[: self.max_probes]:
+            attempted = {item["endpoint"] for item in self.attempts}
+            for kind, endpoint in [
+                (kind, endpoint)
+                for kind, endpoint in candidates
+                if endpoint not in attempted
+            ][: max(0, self.max_probes - len(self.attempts))]:
                 self.session._check()
                 self._probe(kind, endpoint)
+            if self.autonomous:
+                self._probe_workflow_sources()
+                candidates = list(
+                    dict.fromkeys(
+                        candidates
+                        + [("definition", address) for address in self.workflow_sources]
+                    )
+                )
             self.capture.drain()
             result = self.capture.discovery
             result.omitted += len(self.capture.pending)

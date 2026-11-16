@@ -38,9 +38,9 @@ def endpoint_url(url):
     authority = parsed.hostname.lower()
     if ":" in authority:
         authority = "[" + authority + "]"
-    if parsed.port and parsed.port != 443:
+    if parsed.port and parsed.port != (443 if parsed.scheme == "https" else 80):
         authority += ":" + str(parsed.port)
-    return urlunsplit(("https", authority, parsed.path or "/", "", ""))
+    return urlunsplit((parsed.scheme, authority, parsed.path or "/", "", ""))
 
 
 def observed_endpoint(url):

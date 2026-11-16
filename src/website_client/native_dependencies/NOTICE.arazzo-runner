@@ -1,0 +1,7 @@
+arazzo-runner
+Copyright (c) 2025 Jentic
+Copyright (c) 2025 The Arazzo Engine project contributors
+Modified by browser-sourced-api-client-generator, November 2026.
+Version 0.9.6+websiteclient.1 preserves explicit JSON null in the native HTTP
+executor and preserves absent payloads in the native parameter processor.
+The original Apache-2.0 license and notices remain in effect.

@@ -12,9 +12,10 @@ import json
 import os
 from pathlib import Path
 import sys
-import types
 import typing
 from urllib.parse import urlsplit
+
+from .result_output import write_result_text
 
 BYTES_PER_KIBIBYTE = 1024
 BYTES_PER_MEBIBYTE = 1024 * BYTES_PER_KIBIBYTE
@@ -51,60 +52,22 @@ SAFE_INPUT_ERROR_PREFIXES = (
 class RequestState:
     # Set before calling the typed method: a later failure can be ambiguous.
     """Track whether an endpoint method started so failure messages preserve uncertainty."""
+
     started: bool = False
+    completed: bool = False
+    write: bool = False
 
 
-def convert(value, annotation):
-    """Convert JSON into the explicit Python type accepted by an upstream SDK method.
+def convert(
+    value: typing.Any, annotation: typing.Any, stack: ExitStack | None = None
+) -> typing.Any:
+    """Convert through the native input adapter; optional stack owns opened files."""
+    from .native_files import convert as native_convert
 
-    Support scalars, unions, enums and the upstream model adapters. Reject unsupported
-    types instead of coercing arbitrary input or introducing a competing schema."""
-    if annotation in {typing.Any, inspect.Parameter.empty}:
-        return value
-    base = typing.get_origin(annotation)
-    if base in {typing.Union, types.UnionType}:
-        for member in typing.get_args(annotation):
-            try:
-                return convert(value, member)
-            except (TypeError, ValueError, KeyError):
-                pass
-        raise ValueError("Input does not match its declared type")
-    if annotation is type(None):
-        if value is not None:
-            raise ValueError()
-        return None
-    if base is list:
-        if not isinstance(value, list):
-            raise ValueError()
-        return [convert(item, typing.get_args(annotation)[0]) for item in value]
-    if base is dict:
-        if not isinstance(value, dict):
-            raise ValueError()
-        return value
-    if base is typing.Literal:
-        if value not in typing.get_args(annotation):
-            raise ValueError()
-        return value
-    if annotation in {date, datetime}:
-        if not isinstance(value, str):
-            raise ValueError()
-        return annotation.fromisoformat(value)
-    if annotation in {str, int, float, bool}:
-        if type(value) is not annotation and not (
-            annotation is float and type(value) is int
-        ):
-            raise ValueError()
-        return value
-    if inspect.isclass(annotation) and issubclass(annotation, Enum):
-        return annotation(value)
-    if hasattr(annotation, "model_validate"):
-        return annotation.model_validate(value)
-    if hasattr(annotation, "from_dict") and isinstance(value, dict):
-        return annotation.from_dict(value)
-    raise ValueError("Unsupported input type; use the generated Python API")
+    return native_convert(value, annotation, stack)
 
 
-def serialize(value):
+def serialize(value: typing.Any) -> typing.Any:
     """Convert supported SDK models, dates and enums into JSON-compatible values."""
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json", by_alias=True)
@@ -123,16 +86,27 @@ def serialize(value):
     raise ValueError("Use the generated Python API for this response type")
 
 
-def load_operation_function(operation):
+def load_operation_function(
+    operation: typing.Mapping[str, typing.Any],
+) -> typing.Callable[..., typing.Any]:
     """Use the upstream generated method as the only request builder."""
     if operation["kind"] == "openapi":
         module = importlib.import_module(operation["module"])
         return module.sync_detailed
+    if operation["kind"] == "graphql-custom":
+        builders = importlib.import_module(
+            __package__ + ".custom_queries"
+            if operation["operationType"] == "query"
+            else __package__ + ".custom_mutations"
+        )
+        return getattr(getattr(builders, operation["builder"]), operation["field"])
     client_class = importlib.import_module(__package__ + ".client").Client
     return getattr(client_class, operation["method"])
 
 
-def input_parameters(function):
+def input_parameters(
+    function: typing.Callable[..., typing.Any],
+) -> dict[str, inspect.Parameter]:
     """Select only explicit endpoint inputs, excluding client and catch-all args."""
     return {
         name: parameter
@@ -142,7 +116,7 @@ def input_parameters(function):
     }
 
 
-def describe_inputs(function):
+def describe_inputs(function: typing.Callable[..., typing.Any]) -> str:
     """Describe required and optional parameters from a schema-backed SDK signature."""
     hints = typing.get_type_hints(function)
     descriptions = []
@@ -153,7 +127,10 @@ def describe_inputs(function):
     return "; ".join(descriptions) or "none"
 
 
-def describe_operation_inputs(operation, function):
+def describe_operation_inputs(
+    operation: typing.Mapping[str, typing.Any],
+    function: typing.Callable[..., typing.Any],
+) -> str:
     """Describe captured GraphQL variable types when Python annotations are only Any."""
     if operation["kind"] != "graphql-operation":
         return describe_inputs(function)
@@ -173,11 +150,10 @@ def describe_operation_inputs(operation, function):
     )
 
 
-def add_operation_arguments(command):
+def add_operation_arguments(command: argparse.ArgumentParser) -> None:
     """Add runtime input, authentication, output and write-confirmation flags."""
     command.add_argument(
         "--url",
-        required=True,
         help="Service base URL for OpenAPI; exact endpoint URL for GraphQL.",
     )
     command.add_argument(
@@ -229,7 +205,20 @@ def add_operation_arguments(command):
     )
 
 
-def build_parser(operations):
+def _apply_runtime_defaults(
+    command: argparse.ArgumentParser, defaults: typing.Mapping[str, typing.Any]
+) -> None:
+    command.set_defaults(
+        url=defaults.get("endpoint"),
+        profile_id=defaults.get("profileId"),
+        runtime_endpoint=defaults.get("endpoint"),
+    )
+
+
+def build_parser(
+    operations: typing.Mapping[str, dict],
+    defaults: typing.Mapping[str, typing.Any] | None = None,
+) -> tuple[argparse.ArgumentParser, dict[str, typing.Callable[..., typing.Any]]]:
     """Build one endpoint subcommand per packaged operation without sending requests."""
     parser = argparse.ArgumentParser(
         description="Call generated endpoint methods. Help is local and sends no requests."
@@ -252,10 +241,13 @@ def build_parser(operations):
             ),
         )
         add_operation_arguments(command)
+        _apply_runtime_defaults(command, defaults or {})
     return parser, functions
 
 
-def validate_execution_options(options, operation):
+def validate_execution_options(
+    options: argparse.Namespace, operation: typing.Mapping[str, typing.Any]
+) -> None:
     """Reject invalid inputs and unconfirmed writes before opening a browser."""
     if operation["write"] and options.confirm_write != options.operation:
         raise ValueError("This write requires --confirm-write " + options.operation)
@@ -272,12 +264,14 @@ def validate_execution_options(options, operation):
     if options.login and not sys.stdin.isatty():
         raise ValueError("Browser login requires an interactive terminal")
 
+    if not options.url:
+        raise ValueError("Input requires --url or a packaged service endpoint")
     validate_service_url(options.url)
     if options.output and os.path.lexists(options.output):
         raise ValueError("Output already exists")
 
 
-def validate_service_url(url):
+def validate_service_url(url: str) -> None:
     # Permit unencrypted HTTP only for local development and test services.
     """Require HTTPS, except for loopback tests, and reject URL-embedded credentials."""
     parsed = urlsplit(url)
@@ -298,7 +292,7 @@ def validate_service_url(url):
         )
 
 
-def read_input_json(input_path):
+def read_input_json(input_path: str | Path | None) -> dict[str, typing.Any]:
     """Read one bounded JSON object for named endpoint arguments."""
     if not input_path:
         return {}
@@ -312,7 +306,7 @@ def read_input_json(input_path):
     return data
 
 
-def read_runtime_headers(enabled):
+def read_runtime_headers(enabled: bool) -> dict[str, str]:
     """Read a bounded object without echoing its credential values."""
     if not enabled:
         return {}
@@ -334,7 +328,11 @@ def read_runtime_headers(enabled):
     return headers
 
 
-def bind_input_arguments(function, data):
+def bind_input_arguments(
+    function: typing.Callable[..., typing.Any],
+    data: dict[str, typing.Any],
+    stack: ExitStack | None = None,
+) -> dict[str, typing.Any]:
     """Convert JSON into the upstream method's scalars, enums and typed models.
 
     The generated signatures define required fields. Their model adapters own
@@ -346,7 +344,7 @@ def bind_input_arguments(function, data):
 
     hints = typing.get_type_hints(function)
     arguments = {
-        name: convert(value, hints.get(name, typing.Any))
+        name: convert(value, hints.get(name, typing.Any), stack)
         for name, value in data.items()
     }
     for name, parameter in parameters.items():
@@ -355,9 +353,22 @@ def bind_input_arguments(function, data):
     return arguments
 
 
-def enter_browser_transport(stack, options, operation):
+def enter_browser_transport(
+    stack: ExitStack,
+    options: argparse.Namespace,
+    operation: typing.Mapping[str, typing.Any],
+) -> typing.Any:
     """Open a one-request authenticated browser transport only when --login is selected."""
     if not options.login:
+        if getattr(options, "profile_id", None) or getattr(
+            options, "runtime_endpoint", None
+        ):
+            from .authenticated_http import profile_dispatch, SDKTransport
+
+            dispatch = stack.enter_context(
+                profile_dispatch(options.profile_id, options.url)
+            )
+            return SDKTransport(dispatch)
         return None
     from .session_http import BrowserLoginTransport
 
@@ -373,7 +384,13 @@ def enter_browser_transport(stack, options, operation):
     )
 
 
-def enter_generated_client(stack, options, operation, headers, transport):
+def enter_generated_client(
+    stack: ExitStack,
+    options: argparse.Namespace,
+    operation: typing.Mapping[str, typing.Any],
+    headers: dict[str, str],
+    transport: typing.Any,
+) -> typing.Any:
     """Inject authentication transport while retaining the upstream client."""
     module = importlib.import_module(__package__ + ".client")
     if operation["kind"] == "openapi":
@@ -386,8 +403,10 @@ def enter_generated_client(stack, options, operation, headers, transport):
             client.set_httpx_client(
                 httpx.Client(
                     base_url=options.url,
+                    headers=headers,
                     transport=transport,
                     follow_redirects=False,
+                    trust_env=False,
                 )
             )
     else:
@@ -396,7 +415,12 @@ def enter_generated_client(stack, options, operation, headers, transport):
             import httpx
 
             client_options["http_client"] = stack.enter_context(
-                httpx.Client(transport=transport, follow_redirects=False)
+                httpx.Client(
+                    transport=transport,
+                    headers=headers,
+                    follow_redirects=False,
+                    trust_env=False,
+                )
             )
         if operation["kind"] == "graphql-operation":
             client_options["allow_writes"] = operation["write"]
@@ -404,7 +428,34 @@ def enter_generated_client(stack, options, operation, headers, transport):
     return stack.enter_context(client)
 
 
-def execute_operation(options, operation, function, arguments, headers, state):
+def _execute_custom_operation(
+    client: typing.Any,
+    operation: typing.Mapping[str, typing.Any],
+    function: typing.Callable[..., typing.Any],
+    arguments: dict[str, typing.Any],
+    operation_name: str,
+) -> typing.Any:
+    """Use only native Ariadne builders, including their generated selection fields."""
+    if any(value is None for value in arguments.values()):
+        raise ValueError(
+            "Input explicit null arguments are unsupported by the native builder"
+        )
+    field = function(**arguments)
+    if operation["selection"]:
+        field.fields(*(getattr(type(field), name) for name in operation["selection"]))
+    return getattr(client, operation["operationType"])(
+        field, operation_name=operation_name
+    )
+
+
+def execute_operation(
+    options: argparse.Namespace,
+    operation: typing.Mapping[str, typing.Any],
+    function: typing.Callable[..., typing.Any],
+    arguments: dict[str, typing.Any],
+    headers: dict[str, str],
+    state: RequestState,
+) -> typing.Any:
     # Keep the client and browser alive for the typed method; close both on
     # success, failure or cancellation before serializing the returned data.
     """Call one generated method while its client and optional browser remain open.
@@ -423,29 +474,40 @@ def execute_operation(options, operation, function, arguments, headers, state):
                 return {"status": int(response.status_code)}
             return response.parsed
 
+        if operation["kind"] == "graphql-custom":
+            return _execute_custom_operation(
+                client, operation, function, arguments, options.operation
+            )
         method = getattr(client, operation["method"])
         return method(**arguments)
 
 
-def write_result(result, output_path):
+def write_result(result: typing.Any, output_path: str | Path | None) -> None:
     """Serialize the result to stdout or an exclusively created private output file."""
     text = json.dumps(serialize(result)) + "\n"
-    if not output_path:
-        print(text, end="")
-        return
-    descriptor = os.open(
-        output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE
-    )
-    with os.fdopen(descriptor, "w") as stream:
-        stream.write(text)
+    write_result_text(text, output_path)
 
 
-def show_failure(error, state):
+def show_failure(error: Exception, state: RequestState) -> None:
     """Report bounded diagnostics without leaking inputs, credentials or server response bodies.
 
     Distinguish pre-call validation from potentially completed requests. A transport
     error after execution starts must never imply that retrying a write is safe."""
-    if isinstance(error, ValueError) and not state.started:
+    if state.completed:
+        print(
+            json.dumps(
+                {
+                    "reason": "local_output_failure",
+                    "requestCompleted": True,
+                    "effects": "possible" if state.write else "none",
+                }
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+    elif type(error).__name__ in {"AuthenticationRequired", "ProfileError"}:
+        print(json.dumps({"reason": str(error)}), file=sys.stderr)
+    elif isinstance(error, ValueError) and not state.started:
         # Model errors may echo private inputs. Only our own validation messages
         # are eligible for display; all other diagnostics stay bounded.
         message = str(error)
@@ -477,29 +539,32 @@ def show_failure(error, state):
         )
 
 
-def main(args=None):
+def main(args: list[str] | None = None) -> int:
     """Validate CLI inputs, execute one generated operation and return a process exit code."""
     operations = json.loads(files(__package__).joinpath("_operations.json").read_text())
-    parser, functions = build_parser(operations)
+    defaults = json.loads(files(__package__).joinpath("_runtime.json").read_text())
+    parser, functions = build_parser(operations, defaults)
     options = parser.parse_args(args)
     operation = operations[options.operation]
     function = functions[options.operation]
-    state = RequestState()
+    state = RequestState(write=operation["write"])
 
     try:
-        validate_execution_options(options, operation)
-        data = read_input_json(options.input)
-        headers = read_runtime_headers(options.headers_stdin)
-        arguments = bind_input_arguments(function, data)
-        if operation["kind"] == "graphql-operation":
-            from .operation_runtime import validate_arguments
+        with ExitStack() as command_stack:
+            validate_execution_options(options, operation)
+            data = read_input_json(options.input)
+            headers = read_runtime_headers(options.headers_stdin)
+            arguments = bind_input_arguments(function, data, command_stack)
+            if operation["kind"] == "graphql-operation":
+                from .operation_runtime import validate_arguments
 
-            validate_arguments(__package__, options.operation, arguments)
-        result = execute_operation(
-            options, operation, function, arguments, headers, state
-        )
-        write_result(result, options.output)
-        return 0
+                validate_arguments(__package__, options.operation, arguments)
+            result = execute_operation(
+                options, operation, function, arguments, headers, state
+            )
+            state.completed = True
+            write_result(result, options.output)
+            return 0
     except KeyboardInterrupt:
         print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
         if state.started:
@@ -513,7 +578,7 @@ def main(args=None):
         return 1
 
 
-def entrypoint():
+def entrypoint() -> None:
     """Exit the installed command with the status returned by main."""
     sys.exit(main())
 

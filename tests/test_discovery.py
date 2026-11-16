@@ -91,7 +91,10 @@ def test_actual_openapi_stays_separate_from_inference():
     discovery.add(entry("https://example.test/openapi.json", response=spec))
     files = discovery.files("har")
     actual = json.loads(next(text for name, text in files.items() if name.startswith("openapi-downloaded")))
-    assert actual == spec
+    from website_client.admission import admit_openapi
+    assert actual == admit_openapi(spec)[0]
+    assert actual["paths"]["/items"]["get"]["operationId"] == "list_items"
+    assert "x-discovery-inferred" not in actual
     assert "openapi-inferred-0001.json" in files
 
 

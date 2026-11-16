@@ -165,7 +165,12 @@ def normalize_graphql(target: Service, source: Artifact, artifacts: ArtifactInde
     if any(item.kind is not Kind.GRAPHQL_OPERATIONS for item in documents):
         raise BrowserError("A GraphQL service references a non-operation artifact.")
     if not documents:
-        raise BrowserError("Missing operation documents for this GraphQL endpoint.")
+        from .graphql_admission import schema_operations
+        operations, exclusions = schema_operations(schema_sdl)
+        if not operations:
+            raise BrowserError("No supported schema-only root selections.")
+        return replace(target, schema_artifact=schema_id, operation_names=tuple(operations), status=Status.READY,
+                       issues=tuple(item["reason"] for item in exclusions))
     text, names = combined_operations(documents, schema_sdl)
     compiled_id = artifacts.derive(
         "normalized-operations.graphql", Kind.GRAPHQL_OPERATIONS, text,

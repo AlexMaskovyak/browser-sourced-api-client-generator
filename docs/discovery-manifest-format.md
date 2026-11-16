@@ -1,89 +1,121 @@
 # Discovery manifest format
 
-Use this reference when writing a tool that supplies discovery results to the
-generator. For installation, commands and recovery, start with
-[the pipeline guide](discovery-pipeline.md). A discovery manifest is one JSON file
-containing API definitions, supporting evidence and their relationships.
+Use this reference to supply saved discovery results to the generator. A manifest
+is a JSON document containing API definitions, source hashes and explicit service
+associations. For ordinary URL or file usage, start with the [pipeline guide](discovery-pipeline.md).
 
 ## Version 1 fields
 
-The normative structural schema ships with the package at
-[`discovery-bundle-v1.schema.json`](../src/website_client/schemas/discovery-bundle-v1.schema.json).
-Consumers also check hashes, references, dependency cycles, byte limits and API
-definition validity. Unknown versions and additional fields are rejected.
+The [packaged structural schema](../src/website_client/schemas/discovery-bundle-v1.schema.json)
+is authoritative. Consumers also check content hashes, references, dependency cycles,
+byte limits and standard definition validity. Unknown versions and extra fields are
+rejected. The standard-library [producer example](../examples/create_discovery_manifest.py)
+shows how to create a complete manifest; the table below is a field reference.
 
 | Field | Meaning |
 | --- | --- |
 | `format` | Exactly `website-client-discovery`. |
 | `version` | Integer `1`. |
-| `stage` | `discovery` or `normalized`. Generation revalidates either stage. |
-| `producer` | Producer `name` and `version`; a claim of origin, not authentication. |
-| `createdAt` | ISO 8601 timestamp including timezone. |
-| `artifacts` | Complete UTF-8 content, kind, identity, hash and provenance. |
-| `services` | API endpoint, protocol and explicitly associated artifact IDs. |
+| `stage` | `discovery` or `normalized`; generation revalidates either. |
+| `producer` | Producer name/version, recording a claim of origin rather than authentication. |
+| `createdAt` | Timestamp including timezone; capture time is not collection-completeness evidence. |
+| `artifacts` | Stored UTF-8 documents with kind, ID, content, hash and provenance. |
+| `services` | Endpoint/protocol and explicit definition/operation document references. |
 | `sourceBundles` | Parent manifest digests, producer identities and capture times. |
-| `normalization` | Policy version, unassigned contract artifacts and limitations. |
+| `normalization` | Policy version, unassigned contract documents and limitations. |
 
-Each stored document is called an `artifact` in the exchange format. It has
-`id`, `name`, `kind`, `content`, `sha256` and `provenance`, which records its sources.
-Kinds are `report`, `har`, `openapi`, `graphql-schema` and `graphql-operations`.
-The hash is lowercase SHA-256 of the exact UTF-8 `content` bytes. Artifact IDs must
-be unique; names need not be unique across producers. Ambiguous name selection
-requires the artifact ID. Provenance records `source`, `locations`, `derivedFrom`
-artifact IDs and `producers`. Preserve originals when adding derived documents.
+Each stored document is called an `artifact` in the exchange format. Its fields are
+`id`, `name`, `kind`, `content`, `sha256` and `provenance`. Kinds are `report`, `har`,
+`openapi`, `graphql-schema`, `graphql-operations` and `arazzo`. The hash covers the
+exact stored UTF-8 content. IDs must be unique; document names need not be unique
+across producers. Provenance records source, safe locations, `derivedFrom` IDs and
+producer identities. Refer to a document by ID when its name is ambiguous.
 
-A service has `id`, `protocol` (`openapi` or `graphql`), `endpoint`,
-`schemaArtifact`, `operationArtifacts` and `confidence`. `schemaArtifact` may be
-null for operation-document generation. A complete schema is optional.
-GraphQL operation documents belong to a particular
-endpoint, not a global pool. The default service ID is `service-` followed by the
-first 16 hexadecimal characters of SHA-256 of `protocol + "\0" + endpoint`.
-The endpoint is canonical HTTPS, with a lowercase authority and `/` for an empty
-path; the default `:443` port, query values, embedded credentials and fragments
-are excluded. Captured numeric or identity path segments may be templates. Runtime client commands still
-require their actual `--url`.
+A service contains `id`, `protocol` (`openapi` or `graphql`), `endpoint`,
+`schemaArtifact`, `operationArtifacts` and `confidence`. GraphQL can have a complete
+schema with no named operations, or named operations with no complete schema. Those
+are distinct generation routes. Documents belong to their declared endpoint, not
+to a global pool inferred from similar fields or neighboring source code.
 
-Confidence is `published`, `external`, `observed`, `declared` or `inferred`.
-It does not establish live behavior or successful execution. A mutation may be
-fully described yet remain unexecuted. Reports retain form declarations and
-blocked request shapes without manufacturing a server schema from them.
+Default service IDs use the first 16 hexadecimal characters of SHA-256 over
+`protocol + "\0" + endpoint`, prefixed with `service-`. Endpoints are canonical
+HTTPS URLs; HTTP is accepted only on explicit loopback addresses for local services.
+Query values, embedded credentials and fragments are excluded. Authority casing and
+default ports are normalized and an empty path becomes `/`. Generated clients save
+the endpoint and need no repeated `--url` for ordinary calls.
 
-## Normalization and selection
+Confidence is `published`, `external`, `observed`, `declared` or `inferred`. It records
+contract evidence, not successful execution or permission to perform a write.
 
-Normalization parses operation documents, resolves their fragments and variables,
-and validates operations against a schema when one is assigned. Without a schema,
-valid bound operation documents remain generation-ready. Complete schemas enable
-stronger validation and generated input/response models. Conflicting operation
-definitions block that service. Similar schemas are not evidence that an unbound
-document belongs to an endpoint. Use explicit binding flags or have the upstream
-producer supply the association.
+## Normalization and automatic generation
 
-Services become `ready`, `review_required` or `blocked`, with issues and operation
-names. Inferred OpenAPI needs `--allow-inferred` at generation. Published schemas
-supersede inferred samples for the same service; superseded evidence is retained.
-Generation automatically selects a single ready service and records other
-services and unassigned documents in `generation.json`. Multiple ready services require
-`--service`. Readiness is structural, not a live compatibility claim.
+Normalization parses named operations and fragments, checks variable declarations,
+and validates against a complete schema when supplied. Schema-only GraphQL uses
+Ariadne's native root builders and bounded default leaf selections; schema-less
+operations keep narrower typing and validation. Unsupported subscriptions, ambiguous
+symbols and essential sensitive structures receive exclusions.
 
-Merge at most 20 inputs with repeated `normalize --input` arguments. Matching
-service IDs must describe the same protocol and endpoint. Missing schemas can be
-filled; conflicting published schemas, conflicting inferred schemas or colliding IDs are rejected. Normalized
-manifests can be normalized again without accumulating new transformations.
+The ordinary `run` command admits supported operations automatically and packages
+all unambiguous usable services with separate namespaces. It records excluded
+operations and conflicts in `coverage.json`. It neither asks for inferred-schema
+review nor requires choosing among several usable services. Compatibility stage
+commands still expose `ready`, `review_required` and `blocked` status and the legacy
+`--service`/`--allow-inferred` controls. Those flags are not default-path prerequisites.
+
+Standard merge requires a repeated service ID to retain the same protocol, endpoint
+and compatible definitions. It rejects conflicting ownership. The autonomous path
+quarantines affected services and retains independent ones, with explicit reasons.
+An artifact ID cannot silently acquire a different contract.
+
+## Reports and private runtime association
+
+Reports preserve only supported safe structure and provenance. Unknown report
+payloads can be omitted with an audit reason. Original and sanitized source hashes
+record privacy transformations without retaining the raw content. Existing captured
+GraphQL request metadata keeps safe method and query-name conventions; it contains
+no copied request headers or query values.
+
+A generated `runtime-associations.json` report maps explicit origins to stable
+non-secret profile identifiers under `runtimeProfiles`. This lets a saved manifest
+regenerate a client offline and retain its profile association. It contains no
+cookies, tokens or profile file paths. Private credential state stays outside output
+and installed package directories; another machine needs its own protected profile.
+
+Arazzo documents keep their standard format. Restricted workflow admission/execution
+and explicit source associations are handled by the workflow owner, not inferred from
+manifest document proximity. Form declarations and blocked request shapes remain
+evidence; they do not manufacture executable dependencies.
+
+A `workflow-bindings.json` report preserves exact source associations for offline
+generation. Its `workflowBindings` object maps a workflow document ID to source
+names declared in that document. Each source name maps to an object with `artifact`
+and an optional explicit `endpoint`. The artifact must identify an admitted OpenAPI
+document in the same manifest. The endpoint, when present, overrides that source's
+server URL. These are contract references and public destinations, not credentials.
+
+For example, the following is a field-shape illustration, not a complete manifest:
+
+```json
+{"workflowBindings":{"WORKFLOW_DOCUMENT_ID":{"service":{"artifact":"OPENAPI_DOCUMENT_ID","endpoint":"https://api.example.com/"}}}}
+```
+
+Normal URL/file generation creates these references from exact advertised URLs or
+declared local source files. Producers should preserve them when exporting a saved
+manifest. Contradictory associations, unknown document IDs or the wrong document
+kind exclude the affected workflow. Offline generation does not fetch missing
+sources or choose a nearby document by filename, matching values or request order.
 
 ## Integrity and limits
 
-Manifest digests use `website-client-canonical-json-v1`: sorted object keys,
-two-space indentation, unescaped Unicode, standard JSON values and one final
-newline, encoded as UTF-8. Array order is preserved. Artifact hashes always cover
-their original exact content. `generation.json` records the selected service,
-parent manifest hashes, raw and normalized schema hashes, operation artifact hashes
-and the operation document actually passed to the code generator. It does not
-include private walk reports or authentication state.
+Manifest digests use `website-client-canonical-json-v1`: sorted keys, two-space
+indentation, unescaped Unicode, standard JSON values and one final newline in UTF-8.
+Array order is preserved. Artifact hashes cover the stored safe content, while source
+hash reports preserve transformation provenance. Generation reports record backend
+versions, used definitions and operation coverage. Neither a hash nor successful
+generation establishes live compatibility.
 
-Manifests are limited to 64 MiB, individual artifacts to 32 MiB, definitions and
-operation documents to 8 MiB, artifacts to 500 and services to 100. Merge inputs
-share the 64 MiB budget. Credentials are not part of this exchange contract.
-Browser capture sanitizes its evidence; external producers are responsible for
-the content they supply. Import preserves that content rather than pretending to
-sanitize arbitrary third-party data. A sanitized HAR alone cannot reconstruct
-schemas or frontend declarations that the full manifest preserves.
+Limits are 64 MiB per manifest, 32 MiB per artifact, 8 MiB per definition/operation
+document, 500 artifacts and 100 services. Merge accepts at most 20 inputs sharing the
+64 MiB budget. Credentials are excluded from the exchange contract. All import and
+output routes apply automatic privacy filtering; external producers should also avoid
+supplying secrets. These heuristics cannot perfectly anonymize arbitrary unknown data.

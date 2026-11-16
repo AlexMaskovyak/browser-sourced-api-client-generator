@@ -156,7 +156,7 @@ def test_cleanup_runs_after_browser_failure(session):
     profile.cleanup.assert_called_once()
 
 
-def test_failed_launch_cleans_profile_and_signals(monkeypatch):
+def test_failed_launch_restores_signals_without_creating_persistent_profile(monkeypatch):
     monkeypatch.setattr("website_client.browser.find_browser", lambda *_a: "/browser")
     profile = Mock(name="profile")
     monkeypatch.setattr(
@@ -172,7 +172,7 @@ def test_failed_launch_cleans_profile_and_signals(monkeypatch):
             pass
     assert "private-value" not in str(error.value)
     assert signal.getsignal(signal.SIGINT) == previous
-    profile.cleanup.assert_called_once()
+    profile.cleanup.assert_not_called()
 
 
 def test_cli_rejects_pipe_before_opening_browser(monkeypatch):
@@ -190,3 +190,20 @@ def test_help_is_installed_and_offline():
     )
     assert "verification" in result
     assert "does not save" in result
+
+
+def test_initial_login_uses_non_persistent_context(monkeypatch):
+    monkeypatch.setattr('website_client.browser.find_browser', lambda *_: '/browser')
+    playwright, browser, context, page = Mock(), Mock(), Mock(), Mock()
+    playwright.chromium.launch.return_value = browser
+    browser.new_context.return_value = context
+    context.pages = []
+    context.new_page.return_value = page
+    monkeypatch.setattr('website_client.browser.sync_playwright', lambda: Mock(start=lambda: playwright))
+    with BrowserSession('https://example.test/app'):
+        pass
+    playwright.chromium.launch.assert_called_once()
+    playwright.chromium.launch_persistent_context.assert_not_called()
+    browser.new_context.assert_called_once()
+    context.close.assert_called_once()
+    browser.close.assert_called_once()

@@ -1,0 +1,66 @@
+--- a/arazzo_runner/http.py
++++ b/arazzo_runner/http.py
+@@ -1,3 +1,4 @@
++# Modified by browser-sourced-api-client-generator: preserve explicit JSON null and omitted bodies.
+ #!/usr/bin/env python3
+ """
+ HTTP Client for Arazzo Runner
+@@ -5,6 +6,7 @@
+ This module provides HTTP request handling for the Arazzo Runner.
+ """
+ import logging
++import json
+ from typing import Any
+ 
+ import requests
+@@ -195,7 +197,11 @@
+ 
+             # Handle explicit None payload
+             if payload is None:
+-                if content_type:
++                if content_category == "json" and "payload" in request_body:
++                    # Native serialization must distinguish JSON null from no body.
++                    headers["Content-Type"] = content_type
++                    data = json.dumps(None)
++                elif content_type:
+                     # Content type specified but no payload - set header but no body
+                     headers["Content-Type"] = content_type
+                     logger.debug(
+--- a/arazzo_runner/executor/parameter_processor.py
++++ b/arazzo_runner/executor/parameter_processor.py
+@@ -1,3 +1,4 @@
++# Modified by browser-sourced-api-client-generator: preserve explicit JSON null and omitted bodies.
+ #!/usr/bin/env python3
+ """
+ Parameter Processor for Arazzo Runner
+@@ -131,6 +132,8 @@
+             Dictionary with prepared request body
+         """
+         content_type = request_body.get("contentType")
++        if "payload" not in request_body:
++            return {"contentType": content_type}
+         payload = request_body.get("payload")
+ 
+         # First, evaluate the entire payload object to resolve any expressions
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "arazzo_runner"
+-version = "0.9.6"
++version = "0.9.6+websiteclient.1"
+ description = "Execution libraries and test tools for Arazzo workflows and Open API operations"
+ authors = [
+     { name = "Jentic", email = "hello@jentic.com" },
+--- a/NOTICE
++++ b/NOTICE
+@@ -1,3 +1,7 @@
+ arazzo-runner
+ Copyright (c) 2025 Jentic
+-Copyright (c) 2025 The Arazzo Engine project contributors
+\ No newline at end of file
++Copyright (c) 2025 The Arazzo Engine project contributors
++Modified by browser-sourced-api-client-generator, November 2026.
++Version 0.9.6+websiteclient.1 preserves explicit JSON null in the native HTTP
++executor and preserves absent payloads in the native parameter processor.
++The original Apache-2.0 license and notices remain in effect.

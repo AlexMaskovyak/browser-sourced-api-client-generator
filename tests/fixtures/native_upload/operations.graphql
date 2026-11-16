@@ -1,0 +1,2 @@
+mutation UploadFile($file: Upload!, $note: String!) { upload(file: $file, note: $note) { sha256 size note } }
+mutation NestedUpload($input: UploadInput!) { submit(input: $input) { sha256 size note } }
