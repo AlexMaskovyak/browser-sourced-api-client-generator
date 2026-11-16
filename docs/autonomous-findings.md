@@ -107,6 +107,22 @@ only bounded reason/type/level fields. Ruff passed for 24 integration files. The
 subsequent standalone container iteration completed ordinary generator CLI and
 persistent-EOF public API generation; final complete acceptance remains pending.
 
+## Acceptance environment correction
+
+F23: The first fixed full `scripts/test-docker.sh` run at `4842da7` stopped with
+339 passing and 12 failing tests in 91.42s. Three failures required the real
+har2sdk Node/npm dependency; nine real-browser cases requested the default Chrome
+executable name. The command had run generator tests in the older compatibility
+image, which intentionally had neither Node nor that executable name. No application
+failure appeared in these tracebacks. Host full verification at `d27827c` passed
+351 tests in 93.98s.
+
+The correction moves full generator tests into the prepared generation image and
+adds a test-only Chrome-name wrapper for its installed disposable Chromium. The
+HTTPS compatibility program keeps its separate base image. The minimal installed
+runtime must still contain neither a browser executable nor separate Node/npm.
+Focused rechecks and the corrected fixed full command are pending.
+
 ## Quality review
 
 The user's explicit quality instruction applies to all owned integration code.
