@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from filelock import FileLock
 from platformdirs import user_state_path
 
-AUTH_HEADERS = frozenset({'authorization', 'x-csrf-token', 'x-xsrf-token', 'csrf-token', 'xsrf-token'})
+AUTH_HEADERS = frozenset({'authorization', 'x-csrf-token', 'x-xsrf-token', 'csrf-token', 'xsrf-token', 'x-api-key', 'api-key'})
 
 
 class ProfileError(ValueError):
@@ -43,6 +43,16 @@ def _private(path, directory=False):
     expected = stat.S_ISDIR if directory else stat.S_ISREG
     if not expected(info.st_mode) or info.st_mode & 0o077 or (hasattr(os, 'getuid') and info.st_uid != os.getuid()):
         raise ProfileError('unsafe_profile_permissions')
+
+
+def header_names(names):
+    blocked = {'cookie', 'host', 'content-length', 'connection', 'transfer-encoding', 'origin', 'referer'}
+    result = set(AUTH_HEADERS)
+    for name in names:
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9-]{0,127}', name) or name.lower() in blocked or name.lower().startswith('sec-'):
+            raise ProfileError('invalid_profile_headers')
+        result.add(name.lower())
+    return result
 
 
 def scoped_headers(headers, allowed=AUTH_HEADERS):
@@ -100,7 +110,8 @@ class ProfileStore:
             value = json.loads(self.path.read_text())
             if value['origin'] != self.origin or value['profile'] != self.identifier:
                 raise ProfileError('profile_origin_mismatch')
-            value['headers'] = scoped_headers(value['headers'])
+            value['header_names'] = sorted(header_names(value.get('header_names', [])))
+            value['headers'] = scoped_headers(value['headers'], set(value['header_names']))
             value['storage_state'] = scoped_state(value['storage_state'], self.origin)
             return value
         except FileNotFoundError:
@@ -108,11 +119,11 @@ class ProfileStore:
         except (KeyError, TypeError, json.JSONDecodeError):
             raise ProfileError('invalid_profile') from None
 
-    def save(self, state, headers):
+    def save(self, state, headers, allowed_headers=()):
         if self.path.exists() or self.path.is_symlink():
             _private(self.path)
         value = {'version': 1, 'profile': self.identifier, 'origin': self.origin,
-                 'headers': scoped_headers(headers), 'storage_state': scoped_state(state, self.origin)}
+                 'headers': scoped_headers(headers, header_names(allowed_headers)), 'header_names': sorted(header_names(allowed_headers)), 'storage_state': scoped_state(state, self.origin)}
         descriptor, temporary = tempfile.mkstemp(prefix='.profile-', dir=self.root)
         try:
             with os.fdopen(descriptor, 'w') as stream:
@@ -125,17 +136,18 @@ class ProfileStore:
                 os.unlink(temporary)
 
 
-def save_browser_profile(context, identifier, endpoint, headers=None):
+def save_browser_profile(context, identifier, endpoint, headers=None, allowed_headers=()):
     """Save selected login state; call only after explicit initial login completes."""
     with ProfileStore(identifier, endpoint).locked() as store:
-        store.save(context.storage_state(), headers or {})
+        store.save(context.storage_state(), headers or {}, allowed_headers)
 
 
 class HeaderCapture:
     """Observe known authentication headers only at the configured API origin."""
 
-    def __init__(self, endpoint):
+    def __init__(self, endpoint, allowed_headers=()):
         self.origin = service_origin(endpoint)
+        self.allowed_headers = header_names(allowed_headers)
         self.headers = {}
 
     def observe(self, method, params):
@@ -144,7 +156,27 @@ class HeaderCapture:
         try:
             request = params['request']
             if service_origin(request['url']) == self.origin:
-                selected = {k: v for k, v in request.get('headers', {}).items() if k.lower() in AUTH_HEADERS}
-                self.headers.update(scoped_headers(selected))
+                selected = {k: v for k, v in request.get('headers', {}).items() if k.lower() in self.allowed_headers}
+                self.headers.update(scoped_headers(selected, self.allowed_headers))
+        except (KeyError, TypeError, ProfileError):
+            return
+
+
+class OriginCaptures:
+    """Capture only origins and authentication names selected by initial definitions."""
+    def __init__(self, endpoint):
+        self.captures = {}
+        self.declare(endpoint)
+
+    def declare(self, endpoint, names=()):
+        origin = service_origin(endpoint)
+        capture = self.captures.setdefault(origin, HeaderCapture(endpoint))
+        capture.allowed_headers.update(header_names(names))
+
+    def observe(self, method, params):
+        try:
+            selected = self.captures.get(service_origin(params['request']['url']))
+            if selected is not None:
+                selected.observe(method, params)
         except (KeyError, TypeError, ProfileError):
             return

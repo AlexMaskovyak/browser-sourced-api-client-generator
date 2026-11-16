@@ -110,7 +110,7 @@ def profile_dispatch(identifier, endpoint):
                 yield AuthenticatedDispatch(api, endpoint, profile['headers'])
             finally:
                 try:
-                    store.save(api.storage_state(), profile['headers'])
+                    store.save(api.storage_state(), profile['headers'], profile.get('header_names', ()))
                 finally:
                     api.dispose()
 

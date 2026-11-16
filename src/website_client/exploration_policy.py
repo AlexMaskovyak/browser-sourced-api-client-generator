@@ -89,11 +89,13 @@ def graphql_read(payload):
         return False
 
 
-def request_allowed(request, allowed_origin):
+def request_allowed(request, allowed_origin, strict_origin=False, api_origins=()):
     """Return a reason for a blocked request, or None for an allowed read."""
     try:
         parsed = urlsplit(request.url)
         target = origin(urlunsplit(parsed._replace(fragment="")))
+        if strict_origin and target != allowed_origin and target not in api_origins:
+            return "undeclared_origin"
         if request.is_navigation_request() and target != allowed_origin:
             return "off_site_navigation"
         static_asset = getattr(request, "resource_type", "") in {

@@ -13,7 +13,7 @@ from .definitions import openapi_document
 
 METHODS = frozenset({'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'})
 # Conservative known-value detection, not a universal secret detector.
-SENSITIVE = re.compile(r'@|(?:bearer\s+)|(?:[?&](?:token|signature|key|credential)=)|(?:AKIA[A-Z0-9]{16})|(?:eyJ[A-Za-z0-9_-]{12,}\.)|(?:[a-f0-9]{32,})|(?:CANARY|SYNTHETIC_(?:TOKEN|SECRET|CAPABILITY))', re.I)
+SENSITIVE = re.compile(r'@|(?:bearer\s+)|(?:[?&](?:token|signature|key|credential)=)|(?:AKIA[A-Z0-9]{16})|(?:eyJ[A-Za-z0-9_-]{12,}\.)|(?:[a-f0-9]{32,})|(?:\bSECRET\d+\b)|(?:CANARY|SYNTHETIC_(?:TOKEN|SECRET|CAPABILITY))', re.I)
 DROP = frozenset({'example', 'examples', 'default', 'description', 'summary', 'externalDocs', 'contact', 'license'})
 
 
@@ -21,10 +21,14 @@ def sensitive(value):
     return isinstance(value, str) and bool(SENSITIVE.search(unquote(value)))
 
 
-def scrub_document(value):
-    """Remove samples and prose; essential sensitive wire structure is excluded later."""
+def scrub_document(value, context=None):
+    """Filter metadata without changing declared wire properties or literal values."""
+    maps = {'properties', 'patternProperties', 'schemas', 'parameters', 'responses', 'requestBodies',
+            'headers', 'callbacks', 'securitySchemes', 'paths', 'definitions', '$defs', 'dependentSchemas'}
     if isinstance(value, dict):
-        return {key: ('API definition.' if key == 'description' else scrub_document(item)) for key, item in value.items()
+        if context in maps:
+            return {key: scrub_document(item) for key, item in value.items()}
+        return {key: ('API definition.' if key == 'description' else scrub_document(item, key)) for key, item in value.items()
                 if (key not in DROP or key == 'description') and not (key.startswith('x-') and not key.startswith('x-discovery-'))}
     if isinstance(value, list):
         return [scrub_document(item) for item in value]
@@ -62,6 +66,8 @@ def walk_contract(document, value, seen=None):
     elif isinstance(value, list):
         for item in value:
             walk_contract(document, item, seen)
+    elif sensitive(value):
+        raise ValueError("sensitive_structure")
 
 
 def request_features(document, path_item, operation):
@@ -133,7 +139,10 @@ def prune_components(document):
 
 def admit_openapi(source):
     """Return safe source, executable definition and per-operation exclusion reasons."""
-    document = yaml.safe_load(source) if isinstance(source, str) else deepcopy(source)
+    try:
+        document = yaml.safe_load(source) if isinstance(source, str) else deepcopy(source)
+    except Exception:
+        raise BrowserError("invalid_openapi") from None
     if not isinstance(document, dict) or not str(document.get('openapi', '')).startswith(('3.0.', '3.1.')):
         raise BrowserError('Supply an OpenAPI 3.0 or 3.1 definition.')
     safe = scrub_document(document)
@@ -178,6 +187,9 @@ def admit_openapi(source):
         if sensitive(path):
             del safe['paths'][path]
     safe = _remove_sensitive_source(safe)
+    used_tags = {tag for item in executable["paths"].values() for method, operation in item.items() if method in METHODS for tag in operation.get("tags", [])}
+    if "tags" in executable:
+        executable["tags"] = [tag for tag in executable["tags"] if tag.get("name") in used_tags and not sensitive(tag.get("name"))]
     prune_components(executable)
     if executable['paths']:
         openapi_document(executable)

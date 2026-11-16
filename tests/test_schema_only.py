@@ -85,3 +85,25 @@ def test_schema_prose_and_sensitive_fields_are_not_packaged(tmp_path):
             assert b'CANARY' not in path.read_bytes()
     assert report['operations'] == ['query_status']
     assert report['coverage']['exclusions'][0]['reason'] == 'sensitive_structure'
+
+
+def test_native_reserved_aliases_collisions_and_privacy_interfaces(tmp_path, monkeypatch):
+    from website_client.graphql_admission import safe_schema, schema_operations
+    schema, excluded = safe_schema('interface CANARY_PRIVATE { id:ID } type Record implements CANARY_PRIVATE { id:ID } type Query { status:String, record:Record }')
+    assert 'record' not in schema and 'CANARY' not in schema
+    assert 'status' in schema
+    source = tmp_path / 'reserved.graphql'
+    source.write_text('type Record { from:String, class:String, camelCase:String } type Query { class:String, record:Record, status(optional:String,required:String!):String, fooBar:String, foo_bar:String }')
+    output = tmp_path / 'client'
+    report = generate(output, 'reserved-fields', schema=source)
+    metadata = json.loads((output / 'reserved_fields' / '_operations.json').read_text())
+    assert metadata['query_class']['field'] == 'class_'
+    assert metadata['query_record']['selection'] == ['camel_case', 'class_', 'from_']
+    assert 'query_fooBar' not in metadata and 'query_foo_bar' not in metadata
+    monkeypatch.syspath_prepend(str(output))
+    wrapper = importlib.import_module('reserved_fields._cli')
+    for item in metadata.values():
+        assert callable(wrapper.load_operation_function(item))
+    result = subprocess.run([sys.executable, '-m', 'reserved_fields._cli', '--help'], cwd=output, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert 'query_status' in result.stdout and 'query_class' in result.stdout

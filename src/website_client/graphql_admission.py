@@ -59,6 +59,10 @@ def safe_schema(source):
         for node in definitions:
             if getattr(node, 'name', None) is not None and node.name.value in unsafe_types:
                 continue
+            if hasattr(node, 'interfaces') and any(interface.name.value in unsafe_types for interface in node.interfaces):
+                unsafe_types.add(node.name.value)
+                changed = True
+                continue
             if hasattr(node, 'fields'):
                 fields = []
                 for field in node.fields:
@@ -94,19 +98,29 @@ def safe_schema(source):
 
 def schema_operations(source):
     """Select native root builders and bounded scalar/enum object leaves."""
-    from ariadne_codegen.utils import str_to_snake_case
+    from ariadne_codegen.utils import process_name
     schema = build_schema(source)
     operations, exclusions = {}, []
     for kind, root, builder in [('query', schema.query_type, 'Query'), ('mutation', schema.mutation_type, 'Mutation')]:
         if root is None:
             continue
+        native_names = {}
+        for wire in root.fields:
+            native_names.setdefault(process_name(wire, convert_to_snake_case=True), []).append(wire)
         for name, field in sorted(root.fields.items()):
+            if len(native_names[process_name(name, convert_to_snake_case=True)]) > 1:
+                exclusions.append({"operation": kind + "_" + name, "reason": "ambiguous_native_name"})
+                continue
             result = get_named_type(field.type)
             selection = []
             reason = None
             if isinstance(result, GraphQLObjectType):
+                leaf_names = {}
+                for wire in result.fields:
+                    leaf_names.setdefault(process_name(wire, convert_to_snake_case=True), []).append(wire)
                 selection = [leaf for leaf, value in sorted(result.fields.items())
-                             if isinstance(get_named_type(value.type), (GraphQLScalarType, GraphQLEnumType))
+                             if len(leaf_names[process_name(leaf, convert_to_snake_case=True)]) == 1
+                             and isinstance(get_named_type(value.type), (GraphQLScalarType, GraphQLEnumType))
                              and not any(is_non_null_type(arg.type) and arg.default_value is Undefined for arg in value.args.values())]
                 if not selection:
                     reason = 'unsupported_selection'
@@ -119,7 +133,7 @@ def schema_operations(source):
                 exclusions.append({'operation': command, 'reason': reason})
                 continue
             operations[command] = {'kind': 'graphql-custom', 'builder': builder,
-                                   'field': str_to_snake_case(name), 'selection': [str_to_snake_case(leaf) for leaf in selection],
+                                   'field': process_name(name, convert_to_snake_case=True), 'selection': [process_name(leaf, convert_to_snake_case=True) for leaf in selection],
                                    'operationType': kind, 'write': kind == 'mutation',
                                    'description': 'GraphQL ' + kind + ' using native schema builders'}
     if schema.subscription_type:

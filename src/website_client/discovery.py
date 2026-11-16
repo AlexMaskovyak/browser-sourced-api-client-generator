@@ -43,7 +43,7 @@ def route(url):
             parameters.append(name)
         else:
             segments.append(quote(segment, safe="-._~"))
-    base = f"https://{parsed.netloc.lower()}"
+    base = f"{parsed.scheme}://{parsed.netloc.lower()}"
     return base, "/".join(segments) or "/", parameters
 
 
@@ -82,6 +82,14 @@ def redact(value, depth=0):
     return None if value is None else "[REDACTED]"
 
 
+def sensitive_structure(value):
+    if isinstance(value, dict):
+        return any(sensitive(key) or sensitive_structure(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(sensitive_structure(item) for item in value)
+    return False
+
+
 def json_body(raw):
     if not isinstance(raw, str) or len(raw.encode()) > MAX_BODY: return None
     try: return json.loads(raw)
@@ -99,7 +107,7 @@ class LiteralCheck(Visitor):
 def operation(payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("query"), str): return None
     text = payload["query"]
-    if len(text.encode()) > MAX_BODY: return None
+    if len(text.encode()) > MAX_BODY or sensitive(text): return None
     try:
         document = parse(text, max_tokens=20000)
         operations = [item for item in document.definitions if item.kind == "operation_definition"]
@@ -145,6 +153,12 @@ class Discovery:
             if method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}: raise ValueError()
             query_names = safe_query(request["url"])
             post = request.get("postData", {})
+            if not isinstance(post, dict):
+                post = {}
+            header_size = any(str(item.get('name', '')).lower() == 'content-length' and str(item.get('value', '0')).isdigit() and int(item.get('value', 0)) > 0 for item in request.get('headers', []) if isinstance(item, dict))
+            body_evidence = bool(request.get('hasPostData') or request.get('_bodyOmitted') or request.get('_bodyUnknown')
+                                 or isinstance(request.get('bodySize'), (int, float)) and request['bodySize'] > 0
+                                 or post.get('params') or post.get('mimeType') or header_size)
             payload = json_body(post.get("text", ""))
             if method == "GET" and payload is None:
                 parts = dict(parse_qsl(urlsplit(request["url"]).query))
@@ -170,7 +184,9 @@ class Discovery:
             endpoint = self.endpoints.setdefault(key, {"origin": base, "path": path, "method": method,
                 "queryParameters": [], "pathParameters": path_params, "responses": {}, "observations": 0,
                 "graphql": graphql, "graphqlUnmodeled": bool(graphql_unknown), "liveVerified": False})
-            if post.get("text") and payload is None: endpoint["requestBodyUnmodeled"] = True
+            if (post.get("text") or body_evidence) and payload is None: endpoint["requestBodyUnmodeled"] = True
+            if sensitive_structure(payload) or sensitive_structure(body):
+                endpoint["privacyUnmodeled"] = True
             endpoint["observations"] += 1
             endpoint["queryParameters"] = sorted(set(endpoint["queryParameters"]) | set(query_names))
             if payload is not None and not graphql: endpoint["requestSchema"] = shape(payload)
@@ -190,8 +206,9 @@ class Discovery:
             if payload is not None:
                 safe_payload = {"operationName": graphql["name"], "query": graphql["document"], "variables": {}} if graphql else redact(payload)
                 safe_request["postData"] = {"mimeType": "application/json", "text": json.dumps(safe_payload)}
-            elif post.get("text"):
+            elif post.get("text") or body_evidence:
                 safe_request["_bodyOmitted"] = True
+                safe_request["postData"] = {"mimeType": mime(post.get("mimeType")), "_bodyUnknown": True}
             safe_response = {"status": status, "statusText": "", "httpVersion": response_version if response_version in versions else "", "headers": [], "cookies": [],
                              "redirectURL": "", "headersSize": -1, "bodySize": -1,
                              "content": {"size": 0, "mimeType": response_mime}}
@@ -200,10 +217,10 @@ class Discovery:
             duration = max(0, min(float(entry.get("time", 0)), 3600000))
             try: started = datetime.fromisoformat(entry["startedDateTime"]).isoformat()
             except Exception: started = datetime.now(timezone.utc).isoformat()
-            self.entries.append({"startedDateTime": started, "time": duration,
+            self.entries.append({"_definitionProbe": bool(entry.get("_definitionProbe")), "_resourceType": entry.get("_resourceType") if entry.get("_resourceType") in {"Fetch", "XHR", "Document"} else None, "startedDateTime": started, "time": duration,
                 "request": safe_request, "response": safe_response, "cache": {},
                 "timings": {"send": 0, "wait": duration, "receive": 0}, "_timingsEstimated": True, "_sanitized": True})
-            if 200 <= status < 300 and isinstance(body, dict): self._definition(body, request["url"])
+            if not entry.get("_skipDefinition") and 200 <= status < 300 and isinstance(body, dict): self._definition(body, request["url"])
             elif 200 <= status < 300 and body is None and isinstance(raw, str) and len(raw.encode()) <= MAX_BODY and ("graphql" in response_mime or urlsplit(request["url"]).path.endswith((".graphql", ".gql"))):
                 try:
                     text = graphql_schema(raw)
@@ -213,7 +230,20 @@ class Discovery:
             self.omitted += 1
 
     def record_definition(self, kind, text, location=None):
+        if kind == "openapi":
+            from .admission import admit_openapi
+            text = json.dumps(admit_openapi(text)[0], indent=2) + "\n"
+        elif kind == "graphql-schema":
+            from .graphql_admission import safe_schema
+            text = safe_schema(text)[0]
         key = (kind, hashlib.sha256(text.encode()).hexdigest())
+        if location:
+            for prior in list(self.definition_sources):
+                if prior != key and prior[0] == kind and location in self.definition_sources[prior]:
+                    self.definition_sources[prior].remove(location)
+                    if not self.definition_sources[prior]:
+                        self.definition_sources.pop(prior, None)
+                        self.definitions.pop(prior, None)
         self.definitions[key] = text
         if location:
             self.definition_sources.setdefault(key, set()).add(location)
@@ -221,7 +251,8 @@ class Discovery:
     def _definition(self, body, location=None):
         try:
             if "openapi" in body:
-                value = openapi_document(body)
+                from .admission import admit_openapi
+                value = admit_openapi(body)[0]
                 kind, text = "openapi", json.dumps(value, indent=2) + "\n"
             elif "__schema" in body or isinstance(body.get("data"), dict) and "__schema" in body["data"]:
                 kind, text = "graphql-schema", graphql_schema(body)
@@ -251,13 +282,17 @@ class Discovery:
             openapi_document(spec)
             files[f"openapi-inferred-{index:04}.json"] = json.dumps(spec, indent=2) + "\n"
         for index, ((kind, _digest), text) in enumerate(self.definitions.items(), 1):
-            files[f"{kind}-downloaded-{index:04}." + ("json" if kind == "openapi" else "graphql")] = text
+            files[f"{kind}-downloaded-{index:04}." + ("json" if kind in {"openapi", "arazzo"} else "graphql")] = text
         conflicts = set()
         combined = {}
         if self.documents:
             # A document may contain multiple operations and shared fragments.
             # Preserve distinct documents separately to avoid duplicate definitions.
             for index, text in enumerate(self.documents.values(), 1):
+                from .privacy import safe_operations
+                text = safe_operations(text).rstrip("\n")
+                if not text.strip():
+                    continue
                 files[f"operations-{index:04}.graphql"] = text + "\n"
                 for definition in parse(text).definitions:
                     key = (definition.kind, definition.name.value)
