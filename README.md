@@ -109,19 +109,6 @@ Failures never trigger an automatic retry. A disconnect or output-file failure c
 follow a successful remote write. Inspect the service before deciding to repeat an
 uncertain write; the tool neither rolls it back nor claims it failed remotely.
 
-## Advanced commands and implementation
-
-`discover`, `import`, `normalize` and `generate` remain available for existing
-pipelines. Their staged interface is optional. Start with [the pipeline guide](docs/discovery-pipeline.md)
-for command-specific inputs and compatibility flags. The [manifest format](docs/discovery-manifest-format.md)
-is a producer reference, separate from everyday usage. [Architecture](ARCHITECTURE.md)
-records component ownership, credential boundaries and failure behavior.
-
-Privacy filtering removes credentials, raw samples and known sensitive examples or
-structure before persistence. It cannot perfectly anonymize arbitrary unknown input.
-Destructive filtering is reported, and essential ambiguity excludes an operation.
-Runtime results intentionally returned to callers are separate from saved discovery.
-
 ## Install a generated workflow package
 
 When explicit supported workflows are present, `coverage.json` includes
@@ -137,6 +124,19 @@ Python package exports `execute_workflow(workflow_id, inputs=None)`. Both use fi
 bundled destinations and private profile defaults without prompts. Invoking a
 workflow authorizes its declared steps, which may write remote data. No automatic
 retry occurs. The generated README explains the result fields and exit codes.
+
+## Advanced commands and implementation
+
+`discover`, `import`, `normalize` and `generate` remain available for existing
+pipelines. Their staged interface is optional. Start with [the pipeline guide](docs/discovery-pipeline.md)
+for command-specific inputs and compatibility flags. The [manifest format](docs/discovery-manifest-format.md)
+is a producer reference, separate from everyday usage. [Architecture](ARCHITECTURE.md)
+records component ownership, credential boundaries and failure behavior.
+
+Privacy filtering removes credentials, raw samples and known sensitive examples or
+structure before persistence. It cannot perfectly anonymize arbitrary unknown input.
+Destructive filtering is reported, and essential ambiguity excludes an operation.
+Runtime results intentionally returned to callers are separate from saved discovery.
 
 ## Verify changes
 
