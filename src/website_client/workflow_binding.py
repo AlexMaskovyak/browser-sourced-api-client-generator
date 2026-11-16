@@ -269,19 +269,96 @@ def _report_candidates(manifest: Manifest) -> dict[tuple[str, str], set[SourceBi
     return candidates
 
 
+def _select_binding(candidates: set[SourceBinding]) -> SourceBinding | None:
+    if not candidates or len({item.artifact_id for item in candidates}) != 1:
+        return None
+    explicit = {
+        endpoint_url(item.endpoint) for item in candidates if item.endpoint is not None
+    }
+    if len(explicit) > 1:
+        return None
+    # An explicit endpoint selects the destination of this same artifact. Its
+    # absence in provenance is not contradictory destination evidence.
+    endpoints = sorted(
+        item.endpoint for item in candidates if item.endpoint is not None
+    )
+    return SourceBinding(
+        next(iter(candidates)).artifact_id, endpoints[0] if endpoints else None
+    )
+
+
+def clean_binding_conflicts(value: Any) -> dict[str, list[str]]:
+    """Retain only bounded source-conflict identities, without paths or prose."""
+    result = {}
+    if not isinstance(value, dict):
+        return result
+    for document, names in value.items():
+        if (
+            not isinstance(document, str)
+            or (sensitive(document) and not _hashed_id(document))
+            or not isinstance(names, list)
+        ):
+            continue
+        selected = sorted(
+            {
+                name
+                for name in names
+                if isinstance(name, str)
+                and IDENTIFIER.fullmatch(name)
+                and not sensitive(name)
+            }
+        )
+        if selected:
+            result[document] = selected
+    return result
+
+
+def _marked_conflicts(manifest: Manifest) -> set[tuple[str, str]]:
+    artifacts = {item.id: item for item in manifest.artifacts}
+    result = set()
+    for artifact in manifest.artifacts:
+        if artifact.kind is not Kind.REPORT:
+            continue
+        try:
+            value = json.loads(artifact.content)
+            for document, names in clean_binding_conflicts(
+                value.get("workflowBindingConflicts", {})
+            ).items():
+                if (
+                    document not in artifacts
+                    or artifacts[document].kind is not Kind.ARAZZO
+                ):
+                    continue
+                declared = {
+                    item.get("name")
+                    for item in json.loads(artifacts[document].content).get(
+                        "sourceDescriptions", []
+                    )
+                    if isinstance(item, dict)
+                }
+                result.update((document, name) for name in names if name in declared)
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return result
+
+
 def binding_conflicts(manifest: Manifest) -> set[tuple[str, str]]:
-    """Return source names with contradictory validated saved associations."""
-    return {
-        key for key, targets in _report_candidates(manifest).items() if len(targets) > 1
+    """Return contradictory report, initial-file, or published-location associations."""
+    return _marked_conflicts(manifest) | {
+        key
+        for key, targets in _report_candidates(manifest).items()
+        if _select_binding(targets) is None
     }
 
 
 def report_bindings(manifest: Manifest) -> dict[str, dict[str, SourceBinding]]:
-    """Read only known source identities with a single unambiguous association."""
-    bindings = {}
-    for (document, name), candidates in _report_candidates(manifest).items():
-        if len(candidates) == 1:
-            bindings.setdefault(document, {})[name] = next(iter(candidates))
+    """Read only known source identities with one compatible combined association."""
+    bindings, blocked = {}, binding_conflicts(manifest)
+    for key, candidates in _report_candidates(manifest).items():
+        selected = _select_binding(candidates)
+        if selected is not None and key not in blocked:
+            document, name = key
+            bindings.setdefault(document, {})[name] = selected
     return bindings
 
 
@@ -304,9 +381,12 @@ def _resolve_sources(
     available: Mapping[str, set[SourceBinding]],
     previous: dict[str, SourceBinding],
     blocked: set[str],
-) -> tuple[dict, dict[str, SourceBinding]]:
+) -> tuple[dict, dict[str, SourceBinding], set[str]]:
     document = json.loads(artifact.content)
-    selected = dict(previous)
+    selected = {
+        name: target for name, target in previous.items() if name not in blocked
+    }
+    conflicts = set(blocked)
     locations = (
         [registry.workflow_locations[artifact.id]]
         if artifact.id in registry.workflow_locations
@@ -327,11 +407,16 @@ def _resolve_sources(
             if addresses
             else set()
         )
-        if name not in selected and len(matches) == 1:
-            selected[name] = next(iter(matches))
-        if name in selected:
-            source["url"] = "sources/" + selected[name].artifact_id + ".json"
-    return document, selected
+        candidates = matches | ({selected[name]} if name in selected else set())
+        combined = _select_binding(candidates)
+        if candidates and combined is None:
+            selected.pop(name, None)
+            conflicts.add(name)
+            continue
+        if combined is not None:
+            selected[name] = combined
+            source["url"] = "sources/" + combined.artifact_id + ".json"
+    return document, selected, conflicts
 
 
 def bind_sources(manifest: Manifest, registry: InputRegistry | None = None) -> Manifest:
@@ -344,27 +429,41 @@ def bind_sources(manifest: Manifest, registry: InputRegistry | None = None) -> M
     for index, artifact in enumerate(artifacts):
         if artifact.kind is not Kind.ARAZZO:
             continue
-        document, selected = _resolve_sources(
+        document, selected, discovered_conflicts = _resolve_sources(
             artifact,
             registry,
             available,
             bindings.get(artifact.id, {}),
             {name for document, name in conflicts if document == artifact.id},
         )
+        conflicts.update((artifact.id, name) for name in discovered_conflicts)
+        bindings[artifact.id] = selected
         if selected:
-            bindings[artifact.id] = selected
             text = encoded(document)
             artifacts[index] = replace(artifact, content=text, sha256=sha256(text))
     if bindings:
         portable = {
             document: {name: target.to_dict() for name, target in sources.items()}
             for document, sources in bindings.items()
+            if sources
         }
         artifacts.append(
             Artifact.create(
                 "workflow-bindings.json",
                 Kind.REPORT,
                 encoded({"workflowBindings": portable}),
+                Source.REPORT,
+            )
+        )
+    if conflicts:
+        grouped = {}
+        for document, name in sorted(conflicts):
+            grouped.setdefault(document, []).append(name)
+        artifacts.append(
+            Artifact.create(
+                "workflow-binding-conflicts.json",
+                Kind.REPORT,
+                encoded({"workflowBindingConflicts": grouped}),
                 Source.REPORT,
             )
         )
