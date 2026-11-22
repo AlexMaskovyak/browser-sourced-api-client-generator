@@ -1,7 +1,8 @@
-# Autonomous client integration architecture
+# Client generation architecture
 
-The supplied specification selects the architecture. This map assigns its seams to
-existing owners and describes the state and failure boundaries for implementation.
+The generator captures website traffic or reads saved definitions, validates the
+usable operations, and builds standalone clients. Each stage below names the code
+that owns its inputs, output and failure handling.
 
 ## Components and data flow
 
@@ -110,8 +111,9 @@ destructive filtering reports missing information and excludes essential ambigui
 The selected Arazzo 0.9.6 executor conflates an explicit nullable JSON body with an
 absent body. The implementation reproduced an empty request body and HTTP 422 from
 a neutral service that requires the JSON bytes `null`. Nested JSON null succeeds.
-The upstream choice changes only for this reproduced incompatibility, as permitted
-by the specification.
+The bundled patch fixes this request-body behavior while leaving request construction
+with the native executor. Poetry installs the exact local wheel through the existing
+project dependency configuration; there is no second development installation step.
 
 The correction belongs in a separately versioned native dependency wheel,
 `arazzo-runner==0.9.6+websiteclient.1`. The project records a minimal upstream patch,
