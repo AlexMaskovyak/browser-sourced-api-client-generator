@@ -87,3 +87,25 @@ Browser capture sanitizes its evidence; external producers are responsible for
 the content they supply. Import preserves that content rather than pretending to
 sanitize arbitrary third-party data. A sanitized HAR alone cannot reconstruct
 schemas or frontend declarations that the full manifest preserves.
+
+## File-upload contracts
+
+A manifest can contain `upload-workflows.json` as a report artifact with its
+normal content hash. This document has `format: website-client-upload-workflows`,
+integer `version: 1`, and a `workflows` array. The reader validates all fields and
+rejects unknown fields, unsupported protocols and conflicting operation mappings.
+Normalization can also derive it from the source declarations in the discovery
+report. The portable generated manifest retains only the selected workflows.
+
+| Workflow field | Meaning |
+| --- | --- |
+| `operation`, `apiEndpoint` | Named mutation and exact GraphQL endpoint. |
+| `metadataEndpoint` | Observed literal application URL for the upload metadata POST. No credentials or query values. |
+| `protocol` | `rails-active-storage-v1`: metadata POST, signed exact-byte PUT, then mutation. |
+| `inputVariable`, `attachmentField` | Operation input object and property receiving the returned signed blob ID. |
+| `evidence` | SHA-256 hashes of the declaring source modules. No source values or authentication state. |
+| `maxBytes` | Client file-size cap, default 15,000,000 bytes; not an assertion about server policy. |
+
+API assignment and a structurally valid workflow permit generation. They do not
+verify live write acceptance. Signed storage URLs, signed blob IDs and temporary
+headers exist only during execution and never belong in the contract.

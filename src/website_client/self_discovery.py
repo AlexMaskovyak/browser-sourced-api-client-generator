@@ -177,6 +177,8 @@ class SelfDiscovery:
         self.max_probes = max_probes
         self.observe_seconds = observe_seconds
         self.explicit_endpoints = list(graphql_endpoints)
+        if len(set(graphql_endpoints)) == 1:
+            self.capture.discovery.declared_graphql_endpoint = graphql_endpoints[0]
         self.attempts = []
         self.explorer = explorer
 
@@ -297,8 +299,8 @@ class SelfDiscovery:
             connection.call(
                 "Network.enable",
                 {
-                    "maxTotalBufferSize": 8 * MAX_BODY,
-                    "maxResourceBufferSize": MAX_BODY,
+                    "maxTotalBufferSize": 32 * MAX_BODY,
+                    "maxResourceBufferSize": 4 * MAX_BODY,
                     "maxPostDataSize": MAX_BODY,
                 },
             )

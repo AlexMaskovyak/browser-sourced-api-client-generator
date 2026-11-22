@@ -113,3 +113,89 @@ Unit tests exercise parsing and policies. Docker installs the built wheel and
 checks browser login, discovery, command chaining and both generated client types
 against a local HTTPS fixture. Compatibility with a real service requires its
 own verification.
+
+## Complete project ownership
+
+`project_generation.py` owns the version 1 project definition and complete build.
+It reads and merges bounded portable manifests, normalizes them, selects one
+API and invokes the existing generation dispatcher in staging. REST/OpenAPI,
+schema-backed GraphQL and operation-document GraphQL keep their existing request
+builders and model ownership. An inferred HTTP contract requires explicit review
+permission, which is retained in the versioned project definition.
+It then generates documentation, synthetic tests, runtime defaults and portable
+rebuild inputs. An explicit Poetry lock is verified before the tree is published.
+Failure leaves the requested output absent; existing output is never replaced.
+
+`client_cli.py` applies packaged endpoint, login URL and header-name defaults only
+at that endpoint. Explicitly selecting a different endpoint does not reuse those
+login defaults. Credential values are observed during future login, never stored
+in the project file. Rebuild inputs preserve operation/request contracts rather
+than unrelated capture context. No service-specific packaging or post-build
+source edits are required.
+
+## First-page data discovery
+
+`SiteExplorer` retains the authenticated tab so tab-scoped state survives setup.
+It resets script execution, waits for hydration and request activity, and exercises
+empty read-only search controls before global navigation. This exposes requests
+for lists whose initial rows were embedded in HTML. Source inspection includes
+HTML and scripts actually loaded for the owned page across asset origins; unrelated
+scripts remain excluded. Per-source, aggregate and source-count limits are fixed.
+
+`Discovery` preserves typed Boolean defaults and bounded pagination literals while
+withholding opaque data literals. Withheld documents carry an explicit reason.
+Captured requests assign operations to their observed API endpoint. A single
+explicit `--graphql-endpoint` also assigns frontend declarations to that API,
+while preserving their unexecuted provenance. Client generation remains a separate stage.
+
+The page-data container scenario starts with rendered records, a tab-scoped view
+selection and a script on an asset origin. Only exercising search produces the
+list request. The test generates and independently installs a client from that
+capture, calls the generated list method and checks the returned record/status.
+
+## Discovering creation screens
+
+The explorer opens creation screens before global menus and pagination, including
+links that open creation pages. Hidden controls do not consume the scan limit.
+Per-page action budgets preserve time for queued graph edges. Opening
+is separate from submitting: form submitters remain excluded and network write
+requests remain blocked. Loaded source declarations are retained even when they
+have never been executed. Source limits apply across the walk and omissions are
+reported so a successful listing capture cannot imply submission coverage.
+
+Frontend declarations do not prove an API destination. An unobserved declaration
+receives its API assignment from a single explicitly supplied GraphQL endpoint.
+Multiple endpoints leave the declaration unassigned. Captured operation names take
+precedence over unexecuted source variants, which remain as unassigned evidence.
+Within source declarations, fragment definitions are resolved locally first and
+then against unique loaded definitions. Missing, conflicting or cyclic fragments
+prevent export. More source arrivals recompute declarations; observed request
+documents are preserved.
+
+## File-backed writes
+
+Upload discovery records the metadata endpoint and protocol separately from the
+business mutation and its attachment input field. These are portable, validated
+contracts, not saved signed URLs or credentials. The generated runtime owns file
+validation, metadata POST, exact-byte storage PUT and the final mutation. The
+browser transport owns authenticated application requests; a credential-free HTTP
+transport owns storage requests using only the metadata response's signed URL
+and permitted headers. Both refuse redirects and automatic retries.
+
+The generated command validates local inputs and explicit confirmation before
+opening a browser or sending any write. It reports the failed stage after an
+uncertain outcome and never replays a completed upload or business write.
+
+`upload_discovery.py` recognizes protocol endpoints and candidate attachment
+properties. `upload_inference.py` requires an unambiguous declaring module and
+operation input; it emits the immutable versioned `UploadWorkflow` record from
+`upload_workflows.py`. Normalization can produce the same contract from saved
+source reports, so independent upstream producers do not need a separate assembly
+step. Its assignment preserves the original manifest hash before deriving data.
+
+`upload_generation.py` generates the Python helper, command metadata and portable
+rebuild contract. `upload_runtime.py` snapshots and validates local bytes, computes
+the protocol checksum and SHA-256, performs the three stages and reports failure
+uncertainty. The generated CLI validates a local preview without opening a browser.
+Only the operation-document GraphQL backend currently composes this protocol;
+other backends and upload protocols require additional implementations.

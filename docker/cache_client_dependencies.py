@@ -28,7 +28,7 @@ subprocess.run(
         str(constraints),
         *(
             f"{name}=={versions[name]}"
-            for name in ("httpx", "attrs", "pydantic", "playwright", "graphql-core")
+            for name in ("httpx", "attrs", "pydantic", "playwright", "graphql-core", "pytest")
         ),
     ],
     check=True,
