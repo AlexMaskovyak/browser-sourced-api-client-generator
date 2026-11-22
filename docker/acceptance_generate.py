@@ -279,6 +279,19 @@ def verify_generator_metadata() -> None:
 def main() -> None:
     assert os.getuid() == 1000
     verify_generator_metadata()
+    # Exercise the installed generator with independent website/CDN/API hosts,
+    # denied introspection, scoped authentication and an actual generated call.
+    execute(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "/work/tests/test_cdn_discovery.py::test_cdn_driven_app_generates_callable_client_without_admitting_cdn[True]",
+        ]
+    )
     state = json.load(urlopen("http://127.0.0.1:8765/__state"))
     output = OUTPUT / "generated"
     verify_generator_console(Fixture(), state)
@@ -320,6 +333,7 @@ def main() -> None:
                 "stdin_physically_closed_after_login": True,
                 "ordinary_generator_console": True,
                 "cdn_dependent_graphql": True,
+                "separate_graphql_host_without_schema": "passed",
                 "unsupported_client_assets": unsupported_assets,
                 "wheel_sha256": hashes,
                 "login_count": after["logins"],
