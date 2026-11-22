@@ -58,6 +58,32 @@ neutral local services. Findings live in `docs/autonomous-findings.md`.
 
 ## Status
 
+### November 22: CDN-dependent page loading
+
+The example run at delivery revision `6896b63` produced no client. Its saved report
+contains 411 blocked cross-origin GET requests, including dashboard JavaScript,
+one visited page, no controls, and six failed definition probes. These observations
+do not establish that blocking scripts was the only cause.
+
+1. Reproduce strict discovery blocking a page's external JavaScript with a neutral
+   two-origin browser fixture. Require a generated client whose operation comes
+   from the script-driven page, with no manual post-login navigation.
+2. Permit browser-classified page assets through the read-only request policy.
+   Keep undeclared API requests, writes, external navigation, credential capture,
+   and frontend contract attribution within their existing boundaries.
+3. Test redirects and negative request cases, run the complete host suite, update
+   the usage/architecture explanation, and commit and push a separate correction PR
+   based on `feature/autonomous-integration`. PR 12 remains the base implementation.
+   A fresh authenticated example run remains required before claiming example support.
+4. For unsupported discovery, also write a root README and a standalone Python
+   client stub. Explain the evidence and recovery steps; the stub sends no requests,
+   returns a nonzero unsupported result, and does not count as a generated service.
+   Verify its help, ordinary invocation, privacy, and offline behavior.
+
+Completion requires the regression to fail before the fix and pass afterwards,
+actual generated-client execution, and server journals proving blocked requests
+were not sent. The prior container result remains tied to `2b9c062`.
+
 Planning and independent adversarial design review completed at `032072a`.
 Milestone 1 implemented at `35dc531`, corrected at `7d90c49` and independently
 reviewed/probed with no remaining material M1 findings. Full suite: 227 passed.
