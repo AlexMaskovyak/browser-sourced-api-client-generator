@@ -1,0 +1,76 @@
+{
+  "arazzo": "1.0.0",
+  "info": {
+    "title": "Neutral sequence",
+    "version": "1.0.0"
+  },
+  "sourceDescriptions": [
+    {
+      "name": "api",
+      "type": "openapi",
+      "url": "openapi.json"
+    }
+  ],
+  "workflows": [
+    {
+      "workflowId": "upload",
+      "steps": [
+        {
+          "stepId": "prepare",
+          "operationId": "prepare",
+          "requestBody": {
+            "contentType": "application/json",
+            "payload": {
+              "filename": "fixture.bin"
+            }
+          },
+          "outputs": {
+            "ticket": "$response.body#/ticket"
+          },
+          "successCriteria": [
+            {
+              "condition": "$statusCode == 200"
+            }
+          ]
+        },
+        {
+          "stepId": "bytes",
+          "operationId": "put_binary",
+          "requestBody": {
+            "contentType": "application/octet-stream",
+            "payload": "$inputs.file"
+          },
+          "successCriteria": [
+            {
+              "condition": "$statusCode == 200"
+            }
+          ]
+        },
+        {
+          "stepId": "finish",
+          "operationId": "finish",
+          "requestBody": {
+            "contentType": "application/json",
+            "payload": {
+              "ticket": "$steps.prepare.ticket"
+            }
+          },
+          "successCriteria": [
+            {
+              "condition": "$statusCode == 200"
+            },
+            {
+              "condition": "$response.body.complete == true"
+            }
+          ],
+          "outputs": {
+            "complete": "$response.body#/complete"
+          }
+        }
+      ],
+      "outputs": {
+        "complete": "$steps.finish.complete"
+      }
+    }
+  ]
+}

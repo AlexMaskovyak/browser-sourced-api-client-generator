@@ -1,248 +1,156 @@
-# Turn discovery results into a Python client
+# Generate clients from URLs and saved inputs
 
-Use this pipeline to discover a website once, save its requests and operation documents, then
-generate a client later without logging in again. It also accepts API definitions
-from another tool, so browser discovery can be one step in a larger build.
+Use `website-client run SOURCE --output DIRECTORY` for the ordinary workflow. It
+connects the existing discovery, import, normalization and generation components
+and processes all unambiguous usable services. The individual stage commands remain
+available for existing producers and diagnostic work; they are not prerequisites.
 
-The handoff is a **discovery manifest**: one JSON file containing definitions,
-supporting reports, content hashes and the API each definition belongs to.
-`discover` saves it as `manifest.json`. Copying this file is enough to move the
-results to another machine with this generator installed. The client it generates
-is a separate Python package with typed API methods and a command-line interface.
+## Prerequisites and inputs
 
-```text
-Browser discovery or another producer
-                -> discovery manifest
-                -> normalize: validate and combine definitions
-                -> normalized manifest with API status
-                -> generate: select one API and create its Python client
+Install the project through Poetry as described in the [README](../README.md#install).
+URL discovery needs a browser and one initial sign-in. HAR inference needs Node 20+
+and npm. Saved inputs need no browser. Supplied standard definitions and manifests
+with converted executable contracts need no Node. A saved capture manifest that
+still needs HAR inference requires Node/npm. Output directories must be new. Source
+files are read without alteration.
+
+An endpoint comes from a definition's server URL, an existing manifest, or the initial
+`--endpoint URL` argument when the input cannot supply it. GraphQL operations come
+from capture or an initial `--operations FILE`; a complete schema can generate through
+native builders without an operation file. No mid-run schema edits are required.
+
+## Run a saved definition
+
+The following commands run from the repository root and use committed fixtures:
+
+```sh
+poetry run website-client run tests/fixtures/openapi.json --endpoint https://api.example.com --output ./rest-example
+poetry run website-client run tests/fixtures/schema.graphql --endpoint https://api.example.com/graphql --output ./graphql-example
 ```
 
-The commands are the same for both supported API models:
+Both commands write local projects and reports, without contacting the configured
+endpoint. The first uses OpenAPI. The second uses schema-only GraphQL builders.
+Use new output paths if rerunning. If no supported operation remains, the command
+returns a nonzero result and an unsupported report. An unsupported operation is
+excluded rather than converted into a manual setup task.
 
-| Website API | Definitions needed for generation |
+To use named GraphQL operations instead of schema-only defaults, supply
+`--operations tests/fixtures/operations.graphql` as an initial input. For a HAR,
+pass its filename as SOURCE. A saved discovery directory supplies its manifest.
+Repeat `--input FILE` when combining manifests or supplying bundled workflow sources.
+Declared local workflow sources within the supplied bundle are loaded automatically.
+Exact advertised source URLs enter the existing bounded discovery queue. Missing or
+conflicting sources exclude the affected workflow without selecting a nearby file.
+
+This additional offline example uses the committed three-step workflow and its
+declared sibling OpenAPI file:
+
+```sh
+poetry run website-client run tests/fixtures/workflow/workflow.json --name workflow-example --output ./workflow-example
+```
+
+Expected result: a service project under `services/` and a workflow project under
+`workflows/workflow-example-workflows/`. Generation sends no request to the fixture's
+declared destination. This is a packaging example; executing it requires a matching
+service and private login profile, which the offline command does not create.
+
+## Read coverage and install packages
+
+`coverage.json` records generated projects, source provenance and automatic exclusion
+reasons. Separate service projects are under `services/`; their names are deterministic.
+Install each project you need with `python -m pip install PROJECT_DIRECTORY`, then use
+that project's console command with `--help`. Installation may download declared
+runtime dependencies. Help sends no service request.
+
+Workflow projects also need the included native companion wheel. Their README gives
+the command that supplies both that wheel and the project to pip. When distributing
+built wheels, supply both sibling wheel paths. A nested wheel resource alone cannot
+satisfy pip's dependency resolution. `coverage.json` identifies the workflow package
+under `workflowPackage`; its console help lists executable workflow IDs.
+
+Coverage reports describe available evidence. A successful generation is not live API
+verification, and a complete report is not a claim that bounded browser traversal
+found every operation. Conflicts block only unresolved services or methods; usable
+independent services remain packaged. Installed clients read endpoint/profile defaults
+and run with stdin closed. Their generated READMEs show exact imports and file inputs.
+
+## Keep credentials separate
+
+URL discovery persists selected origin-scoped login state in a private local profile,
+outside every output directory. Generated configuration contains only the endpoint,
+origin and profile identifier. Cookie renewal is automatic. The full load, call/job
+and save sequence is locked so concurrent processes cannot overwrite rotated cookies.
+
+A saved manifest or wheel is portable code and contract evidence, not portable
+credentials. Another machine must provision its own protected profile through login.
+Authentication rejection terminates with `authentication_required`, without asking
+for headers, MFA or agent help. To recover, rerun the original URL command with a new output directory and sign in.
+The stable origin profile refreshes credentials for existing installed clients.
+
+Profiles use the operating system's private user-state directory. To print the
+selected directory without reading credentials, run from the generator checkout:
+
+```sh
+poetry run python -c 'from website_client.runtime_profile import profile_directory; print(profile_directory())'
+```
+
+For a container on the same provisioned machine, mount that entire directory
+separately and set `WEBSITE_CLIENT_PROFILE_DIR` to its in-container path. Keep the
+mount writable so cookie renewal can atomically replace files. The container user
+must own it; directories require mode `700` and files mode `600`. A permission
+failure stops execution before dispatch. Never place this directory inside source
+projects, distributions or the public output mount. A different machine requires
+its own login rather than copying this credential state.
+
+## Use individual stages when integrating another producer
+
+These are advanced compatibility commands. They read saved inputs and write local
+outputs. They do not make business API calls. For example, create and normalize a
+manifest from the committed OpenAPI fixture:
+
+```sh
+mkdir -p generated
+poetry run website-client import --openapi tests/fixtures/openapi.json --endpoint https://api.example.com --output generated/imported.json
+poetry run website-client normalize --input generated/imported.json --output generated/normalized.json
+poetry run website-client generate --manifest generated/normalized.json --name sample-client --output generated/sample-client
+```
+
+The first command creates the parent directory for these local outputs. Expected result: a manifest, normalized manifest and
+one standalone project. An already existing destination is an error and is preserved.
+For multiple services, the compatibility `generate` command accepts `--service ID`;
+use `run` to package all usable services automatically. Inferred-review flags on the
+legacy stage interface are not required by `run`.
+
+`discover --har FILE` imports an existing HAR. `discover --url URL --explore` retains
+the staged browser-discovery interface. `import --graphql-schema FILE --endpoint URL`
+accepts complete SDL/introspection; `import --operations FILE --endpoint URL` imports
+named schema-less operations. `normalize --input FILE` can be repeated for manifests.
+Each command's `--help` lists its exact arguments and limits.
+
+For shell pipelines, use `set -o pipefail` and remember that a downstream command can
+publish output before a producer fails late. Staged files make failure boundaries
+clearer. Manifest/stdin interfaces exchange complete JSON documents, not JSON Lines.
+Only the initial browser login reads terminal input; saved-input stages do not.
+
+## Handle exclusions and failures
+
+| Result | Meaning and next action |
 | --- | --- |
-| REST/HTTP | OpenAPI describing its routes, methods and inputs. Discovery can download a published definition or infer one from samples; inference needs review. |
-| GraphQL | Named operation documents for the queries or mutations to generate. A complete schema is optional and enables stronger models and validation. |
+| `complete` | All eligible supplied/discovered evidence was processed; install generated projects and invoke only intended operations. |
+| `partial` | Usable projects remain; inspect recorded automatic exclusions to understand coverage. No setup dialogue follows. |
+| `unsupported` | No executable operation remains; command exits nonzero and explains why. |
+| HAR dependency failure | Install the stated Node/npm prerequisite, then rerun with a new output. Definitions can still generate without HAR conversion. |
+| `authentication_required` | Execution stopped without retry; explicitly log in again before a later attempt. |
+| Uncertain request failure | A write may have succeeded. Check the service before deciding to retry. |
+| Local output failure | Publication or saving failed; do not infer that a preceding remote request failed. Inspect partial local output before reusing a path. |
 
-The manifest can hold both. Select the API you need at generation time. The
-tool does not currently generate from SOAP/WSDL, gRPC/protobuf or arbitrary custom
-RPC definitions. The browser may observe their HTTP traffic, but observation
-does not supply a supported contract. See [coverage and request policy](../ARCHITECTURE.md#http-discovery-and-supported-api-definitions).
+Non-exploded form array queries, unsupported complex encodings, unresolved remote
+references, ambiguous contracts and essential sensitive structure are excluded
+without schema rewriting. A native backend failure excludes the affected SDK
+operation and regenerates usable siblings; an independently supported workflow can
+retain its original source contract. Workflows require explicit supported documents and value
+mappings. No dependency is inferred from source proximity, request order or matching
+values. Privacy filtering is conservative and cannot detect every unknown secret.
 
-## Prepare the environment
-
-Run from the repository root, where `pyproject.toml` is located. Use the existing
-Poetry installation and a supported Python version as described in the
-[installation instructions](../README.md#start-here-website-to-client).
-
-```sh
-poetry sync --with dev
-mkdir -p captures clients
-```
-
-Browser discovery needs Chrome or Chromium and an interactive terminal. You sign
-in and complete verification codes in a temporary browser. Normalization and
-generation use local inputs and send no service API requests. Dependency
-installation may need network access.
-
-All output names below must be new, and their parent directories must exist.
-Replace example website addresses with the actual website before using discovery.
-
-## Discover, inspect and generate
-
-1. Read the website and save its discovery results:
-
-   ```sh
-   poetry run website-client discover --url https://app.example.com --explore --output ./captures/walk
-   ```
-
-   Sign in, open the page where exploration should start, then press Enter in the
-   terminal. The bounded walk records requests and declared forms. It saves
-   `./captures/walk/manifest.json` and readable reports, then closes the browser.
-
-2. Validate the saved definitions and write their generation status:
-
-   ```sh
-   poetry run website-client normalize --input ./captures/walk --output ./captures/walk/normalized.json
-   ```
-
-   The terminal lists API IDs and status. In `normalized.json`, `services` contains
-   each API's `endpoint`, `status` and `issues`. `ready` means its definitions are
-   structurally usable, `review_required` means inferred OpenAPI needs review,
-   and `blocked` means callable operations or definitions are missing or invalid.
-   Missing GraphQL schemas do not block generation from bound operation documents.
-
-3. Create a standalone client from the only ready API:
-
-   ```sh
-   poetry run website-client generate --manifest ./captures/walk/normalized.json --name site-client --output ./clients/site-client
-   ```
-
-   If several APIs are ready, add `--service` followed by the chosen ID from step
-   2. Generation creates a Python project and `generation.json` with input hashes
-   and producer history. Follow [client installation and usage](../README.md#run-a-generated-client)
-   to install it. Calling its API commands requires fresh runtime authentication.
-
-You can also pass the saved manifest directly to `generate`; it normalizes first.
-The original loose files and browser session are never required. Old captures
-without a manifest can still supply definition files to `import` below.
-
-## Inspect and select an API
-
-After normalization, run this command from the generator repository root. It
-prints just the API IDs, endpoint addresses, statuses and validation issues:
-
-```sh
-poetry run python - <<'PYTHON'
-import json
-from pathlib import Path
-
-manifest = json.loads(Path("captures/walk/normalized.json").read_text())
-for api in manifest["services"]:
-    print(f"{api['id']}  {api['protocol']}  {api['endpoint']}  {api['status']}")
-    for issue in api["issues"]:
-        print(f"  {issue}")
-PYTHON
-```
-
-An API ID identifies one endpoint and its assigned definitions. Use the ID from
-this output, not a document filename or operation name. If several APIs are
-ready, this command prompts for your choice and generates only that API's client:
-
-```sh
-printf 'Paste the API ID, then press Enter: '
-read -r api_id
-poetry run website-client generate --manifest ./captures/walk/normalized.json --service "$api_id" --name selected-client --output ./clients/selected-client
-```
-
-A blocked API cannot generate. Missing operations require captured or supplied
-operation documents. A schema is optional: without one, generation checks declared
-variables and returns JSON dictionaries rather than inventing server models.
-[Import or combine those inputs](#connect-a-different-producer), then normalize
-again using a new output filename. A form inventory alone cannot fill those gaps.
-
-## Install the generated client
-
-After generating `site-client` in the procedure above:
-
-```sh
-cd clients/site-client
-poetry install
-poetry run site-client --help
-```
-
-Help lists the actual endpoint commands and whether each reads or writes. Use
-one listed name with `--help` to see its required JSON fields and URL options.
-That operation name and its input fields depend on the API you discovered, so a
-universal executable service command cannot be supplied here. Follow
-[generated client login](../README.md#log-into-a-generated-client) when ready to
-send a real request. Each browser-authenticated operation opens a fresh login;
-the discovery session is not retained. Return to the generator root before
-running the pipeline commands below.
-
-## Chain commands through stdin and stdout
-
-This example performs the same work without saving the intermediate normalized
-manifest. It assumes one ready API; otherwise add `--service` to generation.
-
-```sh
-set -o pipefail
-poetry run website-client discover --url https://app.example.com --explore --output ./captures/piped-walk --emit-manifest |
-  poetry run website-client normalize --input - |
-  poetry run website-client generate --manifest - --name piped-client --output ./clients/piped-client
-```
-
-Sign in and press Enter in the first command's terminal. Only discovery reads the
-terminal; subsequent commands read the pipe. Progress goes to stderr. Each handoff
-contains one complete JSON document, not JSON Lines or an incremental stream.
-`generate` writes a generation report to stdout and the client to its output directory.
-Browser discovery cannot accept piped stdin; offline HAR import accepts `--har -`.
-`--bundle` and `--emit-bundle` remain aliases for the manifest flags.
-
-## Connect a different producer
-
-If another tool emits OpenAPI, pipe its output to `import --openapi -`. For
-GraphQL, supply operation documents and the API's HTTPS endpoint. An optional
-`--graphql-schema` supplies stronger validation and models. A form inventory alone
-is not an operation document or an executable request.
-
-This runnable offline example uses the repository's sample OpenAPI definition:
-
-```sh
-set -o pipefail
-poetry run website-client import --openapi ./tests/fixtures/openapi.json --endpoint https://api.example.com |
-  poetry run website-client normalize --input - |
-  poetry run website-client generate --manifest - --name sample-client --output ./clients/sample-client
-```
-
-A schema-free GraphQL example uses the repository's operation documents:
-
-```sh
-set -o pipefail
-poetry run website-client import --operations ./tests/fixtures/operations.graphql --endpoint https://api.example.com/graphql |
-  poetry run website-client normalize --input - |
-  poetry run website-client generate --manifest - --name captured-client --output ./clients/captured-client
-```
-
-The result includes `GetItem` and `CreateItem` methods and CLI commands. Help lists
-GraphQL variable names, declared types, required values and optional omissions.
-Requests retain GET/POST and the `operationName` URL parameter when those were
-recorded in the capture; operation-only imports default to standard GraphQL POST.
-Each method sends its own operation and reachable fragments. Schema-free output
-reports `generationMode: operation-documents` and `schemaValidated: false`.
-Standard scalar, nullability and list constraints are checked, including the
-difference between omitting a variable and explicitly passing null. Unknown custom
-input types and response fields remain JSON, without invented validation rules.
-A complete schema added through import/merge uses the existing schema backend.
-
-Another tool can emit the manifest format directly. The independent
-[create_discovery_manifest.py](../examples/create_discovery_manifest.py) example
-uses only Python's standard library. Run it without third-party packages:
-
-```sh
-set -o pipefail
-python -S examples/create_discovery_manifest.py --protocol graphql --schema tests/fixtures/schema.graphql --operations tests/fixtures/operations.graphql --endpoint https://api.example.com/graphql |
-  poetry run website-client normalize --input - |
-  poetry run website-client generate --manifest - --name independent-client --output ./clients/independent-client
-```
-
-Expected result: a project containing `GetItem` and `CreateItem` methods and CLI
-commands. To implement another producer, follow the [manifest format reference](discovery-manifest-format.md).
-
-To combine separate captures or add a schema obtained elsewhere, repeat
-`normalize --input` with their manifest paths. A schema-only GraphQL import can
-omit `--operations`; merging fills missing schemas only when API IDs match.
-Default IDs derive from protocol and endpoint. Conflicting schemas stop merging.
-Unassigned operations stay unassigned until the producer identifies their API or
-you explicitly assign them with `--bind-operations SERVICE_ID=DOCUMENT_ID_OR_NAME`.
-Schema assignment uses `--bind-schema` with the same syntax. IDs and document
-names are in the manifest's `services` and `artifacts` arrays.
-
-## Handle failure and restart
-
-| Result | Meaning and next step |
-| --- | --- |
-| `normalize` exits 0 | The transformation succeeded. Inspect API status; it may still contain blocked APIs. |
-| `generate` exits 0 | The selected API produced a local client. This proves neither live compatibility nor write completion. |
-| Invalid JSON, version, hash or reference | The command exits nonzero. Repair the upstream input; generation publishes no client from that invalid input. |
-| API is blocked or ambiguous | Read `services[].issues`, obtain missing definitions or supply the intended `--service`. |
-| API needs review | Inspect the inferred OpenAPI, then use `generate --allow-inferred` only if accepted. |
-| Existing output or cancelled discovery | Inspect any new partial output and rerun with a new path. Prior output is not overwritten. |
-
-`pipefail` reports a failed command, but a pipe is not a transaction. A producer
-can emit valid JSON and then fail; downstream generation may finish before that
-failure is known. Inspect outputs after a failed pipe. For builds that must wait
-for producer success, save each step and use `&&` to run the next only on success:
-
-```sh
-poetry run website-client import --openapi ./tests/fixtures/openapi.json --endpoint https://api.example.com --output ./build-input.json &&
-  poetry run website-client normalize --input ./build-input.json --output ./build-contracts.json &&
-  poetry run website-client generate --manifest ./build-contracts.json --name build-client --output ./clients/build-client
-```
-
-Replace the first command with your actual producer, writing its stdout to a new
-file if necessary. Do not reuse an old input after a failed producer command.
-Discovery remains bounded. A form declaration or blocked mutation does not become
-a callable API definition through normalization. Missing definitions require
-another source or explicit developer work; the pipeline cannot infer them fully.
+For producer fields, use the [manifest reference](discovery-manifest-format.md).
+For component and credential ownership, use [architecture](../ARCHITECTURE.md).

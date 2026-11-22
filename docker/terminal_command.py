@@ -39,13 +39,19 @@ def eventually(check, timeout_seconds=DEFAULT_WAIT_TIMEOUT_SECONDS):
     )
 
 
+def browser_profiles():
+    """Track both legacy and Playwright-owned disposable Chromium directories."""
+    root = Path(tempfile.gettempdir())
+    return set(root.glob("website-client-browser-*")) | set(
+        root.glob("playwright_chromiumdev_profile-*")
+    )
+
+
 class Command:
     def __init__(
         self, site, *, discover_output=None, executable=None, args=None, env=None
     ):
-        self.baseline = set(
-            Path(tempfile.gettempdir()).glob("website-client-browser-*")
-        )
+        self.baseline = browser_profiles()
         executable = executable or shutil.which("website-client")
         self.pid, self.terminal = pty.fork()
         if self.pid == 0:
@@ -92,10 +98,7 @@ class Command:
         )
 
     def connect(self):
-        profiles = (
-            set(Path(tempfile.gettempdir()).glob("website-client-browser-*"))
-            - self.baseline
-        )
+        profiles = browser_profiles() - self.baseline
         assert len(profiles) == 1
         self.profile = profiles.pop()
         self.port = int(
@@ -106,7 +109,13 @@ class Command:
             f"http://127.0.0.1:{self.port}"
         )
         context = self.browser.contexts[0]
-        page = context.pages[0]
+        page = next(
+            page
+            for context in self.browser.contexts
+            for page in context.pages
+            if not page.url.startswith("about:")
+        )
+        context = page.context
         self.connection = Connection(page, context.new_cdp_session(page))
 
     def node(self, selector):

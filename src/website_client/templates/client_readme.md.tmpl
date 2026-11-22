@@ -1,38 +1,82 @@
 # $name
 
-From this directory, install the package and list its operations:
+Install this generated package and list its operations:
 
 ```sh
 poetry install
 poetry run $name --help
 ```
 
-Choose a listed operation and run `poetry run $name OPERATION --help`, replacing
-`OPERATION` with its actual name. Help describes required JSON inputs and whether
-the operation reads or writes data. JSON input names match the generated Python
-arguments; the commands call those methods.
+Help reads local command metadata and sends no requests. Run a listed operation's
+`--help` to see its exact required JSON arguments and whether it writes remote data.
+Pass an input file with `--input PATH`. Writes require `--confirm-write` followed by
+the exact operation name. Explicit invocation sends the request without another
+question. Requests are never retried automatically.
 
-Use `--url` for the service base URL or GraphQL endpoint. Add `--login` to open
-Chrome, sign in and complete verification codes, then press Enter to call the
-endpoint through that browser session. If the sign-in website differs from the
-API, supply its address with `--login-url`.
+## Saved login and unattended calls
 
-Chrome must be installed and login needs an interactive terminal. Chromium uses
-`--browser chromium`; custom executable locations use `--browser-path`. Operation
-help explains `--session-header` for additional observed session-header names.
-Playwright's Python package includes its Node driver. No separate Node installation
-or Playwright browser download is needed because the command uses installed Chrome
-or Chromium.
+When generation supplies a default endpoint and profile identifier, Python and the
+command load them automatically. Credentials stay in the private profile directory
+on this machine, outside this package. The profile lock covers the entire Python
+context, including multiple calls, and saves renewed cookies when the context ends.
+A profile is associated with one origin. A new machine needs its own login profile.
 
-The temporary browser closes after the operation. Each command requires a fresh
-sign-in. Ctrl+C cancels. Browser session state is not saved or printed. As an
-alternative to browser login, `--headers-stdin` accepts temporary headers as a JSON
-object. Do not combine the two authentication methods.
+```python
+from $package import client_context
 
-Writes require `--confirm-write` followed by the exact operation name. Requests
-are never retried automatically. Use `--output NEW_FILE` for private JSON output.
-If a request fails, check the service before retrying because it may have succeeded.
+with client_context() as client:
+    # Example: call the actual native methods listed in this package.
+    # OpenAPI methods are in the generated api modules and accept client=client.
+    # GraphQL methods are on client itself.
+    pass
+```
 
-Complex input conversions and custom scalar mappings may require the Python API.
-Multi-step service workflows require separate extensions.
+This example shows ownership only; replace `pass` with a generated operation and its
+ordinary arguments. Native return types and GraphQL errors remain unchanged. Public
+services can use a configured endpoint without a credential profile. Saved-profile
+execution needs Playwright's Python package and its packaged request driver, but no
+browser executable, separate Node installation, agent or interactive terminal.
+Expired authentication ends with `authentication_required`. It never asks for a
+token or verification code. A later explicit login is recovery.
 
+For packages generated without defaults, supply `--url` or use the native generated
+Client directly. The compatibility `--login` option opens installed Chrome or
+Chromium for one interactive call. Use `--browser chromium` or `--browser-path` when
+needed, and `--login-url` if sign-in differs from the API. `--headers-stdin` accepts
+temporary JSON headers instead of this compatibility login. Do not combine them.
+The autonomous discovery path provisions protected profiles separately.
+
+## Files and results
+
+A CLI file value is a JSON object with `path` and optional `filename` and
+`content_type`. For example, a method with a native File or Upload argument called
+`file` accepts this input object:
+
+```json
+{"file": {"path": "/absolute/path/payload.bin", "filename": "payload.bin", "content_type": "application/octet-stream"}}
+```
+
+This is an input example; use an existing file and the exact argument shown in the
+operation's help. Nested input models and file lists accept the same file objects.
+The command owns and closes opened files on success and failure. Each file and the
+complete encoded request must fit within 8 MiB. Uploads use native upstream
+serialization and do not stream through the request driver.
+
+Results print as JSON. `--output NEW_FILE` creates a private file instead. A failed
+output write does not mean the remote request failed. After an uncertain request,
+check the service before explicitly retrying. No rollback is implied.
+
+
+## Offline package checks
+
+Optional developer checks require pytest 8 or 9 in the same Python environment:
+
+```sh
+python -m pip install 'pytest>=8,<10'
+python -m pytest -q tests
+```
+
+These checks read installed command metadata, native signatures and component notices.
+They send no service requests and do not establish live compatibility. Verify intended
+operations against your service separately. Installed notice files are under the
+package's `_notices` directory; the source project also includes `NOTICE.md`.

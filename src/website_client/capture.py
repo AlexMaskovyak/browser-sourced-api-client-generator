@@ -40,8 +40,8 @@ class NetworkCapture:
                 self.discovery.omitted += 1
                 return
             self.pending_bytes += size
-            self.pending[identifier] = {"request": {"url": request.get("url"), "method": request.get("method"),
-                "postData": {"text": post}}, "response": {}, "_started": params.get("timestamp", 0), "_bytes": size,
+            self.pending[identifier] = {"_resourceType": params.get("type"), "request": {"url": request.get("url"), "method": request.get("method"),
+                "postData": {"text": post}, "hasPostData": bool(request.get("hasPostData"))}, "response": {}, "_started": params.get("timestamp", 0), "_bytes": size,
                 "startedDateTime": datetime.fromtimestamp(params.get("wallTime", time.time()), timezone.utc).isoformat()}
         elif method == "Network.responseReceived" and identifier in self.pending:
             response = params.get("response", {})

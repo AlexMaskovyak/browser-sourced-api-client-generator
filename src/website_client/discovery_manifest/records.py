@@ -19,6 +19,7 @@ class Protocol(StrEnum):
 
 class Kind(StrEnum):
     REPORT = "report"
+    ARAZZO = "arazzo"
     HAR = "har"
     OPENAPI = "openapi"
     GRAPHQL_SCHEMA = "graphql-schema"

@@ -2,21 +2,26 @@
 
 import ast
 from dataclasses import dataclass
+from copy import deepcopy
+from contextlib import redirect_stdout, redirect_stderr
+import io
 import hashlib
 import importlib.metadata
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 from string import Template
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 from graphql import build_schema, parse, print_ast, validate
 
 from .browser import BrowserError
-from .definitions import graphql_schema, openapi_document, read_document
+from .definitions import read_document
 from .discovery import new_output
 
 GENERATOR_TIMEOUT_SECONDS = 120
@@ -29,6 +34,11 @@ RUNTIME_SOURCES = {
     "_cli.py": "client_cli.py",
     "browser.py": "browser.py",
     "session_http.py": "session_http.py",
+    "runtime_profile.py": "runtime_profile.py",
+    "authenticated_http.py": "authenticated_http.py",
+    "runtime.py": "client_runtime.py",
+    "native_files.py": "native_files.py",
+    "result_output.py": "result_output.py",
 }
 
 
@@ -38,10 +48,12 @@ class GeneratedProject:
 
     Backends own generated request code; shared packaging adds browser transport,
     CLI entry points and reports after backend generation succeeds."""
+
     directory: Path
     package_name: str
     operations: dict
     generator_name: str
+    coverage: dict | None = None
 
 
 def write_json(path, value):
@@ -142,51 +154,141 @@ def configure_openapi_package(project, name, package):
     metadata += f'\n[tool.poetry.scripts]\n{name} = "{package}._cli:entrypoint"\n'
     metadata = metadata.replace(
         "[tool.poetry.dependencies]\n",
-        '[tool.poetry.dependencies]\nplaywright = ">=1.58,<2"\n',
+        '[tool.poetry.dependencies]\nplaywright = "==1.64.1"\nplatformdirs = ">=4.3,<5"\nfilelock = ">=3.20,<4"\n',
         1,
     )
     metadata_path.write_text(metadata)
 
 
-def generate_openapi_project(stage, name, package, source):
-    """Run openapi-python-client in staging, then add shared CLI packaging.
+def _openapi_backend(stage, name, package, spec, project):
+    """Use the pinned public API so warnings are structured, never terminal text."""
+    from openapi_python_client import generate as upstream_generate
+    from openapi_python_client.config import Config, ConfigFile, MetaType
 
-    Reject backend warnings and disable post-generation shell hooks. Publication
-    is the caller's responsibility after metadata extraction succeeds."""
-    spec = openapi_document(source)
-    definition_path = stage / "openapi.json"
-    configuration_path = stage / "config.json"
-    project = stage / "project"
+    stage.mkdir(parents=True, exist_ok=True)
+    definition_path = stage / "definition.json"
     write_json(definition_path, spec)
-    write_json(
-        configuration_path,
+    config = Config.from_sources(
+        ConfigFile(
+            project_name_override=name, package_name_override=package, post_hooks=[]
+        ),
+        MetaType.POETRY,
+        definition_path,
+        "utf-8",
+        False,
+        project,
+    )
+    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        errors = upstream_generate(config=config)
+    return [
         {
-            "project_name_override": name,
-            "package_name_override": package,
-            # The wrapper supplies its own runtime; no shell hooks are needed.
-            "post_hooks": [],
-        },
-    )
-    run_generator(
-        "openapi_python_client",
-        [
-            "generate",
-            "--path",
-            str(definition_path),
-            "--output-path",
-            str(project),
-            "--config",
-            str(configuration_path),
-            "--meta",
-            "poetry",
-            "--fail-on-warning",
-        ],
-        stage,
-    )
+            "reason": "upstream_generation_warning",
+            "type": type(item).__name__,
+            "level": item.level.value,
+        }
+        for item in errors
+    ]
+
+
+def _generated_python_diagnostics(project: Path, package: str) -> list[dict[str, str]]:
+    """Reject malformed upstream output without exposing source lines in diagnostics."""
+    for path in (project / package).rglob("*.py"):
+        try:
+            ast.parse(path.read_text())
+        except SyntaxError:
+            return [
+                {
+                    "reason": "upstream_generation_warning",
+                    "type": "SyntaxError",
+                    "level": "warning",
+                }
+            ]
+    return []
+
+
+def generate_openapi_project(stage, name, package, source):
+    """Keep independent usable methods when admission or the backend excludes others."""
+    from .admission import METHODS, admit_openapi, prune_components
+
+    safe, spec, exclusions = admit_openapi(source)
+    project = stage / "project"
+    if not spec["paths"]:
+        raise BrowserError("unsupported: no executable OpenAPI operations")
+    diagnostics = _openapi_backend(stage / "backend", name, package, spec, project)
+    diagnostics.extend(_generated_python_diagnostics(project, package))
+    if diagnostics:
+        # A backend warning may drop part of a model while leaving a callable method.
+        # Test each dependency closure through that same backend before packaging it.
+        shutil.rmtree(project, ignore_errors=True)
+        admitted = deepcopy(spec)
+        admitted["paths"] = {}
+        for index, (path, method, operation) in enumerate(
+            (path, method, operation)
+            for path, item in spec["paths"].items()
+            for method, operation in item.items()
+            if method in METHODS
+        ):
+            candidate = deepcopy(spec)
+            candidate["paths"] = {
+                path: {
+                    key: deepcopy(value)
+                    for key, value in spec["paths"][path].items()
+                    if key not in METHODS
+                }
+            }
+            candidate["paths"][path][method] = deepcopy(operation)
+            prune_components(candidate)
+            probe = stage / ("probe-" + str(index))
+            warnings = _openapi_backend(
+                probe, name, package, candidate, probe / "project"
+            )
+            warnings.extend(_generated_python_diagnostics(probe / "project", package))
+            if warnings:
+                exclusions.append(
+                    {
+                        "operation": operation.get("operationId"),
+                        "method": method.upper(),
+                        "path": path,
+                        "reason": "upstream_generation_warning",
+                        "diagnostics": warnings,
+                    }
+                )
+            else:
+                selected = admitted["paths"].setdefault(
+                    path,
+                    {
+                        key: deepcopy(value)
+                        for key, value in spec["paths"][path].items()
+                        if key not in METHODS
+                    },
+                )
+                selected[method] = deepcopy(operation)
+        spec = admitted
+        prune_components(spec)
+        if not spec["paths"]:
+            raise BrowserError("unsupported: no executable OpenAPI operations")
+        final_warnings = _openapi_backend(stage / "final", name, package, spec, project)
+        final_warnings.extend(_generated_python_diagnostics(project, package))
+        if final_warnings:
+            raise BrowserError("unsupported: conflicting upstream generation inputs")
     operations = operation_metadata(project, package)
+    expected = sum(
+        method in METHODS for item in spec["paths"].values() for method in item
+    )
+    if len(operations) != expected:
+        raise BrowserError(
+            "unsupported: upstream omitted operations without attributable diagnostics"
+        )
     configure_openapi_package(project, name, package)
     write_json(project / "openapi.json", spec)
-    return GeneratedProject(project, package, operations, "openapi-python-client")
+    write_json(project / "source-openapi.json", safe)
+    return GeneratedProject(
+        project,
+        package,
+        operations,
+        "openapi-python-client",
+        {"exclusions": exclusions, "diagnostics": diagnostics},
+    )
 
 
 def validated_graphql_operations(schema_sdl, operations_path):
@@ -198,7 +300,9 @@ def validated_graphql_operations(schema_sdl, operations_path):
         raise BrowserError(
             "GraphQL generation requires --operations as well as --graphql-schema."
         )
-    query_text = read_document(operations_path)
+    from .privacy import safe_operations
+
+    query_text = safe_operations(read_document(operations_path))
     try:
         document = parse(query_text)
         if validate(build_schema(schema_sdl), document):
@@ -246,15 +350,20 @@ def write_graphql_configuration(stage, project, package, schema_sdl, document):
     operations_path = stage / "operations.graphql"
     configuration_path = stage / "config.toml"
     schema_path.write_text(schema_sdl)
-    operations_path.write_text(print_ast(document))
+    if document is not None:
+        operations_path.write_text(print_ast(document))
     configuration = [
         "[tool.ariadne-codegen]",
         f"schema_path = {json.dumps(str(schema_path))}",
-        f"queries_path = {json.dumps(str(operations_path))}",
+        *(
+            [f"queries_path = {json.dumps(str(operations_path))}"]
+            if document is not None
+            else ["enable_custom_operations = true"]
+        ),
         f"target_package_name = {json.dumps(package)}",
         f"target_package_path = {json.dumps(str(project))}",
         "async_client = false",
-        "multipart_uploads = false",
+        "multipart_uploads = true",
         'include_comments = "none"',
     ]
     configuration_path.write_text("\n".join(configuration))
@@ -268,12 +377,23 @@ def generate_graphql_project(stage, name, package, source, operations_path):
 
     Unlike the operation-only backend, this path has a complete schema and can emit
     typed response models. No endpoint is called during generation."""
-    if not operations_path:
-        raise BrowserError(
-            "GraphQL generation requires --operations as well as --graphql-schema."
+    from .graphql_admission import safe_schema, schema_operations
+
+    schema_sdl, privacy_exclusions = safe_schema(source)
+    operation_exclusions = []
+    if operations_path:
+        from .privacy import safe_operations
+
+        text, operation_exclusions = safe_operations(
+            read_document(operations_path), with_exclusions=True
         )
-    schema_sdl = graphql_schema(source)
-    document, selected = validated_graphql_operations(schema_sdl, operations_path)
+        admitted_operations = stage / "admitted-operations.graphql"
+        admitted_operations.write_text(text)
+        document, selected = validated_graphql_operations(
+            schema_sdl, admitted_operations
+        )
+    else:
+        document, selected = None, None
     project = stage / "project"
     project.mkdir()
     configuration_path = write_graphql_configuration(
@@ -285,23 +405,58 @@ def generate_graphql_project(stage, name, package, source, operations_path):
         stage,
     )
 
-    operations = graphql_operation_metadata(selected)
+    if selected is not None:
+        operations, exclusions = graphql_operation_metadata(selected), []
+    else:
+        operations, exclusions = schema_operations(schema_sdl)
+    if not operations:
+        raise BrowserError("unsupported: no executable GraphQL operations")
     (project / "pyproject.toml").write_text(
         render_template("graphql_pyproject.toml.tmpl", name=name, package=package)
     )
     (project / "schema.graphql").write_text(schema_sdl)
-    (project / "operations.graphql").write_text(print_ast(document) + "\n")
-    return GeneratedProject(project, package, operations, "ariadne-codegen")
+    if document is not None:
+        (project / "operations.graphql").write_text(print_ast(document) + "\n")
+    return GeneratedProject(
+        project,
+        package,
+        operations,
+        "ariadne-codegen",
+        {"exclusions": privacy_exclusions + operation_exclusions + exclusions},
+    )
 
 
-def write_runtime_files(project):
-    """Copy only the standalone runtime, never the generator implementation."""
-    target = project.directory / project.package_name
-    for output_name, source_name in RUNTIME_SOURCES.items():
+def copy_runtime_sources(target: Path, sources: dict[str, str]) -> None:
+    """Copy declared standalone runtime modules into an already staged package."""
+    for output_name, source_name in sources.items():
         target.joinpath(output_name).write_text(
             Path(__file__).with_name(source_name).read_text()
         )
+
+
+def write_runtime_files(project, runtime_config=None):
+    """Copy only the standalone runtime, never the generator implementation."""
+    target = project.directory / project.package_name
+    copy_runtime_sources(target, RUNTIME_SOURCES)
     write_json(target / "_operations.json", project.operations)
+    config = {"kind": next(iter(project.operations.values()))["kind"]}
+    config.update(runtime_config or {})
+    if config.get("endpoint"):
+        from .runtime_profile import service_origin
+
+        config["origin"] = service_origin(config["endpoint"])
+        if urlsplit(config["endpoint"]).query:
+            raise BrowserError("Runtime endpoints cannot contain query values.")
+    if set(config) - {"kind", "endpoint", "origin", "profileId"}:
+        raise BrowserError("Invalid non-secret runtime configuration.")
+    if config.get("profileId") is not None and (
+        not isinstance(config["profileId"], str)
+        or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", config["profileId"])
+    ):
+        raise BrowserError("Invalid runtime profile identifier.")
+    write_json(target / "_runtime.json", config)
+    with (target / "__init__.py").open("a") as stream:
+        stream.write("\nfrom .runtime import client_context\n")
 
 
 def write_project_readme(project, name):
@@ -324,7 +479,17 @@ def write_generation_report(project, source, operations_source=None, lineage=Non
         "liveVerified": False,
     }
     if project.generator_name == "ariadne-codegen":
-        report.update(generationMode="graphql-schema", schemaValidated=True)
+        report.update(
+            generationMode=(
+                "graphql-schema-only"
+                if any(
+                    item["kind"] == "graphql-custom"
+                    for item in project.operations.values()
+                )
+                else "graphql-schema"
+            ),
+            schemaValidated=True,
+        )
     else:
         report.update(generationMode="openapi", definitionValidated=True)
     if operations_source is not None:
@@ -334,6 +499,8 @@ def write_generation_report(project, source, operations_source=None, lineage=Non
         report["generatedOperationsSha256"] = hashlib.sha256(
             (project.directory / "operations.graphql").read_bytes()
         ).hexdigest()
+    if project.coverage is not None:
+        report["coverage"] = project.coverage
     if lineage is not None:
         report["lineage"] = lineage
     write_json(project.directory / "generation.json", report)
@@ -371,6 +538,7 @@ def generate(
     schema=None,
     operations=None,
     lineage=None,
+    runtime_config=None,
 ):
     """Generate a schema-backed client, then publish it into a new directory.
 
@@ -395,8 +563,13 @@ def generate(
             project = generate_openapi_project(stage, name, package, source)
         else:
             project = generate_graphql_project(stage, name, package, source, operations)
-        write_runtime_files(project)
+        write_runtime_files(project, runtime_config)
         write_project_readme(project, name)
+        from .project_metadata import write_distribution_support
+
+        write_distribution_support(
+            project.directory, project.package_name, name, (project.generator_name,)
+        )
         report = write_generation_report(project, source, operations_source, lineage)
         publish_tree(project.directory, output)
         return report

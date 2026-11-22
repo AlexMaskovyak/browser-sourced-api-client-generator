@@ -1,0 +1,25 @@
+{
+  "name": "arazzo-runner",
+  "version": "0.9.6+websiteclient.1",
+  "upstreamVersion": "0.9.6",
+  "source": {
+    "url": "https://files.pythonhosted.org/packages/5c/ef/00bd8d69b013c0d64d877e3721f23b70d68adfc6f7e34183a7cce997d1eb/arazzo_runner-0.9.6.tar.gz",
+    "sha256": "5491c9facc1a552ad278657315d527889a63353185f6c93456d8af01180f9102",
+    "filename": "arazzo_runner-0.9.6.tar.gz"
+  },
+  "patchSha256": "ac4527a5b87dc33581ed69242e4df280a8e1280637666a9e07f644066f61f595",
+  "buildBackend": {
+    "name": "pdm-backend",
+    "version": "2.5.0"
+  },
+  "wheel": {
+    "filename": "arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl",
+    "sha256": "8a04b4df1593ea7ae549b1f526fe94ec070cb991c3501432bdacba19bd1bf78c"
+  },
+  "modifiedFiles": [
+    "arazzo_runner/http.py",
+    "arazzo_runner/executor/parameter_processor.py",
+    "pyproject.toml",
+    "NOTICE"
+  ]
+}

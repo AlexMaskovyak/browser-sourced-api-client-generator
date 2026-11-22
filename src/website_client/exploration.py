@@ -52,9 +52,15 @@ class SiteExplorer:
         max_actions=DEFAULT_MAX_ACTIONS,
         max_depth=DEFAULT_MAX_DEPTH,
         duration_seconds=DEFAULT_EXPLORE_SECONDS,
+        strict_origin=False,
+        api_origins=None,
+        credential_observer=None,
     ):
         validate_exploration(max_pages, max_actions, max_depth, duration_seconds)
         self.session = session
+        self.strict_origin = strict_origin
+        self.api_origins = api_origins if api_origins is not None else set()
+        self.credential_observer = credential_observer
         self.start_url = session.current_url()
         self.max_pages = max_pages
         self.max_actions = max_actions
@@ -84,7 +90,7 @@ class SiteExplorer:
             self.omitted += 1
 
     def _guard(self, route):
-        reason = request_allowed(route.request, self.session._origin)
+        reason = request_allowed(route.request, self.session._origin, self.strict_origin, self.api_origins)
         if (
             reason is None
             and self._control_phase
@@ -117,6 +123,8 @@ class SiteExplorer:
             )
             route.abort("blockedbyclient")
         else:
+            if self.credential_observer is not None:
+                self.credential_observer.observe_request(route.request)
             route.continue_()
 
     def _websocket(self, socket):
@@ -149,6 +157,15 @@ class SiteExplorer:
         self.session._connection = self.session.connection_for(self.session._page)
         old_page.close()
         context.on("page", self._popup)
+        if self.credential_observer is not None:
+            context.on("response", self._cookie_response)
+
+    def _cookie_response(self, response):
+        try:
+            self.credential_observer.observe_response(response.url, response.header_values("set-cookie"))
+        except Exception:
+            # Header/driver diagnostics cannot leave the credential capture boundary.
+            return
 
     def _popup(self, page):
         self._record(self.skipped, {"kind": "popup", "reason": "popup_not_explored"})
@@ -165,6 +182,8 @@ class SiteExplorer:
         except Exception:
             document_in_tab = False
         if document_in_tab:
+            if self.credential_observer is not None and request_allowed(route.request, self.session._origin, self.strict_origin, self.api_origins) is None:
+                self.credential_observer.observe_request(route.request)
             route.continue_()
         else:
             self._guard(route)
@@ -183,6 +202,7 @@ class SiteExplorer:
             method=raw["method"],
             post_data=raw.get("postData"),
             resource_type=event.get("resourceType", "").lower(),
+            headers=raw.get("headers", {}),
             is_navigation_request=lambda: event.get("resourceType") == "Document",
             frame=self.session._page.main_frame
             if event.get("frameId") == self.main_frame_id
@@ -290,7 +310,7 @@ class SiteExplorer:
         for index in range(min(links.count(), MAX_ELEMENTS)):
             element = links.nth(index)
             href = element.get_attribute("href")
-            definition = schema_url(page.url, href)
+            definition = schema_url(page.url, href, advertised="service-desc" in (element.get_attribute("rel") or "").split())
             if (
                 definition
                 and definition not in observer.schema_links
@@ -542,4 +562,6 @@ class SiteExplorer:
                 self.session._context.unroute("**/*", self._http_guard)
                 self._context_guard_installed = False
             self.session._context.remove_listener("page", self._popup)
+            if self.credential_observer is not None:
+                self.session._context.remove_listener("response", self._cookie_response)
             self._guard_installed = False
