@@ -32,6 +32,7 @@ def test_observed_session_headers_are_origin_scoped_and_transient():
         },
     }
     transport._observe("Network.requestWillBeSent", event)
+
     assert transport._headers == {
         "authorization": "private-bearer",
         "x-app-context": "private-context",
@@ -111,6 +112,7 @@ def test_typed_request_uses_browser_interception_and_aborts_response_rendering(
         "POST", "https://example.test/items", json={"name": "Created"}
     )
     response = transport.handle_request(request)
+
     assert response.json() == {"id": 7}
     calls = connection.call.call_args_list
     continued = next(
@@ -119,10 +121,8 @@ def test_typed_request_uses_browser_interception_and_aborts_response_rendering(
     assert continued["method"] == "POST"
     assert json.loads(base64.b64decode(continued["postData"])) == {"name": "Created"}
     headers = {item["name"]: item["value"] for item in continued["headers"]}
-    assert (
-        headers["user-agent"] == "Native Chrome"
-        and headers["authorization"] == "private-bearer"
-    )
+    assert headers["user-agent"] == "Native Chrome"
+    assert headers["authorization"] == "private-bearer"
     assert headers["origin"] == "https://example.test"
     assert "content-encoding" not in response.headers
     assert any(
@@ -139,6 +139,7 @@ def test_redirect_response_is_returned_without_following(monkeypatch):
     response = transport.handle_request(
         httpx.Request("POST", "https://example.test/items", json={})
     )
+
     assert response.status_code == 302
     assert not any(
         call.args[0] == "Fetch.getResponseBody"
@@ -205,6 +206,7 @@ def test_interception_failure_is_returned_after_navigation_and_cleans_up(monkeyp
     connection.call.side_effect = RuntimeError("private-protocol-error")
     with pytest.raises(BrowserError) as error:
         transport.handle_request(httpx.Request("POST", "https://example.test/items"))
+
     assert "private-protocol-error" not in str(error.value)
     parent.target.close.assert_called_once()
     assert transport._active_request is None
@@ -223,6 +225,7 @@ def test_aborted_navigation_keeps_intercepted_api_result(monkeypatch):
     response = transport.handle_request(
         httpx.Request("POST", "https://example.test/items")
     )
+
     assert response.json() == {"id": 7}
     parent.target.close.assert_called_once()
 
@@ -235,6 +238,7 @@ def test_explicit_shared_session_headers_are_retained_without_taking_ownership()
         "POST",
         {"X-App-Context": "private-context"},
     )
+
     assert transport._headers == {"x-app-context": "private-context"}
     transport.close()
     session.close.assert_not_called()
@@ -248,6 +252,7 @@ def test_shared_session_ignores_managed_headers_and_rejects_excess_headers():
         "POST",
         {"Cookie": "private", "Sec-Fetch-Site": "same-site"},
     )
+
     assert transport._headers == {}
     with pytest.raises(BrowserError):
         BrowserLoginTransport.for_session(
@@ -285,5 +290,6 @@ def test_selected_protocol_identification_headers_follow_the_scoped_request(
         if call.args[0] == "Fetch.continueRequest"
     )
     headers = {item["name"]: item["value"] for item in continued["headers"]}
+
     assert headers["apollographql-client-name"] == "example-ui"
     assert headers["apollographql-client-version"] == "example-version"

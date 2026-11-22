@@ -55,6 +55,7 @@ def test_native_network_events_are_scoped_bounded_and_discard_headers():
         },
     }
     capture.event("Network.requestWillBeSent", request)
+
     assert "private-token" not in json.dumps(capture.pending)
     capture.event(
         "Network.responseReceived",
@@ -100,5 +101,6 @@ def test_response_body_failures_preserve_endpoint_metadata_and_report_gap():
     )
     capture.event("Network.loadingFinished", {"requestId": "1"})
     capture.drain()
+
     assert capture.body_failures == 1
     assert len(capture.discovery.endpoints) == 1

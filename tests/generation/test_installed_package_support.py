@@ -7,15 +7,23 @@ import sys
 
 from website_client.autonomous import run
 from website_client.generation import generate
-from support.packaging import installed_target, installed_cli, supplied_bundle
+from support.packaging import HELPERS, installed_target, installed_cli, supplied_bundle
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def run_installed_checks(project, target, tmp_path):
-    code = "import sys,pytest; sys.path.insert(0,sys.argv.pop(1)); raise SystemExit(pytest.main(sys.argv[1:]))"
     result = subprocess.run(
-        [sys.executable, "-I", "-c", code, str(target), "-q", str(project / "tests")],
+        [
+            sys.executable,
+            "-I",
+            str(HELPERS / "run_installed.py"),
+            str(target),
+            "module",
+            "pytest",
+            "-q",
+            str(project / "tests"),
+        ],
         cwd=tmp_path,
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -37,14 +45,14 @@ def test_sdk_wheel_ships_notices_and_useful_offline_contract_tests(tmp_path):
     result = subprocess.run(
         [
             sys.executable,
-            "-c",
-            'from poetry.core.masonry.api import build_wheel; build_wheel("dist")',
+            str(HELPERS / "build_wheel.py"),
         ],
         cwd=project,
         capture_output=True,
         text=True,
         timeout=60,
     )
+
     assert result.returncode == 0, result.stderr
     wheel = next((project / "dist").glob("*.whl"))
     target = tmp_path / "installed"
@@ -67,7 +75,8 @@ def test_sdk_wheel_ships_notices_and_useful_offline_contract_tests(tmp_path):
     assert result.returncode == 0, result.stderr
     run_installed_checks(project, target, tmp_path)
     assert (target / "contract_sdk/_notices/LICENSE.openapi-python-client").is_file()
-    assert (project / "LICENSE").is_file() and (project / "NOTICE.md").is_file()
+    assert (project / "LICENSE").is_file()
+    assert (project / "NOTICE.md").is_file()
 
 
 def test_workflow_input_inventory_help_notices_and_installed_checks(tmp_path):
@@ -91,19 +100,17 @@ def test_workflow_input_inventory_help_notices_and_installed_checks(tmp_path):
         "upload"
     ]
     indexed = {item["name"]: item for item in inputs}
+
     assert indexed["receipt"] == {
         "name": "receipt",
         "required": True,
         "type": "unknown (no declared type)",
         "binary": True,
     }
-    assert (
-        indexed["ticketName"]["required"] and indexed["ticketName"]["type"] == "string"
-    )
-    assert (
-        not indexed["optionalFlag"]["required"]
-        and indexed["optionalFlag"]["type"] == "boolean"
-    )
+    assert indexed["ticketName"]["required"]
+    assert indexed["ticketName"]["type"] == "string"
+    assert not indexed["optionalFlag"]["required"]
+    assert indexed["optionalFlag"]["type"] == "boolean"
     readme = (project / "README.md").read_text()
     assert "--input inputs.json --file receipt=payload.bin" in readme
     assert "--file file=payload.bin" not in readme

@@ -1,7 +1,6 @@
 """Generated REST and GraphQL SDK structure and callable commands."""
 
 import http.server
-import importlib
 import json
 import os
 from pathlib import Path
@@ -96,6 +95,7 @@ def command(project, package, args, stdin=None):
 
 def test_real_upstream_generators_emit_standalone_packages(generated):
     rest, graphql, rest_report, graphql_report = generated
+
     assert rest_report["generator"] == "openapi-python-client"
     assert graphql_report["generator"] == "ariadne-codegen"
     for project in (rest, graphql):
@@ -118,13 +118,13 @@ def test_generated_help_has_actual_inputs_and_write_labels(generated):
     ):
         result = command(project, package, [operation, "--help"])
         assert result.returncode == 0, result.stderr
-        assert (
-            field in result.stdout
-            and "required" in result.stdout
-            and "READS remote data" in result.stdout
-        )
-        assert "--login" in result.stdout and "--login-url" in result.stdout
+        assert field in result.stdout
+        assert "required" in result.stdout
+        assert "READS remote data" in result.stdout
+        assert "--login" in result.stdout
+        assert "--login-url" in result.stdout
     result = command(graphql, "sample_graphql", ["CreateItem", "--help"])
+
     assert "WRITES remote data" in result.stdout
 
 
@@ -138,6 +138,7 @@ def test_generated_openapi_cli_calls_typed_methods_and_guards_writes(
     result = command(
         rest, "sample_rest", ["get_item", "--url", url, "--input", str(inputs)]
     )
+
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"id": 7, "name": "Example"}
     assert counts == {"reads": 1, "writes": 0}
@@ -145,7 +146,8 @@ def test_generated_openapi_cli_calls_typed_methods_and_guards_writes(
     denied = command(
         rest, "sample_rest", ["create_item", "--url", url, "--input", str(inputs)]
     )
-    assert denied.returncode != 0 and counts["writes"] == 0
+    assert denied.returncode != 0
+    assert counts["writes"] == 0
     result = command(
         rest,
         "sample_rest",
@@ -175,6 +177,7 @@ def test_generated_graphql_cli_calls_typed_methods_and_guards_writes(
         "sample_graphql",
         ["GetItem", "--url", url + "/graphql", "--input", str(inputs)],
     )
+
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"item": {"id": "7", "name": "Example"}}
     assert counts == {"reads": 1, "writes": 0}
@@ -184,7 +187,8 @@ def test_generated_graphql_cli_calls_typed_methods_and_guards_writes(
         "sample_graphql",
         ["CreateItem", "--url", url + "/graphql", "--input", str(inputs)],
     )
-    assert denied.returncode != 0 and counts["writes"] == 0
+    assert denied.returncode != 0
+    assert counts["writes"] == 0
     result = command(
         graphql,
         "sample_graphql",
@@ -209,6 +213,7 @@ def test_generation_rejects_existing_output_and_invalid_graphql(tmp_path):
     sentinel.write_text("keep")
     with pytest.raises(BrowserError, match="already exists"):
         generate(output, openapi=FIXTURES / "openapi.json")
+
     assert sentinel.read_text() == "keep"
     operations = tmp_path / "invalid.graphql"
     operations.write_text("query Invalid { missing }")
@@ -232,15 +237,19 @@ def test_generated_login_rejects_pipes_and_unconfirmed_writes_before_launch(
         "sample_rest",
         ["get_item", "--url", url, "--input", str(inputs), "--login"],
     )
-    assert result.returncode != 0 and "interactive terminal" in result.stderr
+
+    assert result.returncode != 0
+    assert "interactive terminal" in result.stderr
     result = command(
         generated[0], "sample_rest", ["create_item", "--url", url, "--login"]
     )
-    assert result.returncode != 0 and "requires --confirm-write" in result.stderr
+    assert result.returncode != 0
+    assert "requires --confirm-write" in result.stderr
     result = command(
         generated[0], "sample_rest", ["get_item", "--url", url, "--browser", "chrome"]
     )
-    assert result.returncode != 0 and "Browser options require --login" in result.stderr
+    assert result.returncode != 0
+    assert "Browser options require --login" in result.stderr
     assert counts == {"reads": 0, "writes": 0}
 
 
@@ -255,6 +264,7 @@ def test_generated_cli_rejects_oversized_json_before_request(
         "sample_rest",
         ["get_item", "--url", url, "--input", str(inputs)],
     )
+
     assert result.returncode != 0
     assert "Input exceeds 1 MiB" in result.stderr
     assert counts == {"reads": 0, "writes": 0}
@@ -277,28 +287,69 @@ def test_generated_cli_bounds_header_bytes_without_echoing_credentials(
         ["get_item", "--url", url, "--input", str(inputs), "--headers-stdin"],
         stdin=headers,
     )
+
     assert result.returncode != 0
     assert "Headers exceed 64 KiB" in result.stderr
     assert credential_marker not in result.stdout + result.stderr
     assert counts == {"reads": 0, "writes": 0}
 
 
-def test_optional_nullable_body_invalid_native_output_excludes_only_affected_sdk_operation(tmp_path):
+def test_optional_nullable_body_invalid_native_output_excludes_only_affected_sdk_operation(
+    tmp_path,
+):
     import ast
-    source = tmp_path / 'openapi.json'
-    source.write_text(json.dumps({'openapi': '3.0.3', 'info': {'title': 'Optional nullable JSON', 'version': '1'}, 'servers': [{'url': 'https://fixture.invalid'}], 'paths': {
-        '/read': {'get': {'operationId': 'read', 'responses': {'200': {'description': 'ok'}}}},
-        '/nullable': {'post': {'operationId': 'nullable', 'requestBody': {'required': False, 'content': {'application/json': {'schema': {'type': 'string', 'nullable': True}}}}, 'responses': {'200': {'description': 'ok'}}}},
-    }}))
-    output = tmp_path / 'client'
-    report = generate(output, 'optional-nullable', openapi=source)
-    assert report['operations'] == ['read']
-    exclusion = next(item for item in report['coverage']['exclusions'] if item['operation'] == 'nullable')
-    assert exclusion['reason'] == 'upstream_generation_warning'
-    assert exclusion['diagnostics'][0]['type'] == 'SyntaxError'
-    assert '/nullable' in json.loads((output / 'source-openapi.json').read_text())['paths']
-    assert not (output / 'optional_nullable' / 'api' / 'default' / 'nullable.py').exists()
-    for path in output.rglob('*.py'):
+
+    source = tmp_path / "openapi.json"
+    source.write_text(
+        json.dumps(
+            {
+                "openapi": "3.0.3",
+                "info": {"title": "Optional nullable JSON", "version": "1"},
+                "servers": [{"url": "https://fixture.invalid"}],
+                "paths": {
+                    "/read": {
+                        "get": {
+                            "operationId": "read",
+                            "responses": {"200": {"description": "ok"}},
+                        }
+                    },
+                    "/nullable": {
+                        "post": {
+                            "operationId": "nullable",
+                            "requestBody": {
+                                "required": False,
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"type": "string", "nullable": True}
+                                    }
+                                },
+                            },
+                            "responses": {"200": {"description": "ok"}},
+                        }
+                    },
+                },
+            }
+        )
+    )
+    output = tmp_path / "client"
+    report = generate(output, "optional-nullable", openapi=source)
+
+    assert report["operations"] == ["read"]
+    exclusion = next(
+        item
+        for item in report["coverage"]["exclusions"]
+        if item["operation"] == "nullable"
+    )
+    assert exclusion["reason"] == "upstream_generation_warning"
+    assert exclusion["diagnostics"][0]["type"] == "SyntaxError"
+    assert (
+        "/nullable" in json.loads((output / "source-openapi.json").read_text())["paths"]
+    )
+    assert not (
+        output / "optional_nullable" / "api" / "default" / "nullable.py"
+    ).exists()
+    for path in output.rglob("*.py"):
         ast.parse(path.read_text())
     import compileall
-    assert compileall.compile_dir(output / 'optional_nullable', quiet=1)
+
+    assert compileall.compile_dir(output / "optional_nullable", quiet=1)

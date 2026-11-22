@@ -31,6 +31,7 @@ def test_invalid_or_ambiguous_operations_are_rejected(text):
 
 def test_defaults_nullability_scalars_and_fragments_without_a_schema():
     operation = next(item for item in compile_operations((DOC,)) if item.name == "Find")
+
     assert validate_variables(operation, {"id": "7"}) == {"id": "7"}
     assert validate_variables(operation, {"id": 7, "label": None}) == {
         "id": 7,
@@ -55,7 +56,9 @@ def test_fragment_names_are_scoped_to_each_captured_request():
         "query Two { item { ...F } } fragment F on Item { name }",
     )
     operations = compile_operations(sources)
-    assert "id" in operations[0].document and "name" not in operations[0].document
+
+    assert "id" in operations[0].document
+    assert "name" not in operations[0].document
     assert "name" in operations[1].document
 
 
@@ -65,6 +68,7 @@ def test_reserved_python_names_get_safe_parameters():
             "query Close($class: ID!, $self: ID!, $__private: ID!) { a(a:$class,b:$self,c:$__private) }",
         )
     )[0]
+
     assert operation.method == "operation_close"
     values = {item.parameter: "7" for item in operation.variables}
     assert validate_variables(operation, values) == {
@@ -83,5 +87,6 @@ def test_zero_input_operation_supports_absent_variable_definitions(monkeypatch):
     document.definitions[0].variable_definitions = None
     monkeypatch.setattr(contracts, "parse", lambda *_args, **_kwargs: document)
     operation = compile_operations(("query Ping { __typename }",))[0]
+
     assert operation.variables == ()
     assert validate_variables(operation, {}) == {}

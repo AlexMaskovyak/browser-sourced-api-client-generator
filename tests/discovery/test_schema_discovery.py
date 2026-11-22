@@ -34,10 +34,12 @@ from website_client.session_http import BrowserLoginTransport
     ],
 )
 def test_unrelated_or_credential_bearing_links_are_not_probed(href):
+
     assert schema_url("https://example.test/app", href) is None
 
 
 def test_same_origin_schema_links_are_resolved():
+
     assert (
         schema_url("https://example.test/docs/", "openapi.yaml")
         == "https://example.test/docs/openapi.yaml"
@@ -55,6 +57,7 @@ def test_observer_keeps_headers_scoped_and_discovers_only_after_login():
         },
     }
     observer.event("Network.requestWillBeSent", event)
+
     assert observer.graphql_endpoints == []
     observer.discovering = True
     observer.event(
@@ -71,14 +74,16 @@ def test_observer_keeps_headers_scoped_and_discovers_only_after_login():
     assert observer.headers == {}
 
 
-
 def request_event(url, *, headers=None, query=False):
     return {
         "documentURL": "https://example.test/app",
         "request": {
-            "url": url, "method": "POST" if query else "GET",
+            "url": url,
+            "method": "POST" if query else "GET",
             "headers": headers or {},
-            "postData": json.dumps({"query": "query Probe { __typename }"}) if query else "",
+            "postData": json.dumps({"query": "query Probe { __typename }"})
+            if query
+            else "",
         },
     }
 
@@ -87,11 +92,19 @@ def test_headerless_origins_do_not_hide_a_late_graphql_endpoint():
     observer = DiscoveryObserver("https://example.test/app")
     observer.discovering = True
     for number in range(MAX_AUTH_ORIGINS + 2):
-        observer.event("Network.requestWillBeSent", request_event(f"https://asset{number}.test/script.js"))
+        observer.event(
+            "Network.requestWillBeSent",
+            request_event(f"https://asset{number}.test/script.js"),
+        )
     observer.event(
         "Network.requestWillBeSent",
-        request_event("https://api.example.test/graphql", headers={"Authorization": "private"}, query=True),
+        request_event(
+            "https://api.example.test/graphql",
+            headers={"Authorization": "private"},
+            query=True,
+        ),
     )
+
     assert observer.graphql_endpoints == ["https://api.example.test/graphql"]
     assert observer.headers == {("api.example.test", 443): {"authorization": "private"}}
 
@@ -102,16 +115,24 @@ def test_full_header_budget_does_not_prevent_endpoint_recognition():
     for number in range(MAX_AUTH_ORIGINS):
         observer.event(
             "Network.requestWillBeSent",
-            request_event(f"https://api{number}.test/", headers={"Authorization": "private"}),
+            request_event(
+                f"https://api{number}.test/", headers={"Authorization": "private"}
+            ),
         )
     observer.event(
         "Network.requestWillBeSent",
-        request_event("https://late.example.test/graphql?private=omit", headers={"Authorization": "omit"}, query=True),
+        request_event(
+            "https://late.example.test/graphql?private=omit",
+            headers={"Authorization": "omit"},
+            query=True,
+        ),
     )
+
     assert observer.graphql_endpoints == ["https://late.example.test/graphql"]
     assert len(observer.headers) == MAX_AUTH_ORIGINS
     assert ("late.example.test", 443) not in observer.headers
     assert "private=omit" not in repr(vars(observer))
+
 
 def session():
     page = Mock()
@@ -134,6 +155,7 @@ def test_shared_transport_closes_only_its_own_request_resources():
         "GET",
         {"Authorization": "private-token", "Cookie": "forbidden"},
     )
+
     assert transport._headers == {"authorization": "private-token"}
     transport.close()
     browser.close.assert_not_called()
@@ -166,6 +188,7 @@ def test_unsuccessful_introspection_is_reported_without_inventing_schema(
     )
     engine = SelfDiscovery(session(), DiscoveryObserver("https://example.test/app"))
     engine._probe("graphql", "https://example.test/graphql")
+
     assert engine.attempts[0]["outcome"] == outcome
     assert not engine.capture.discovery.definitions
     assert "private service error" not in json.dumps(engine.attempts)
@@ -180,7 +203,9 @@ def test_unsuccessful_introspection_is_reported_without_inventing_schema(
 
 
 def test_valid_download_uses_existing_openapi_validator(monkeypatch):
-    document = json.loads((Path(__file__).parents[1] / "fixtures/openapi.json").read_text())
+    document = json.loads(
+        (Path(__file__).parents[1] / "fixtures/openapi.json").read_text()
+    )
     monkeypatch.setattr(
         BrowserLoginTransport,
         "for_session",
@@ -190,6 +215,7 @@ def test_valid_download_uses_existing_openapi_validator(monkeypatch):
     )
     engine = SelfDiscovery(session(), DiscoveryObserver("https://example.test/app"))
     engine._probe("definition", "https://example.test/openapi.json")
+
     assert engine.attempts[0]["outcome"] == "found"
     assert any(
         kind == "openapi" for kind, _digest in engine.capture.discovery.definitions
@@ -213,6 +239,7 @@ def test_probe_limit_and_observer_cleanup(monkeypatch):
         "website_client.self_discovery.time.monotonic", lambda: next(clock)
     )
     _result, report = engine.run()
+
     assert len(report["probes"]) == 2
     assert report["candidatesNotProbed"] > 0
     assert report["completeServiceCoverage"] is False
@@ -241,6 +268,7 @@ def test_invalid_cli_combinations_fail_before_browser_launch(
 ):
     factory = Mock(side_effect=AssertionError("Must validate before login"))
     monkeypatch.setattr("website_client.cli.BrowserSession", factory)
+
     assert main(["discover", "--output", str(tmp_path / "new"), *arguments]) == 1
     factory.assert_not_called()
 

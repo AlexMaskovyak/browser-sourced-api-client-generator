@@ -41,6 +41,7 @@ def test_independent_producer_document_is_accepted(tmp_path):
     bundle = independent_bundle()
     path = tmp_path / "input.json"
     path.write_text(json.dumps(bundle))
+
     assert read_bundle(path) == bundle
 
 

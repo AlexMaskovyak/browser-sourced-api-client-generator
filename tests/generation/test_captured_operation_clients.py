@@ -61,6 +61,7 @@ def test_generated_methods_send_exact_requests_and_guard_mutations(
     report = generate_bundle(
         manifest(tmp_path, observed=True), output, "captured-client"
     )
+
     assert report["generationMode"] == "operation-documents"
     assert report["schemaValidated"] is False
     assert report["lineage"]["schemaArtifact"] is None
@@ -116,7 +117,8 @@ def test_generated_methods_send_exact_requests_and_guard_mutations(
         capture_output=True,
         text=True,
     )
-    assert result.returncode != 0 and "--confirm-write Create" in result.stderr
+    assert result.returncode != 0
+    assert "--confirm-write Create" in result.stderr
 
 
 def test_operation_only_import_normalize_generate_pipe(tmp_path):
@@ -128,6 +130,7 @@ def test_operation_only_import_normalize_generate_pipe(tmp_path):
         text=True,
         capture_output=True,
     )
+
     assert imported.returncode == 0, imported.stderr
     normalized = subprocess.run(
         cli + ["normalize", "--input", "-"],
@@ -185,6 +188,7 @@ def test_get_requests_preserve_variables_and_do_not_follow_redirects(
         with Client("https://example.test/graphql", http_client=http) as client:
             with pytest.raises(RuntimeError, match="non-success"):
                 client.find(id="7")
+
     assert len(calls) == 1
     assert calls[0].method == "GET"
     assert json.loads(calls[0].url.params["variables"]) == {"id": "7"}
@@ -214,6 +218,7 @@ def test_partial_graphql_errors_fail_without_retry_or_server_message_leaks(
         with Client("https://example.test/graphql", http_client=http) as client:
             with pytest.raises(RuntimeError) as error:
                 client.find(id="7")
+
     assert len(calls) == 1
     assert "do-not-print" not in str(error.value)
     bad = tmp_path / "bad.json"
@@ -248,7 +253,9 @@ def test_cli_failure_reports_safe_http_status_and_browser_reason(capsys):
     state.started = True
     show_failure(OperationError("private-response", http_status=403), state)
     output = capsys.readouterr().err
-    assert "403" in output and "private-response" not in output
+
+    assert "403" in output
+    assert "private-response" not in output
     show_failure(BrowserError("Browser request redirects are blocked."), state)
     assert "redirects are blocked" in capsys.readouterr().err
 
@@ -260,11 +267,14 @@ def test_generation_documents_public_methods_and_repeats_exactly(tmp_path):
     first, second = tmp_path / "first", tmp_path / "second"
     generate_bundle(source, first, "documented-client")
     generate_bundle(source, second, "documented-client")
-    files = lambda root: {
-        str(path.relative_to(root)): path.read_bytes()
-        for path in root.rglob("*")
-        if path.is_file()
-    }
+
+    def files(root):
+        return {
+            str(path.relative_to(root)): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
     assert files(first) == files(second)
     tree = ast.parse((first / "documented_client/client.py").read_text())
     client = next(node for node in tree.body if isinstance(node, ast.ClassDef))

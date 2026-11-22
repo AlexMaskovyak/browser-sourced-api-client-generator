@@ -51,6 +51,7 @@ def request(
     ],
 )
 def test_navigation_excludes_actions_external_sites_and_downloads(href):
+
     assert (
         clean_navigation("https://example.test/app", href, ("example.test", 443))
         is None
@@ -58,6 +59,7 @@ def test_navigation_excludes_actions_external_sites_and_downloads(href):
 
 
 def test_spa_and_pagination_links_preserve_runtime_addresses():
+
     assert (
         clean_navigation(
             "https://example.test/app", "/#/orders?page=2", ("example.test", 443)
@@ -87,6 +89,7 @@ def test_spa_and_pagination_links_preserve_runtime_addresses():
     ],
 )
 def test_only_selected_graphql_queries_are_readable(payload):
+
     assert graphql_read(payload) is False
     assert (
         request_allowed(request("POST", payload=payload), ("example.test", 443))
@@ -99,6 +102,7 @@ def test_selected_query_may_share_document_with_an_unselected_mutation():
         "query": "query Read { items } mutation Save { save }",
         "operationName": "Read",
     }
+
     assert graphql_read(payload)
     assert (
         request_allowed(request("POST", payload=payload), ("example.test", 443)) is None
@@ -107,12 +111,14 @@ def test_selected_query_may_share_document_with_an_unselected_mutation():
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 def test_unknown_writes_are_blocked(method):
+
     assert request_allowed(
         request(method, payload={"amount": 12}), ("example.test", 443)
     )
 
 
 def test_get_graphql_mutation_and_off_site_redirect_are_blocked():
+
     assert request_allowed(
         request(url="https://example.test/graphql?query=mutation%20Save%20%7Bsave%7D"),
         ("example.test", 443),
@@ -138,6 +144,7 @@ def test_get_graphql_mutation_and_off_site_redirect_are_blocked():
 def test_source_literals_include_writes_without_executing_source(tmp_path):
     source = 'const value = {body: "mutation Add($name: String!) { add(name: $name) { id } }"}; throw Error("must not execute");'
     documents = extract_documents(source)
+
     assert len(documents) == 1
     assert "mutation Add" in documents[0]
     assert (
@@ -165,9 +172,12 @@ def test_frontend_declarations_are_separate_from_observed_endpoints():
     connection.call.assert_not_called()
     frontend.drain()
     item = frontend.modules[0]["operations"][0]
-    assert item["kind"] == "mutation" and item["executed"] is False
+
+    assert item["kind"] == "mutation"
+    assert item["executed"] is False
     assert item["variables"] == {"name": "String!"}
-    assert discovery.documents and not discovery.endpoints
+    assert discovery.documents
+    assert not discovery.endpoints
     assert "mutation Save" in discovery.files("browser")["operations.graphql"]
 
 
@@ -183,6 +193,7 @@ def test_interception_records_write_shape_without_values():
     explorer._guard(intercepted)
     intercepted.abort.assert_called_once()
     intercepted.continue_.assert_not_called()
+
     assert (
         explorer.blocked[0]["requestSchema"]["properties"]["amount"]["type"]
         == "integer"
@@ -206,6 +217,7 @@ def test_websocket_guard_never_connects_to_the_server_or_waits_for_close():
     explorer._websocket(socket)
     socket.connect_to_server.assert_not_called()
     socket.close.assert_not_called()
+
     assert explorer.blocked[0]["sent"] is False
 
 
@@ -229,6 +241,7 @@ def test_pagination_uses_request_progress_without_reading_page_contents(
     monkeypatch.setattr(explorer, "_inspect", Mock())
     monkeypatch.setattr(explorer, "_settle", Mock())
     explorer._walk_controls(capture, Mock(), 0)
+
     assert button.click.call_count == expected_clicks
     page.content.assert_not_called()
 
@@ -253,5 +266,6 @@ def test_exploration_budgets_are_validated(settings):
 def test_exploration_cli_validation_precedes_login(monkeypatch, tmp_path, arguments):
     factory = Mock(side_effect=AssertionError("Must validate first"))
     monkeypatch.setattr("website_client.cli.BrowserSession", factory)
+
     assert main(["discover", "--output", str(tmp_path / "new"), *arguments]) == 1
     factory.assert_not_called()

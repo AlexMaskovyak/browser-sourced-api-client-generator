@@ -35,6 +35,7 @@ def test_rejects_unsafe_url(url):
 
 
 def test_origin_normalized():
+
     assert origin("https://EXAMPLE.test/app") == origin(
         "https://example.test:443/other"
     )
@@ -54,6 +55,7 @@ def test_playwright_control_errors_do_not_echo_private_diagnostics():
     page, protocol = Mock(), Mock()
     connection = Connection(page, protocol)
     protocol.send.return_value = {"ok": True}
+
     assert connection.call("Page.getFrameTree") == {"ok": True}
     protocol.send.side_effect = RuntimeError("private-token")
     with pytest.raises(BrowserError) as error:
@@ -75,6 +77,7 @@ def test_playwright_events_are_forwarded_and_detached():
     page.wait_for_timeout.assert_called_once_with(200)
     connection.close()
     protocol.detach.assert_called_once()
+
     assert connection.on_event is None
 
 
@@ -109,6 +112,7 @@ def session(monkeypatch):
 
 def test_confirmation_reports_uncertainty(session):
     result = session.confirm_login(Terminal("\n"), io.StringIO())
+
     assert result == {
         "sessionReady": True,
         "authentication": "user-confirmed",
@@ -119,6 +123,7 @@ def test_confirmation_reports_uncertainty(session):
 
 def test_confirmation_reads_current_frame_when_cached_url_is_stale(session):
     session._page.url = "https://example.test/mfa"
+
     assert session.confirm_login(Terminal("\n"), io.StringIO())["sessionReady"] is True
     session._connection.call.assert_called_with("Page.getFrameTree")
 
@@ -158,7 +163,9 @@ def test_cleanup_runs_after_browser_failure(session):
     profile.cleanup.assert_called_once()
 
 
-def test_failed_launch_restores_signals_without_creating_persistent_profile(monkeypatch):
+def test_failed_launch_restores_signals_without_creating_persistent_profile(
+    monkeypatch,
+):
     monkeypatch.setattr("website_client.browser.find_browser", lambda *_a: "/browser")
     profile = Mock(name="profile")
     monkeypatch.setattr(
@@ -172,6 +179,7 @@ def test_failed_launch_restores_signals_without_creating_persistent_profile(monk
     with pytest.raises(BrowserError) as error:
         with BrowserSession("https://example.test/app"):
             pass
+
     assert "private-value" not in str(error.value)
     assert signal.getsignal(signal.SIGINT) == previous
     profile.cleanup.assert_not_called()
@@ -183,6 +191,7 @@ def test_cli_rejects_pipe_before_opening_browser(monkeypatch):
         "website_client.cli.BrowserSession",
         Mock(side_effect=AssertionError("Must not launch")),
     )
+
     assert main(["login", "--url", "https://example.test"]) == 1
 
 
@@ -190,19 +199,22 @@ def test_help_is_installed_and_offline():
     result = subprocess.check_output(
         [sys.executable, "-m", "website_client.cli", "login", "--help"], text=True
     )
+
     assert "verification" in result
     assert "does not save" in result
 
 
 def test_initial_login_uses_non_persistent_context(monkeypatch):
-    monkeypatch.setattr('website_client.browser.find_browser', lambda *_: '/browser')
+    monkeypatch.setattr("website_client.browser.find_browser", lambda *_: "/browser")
     playwright, browser, context, page = Mock(), Mock(), Mock(), Mock()
     playwright.chromium.launch.return_value = browser
     browser.new_context.return_value = context
     context.pages = []
     context.new_page.return_value = page
-    monkeypatch.setattr('website_client.browser.sync_playwright', lambda: Mock(start=lambda: playwright))
-    with BrowserSession('https://example.test/app'):
+    monkeypatch.setattr(
+        "website_client.browser.sync_playwright", lambda: Mock(start=lambda: playwright)
+    )
+    with BrowserSession("https://example.test/app"):
         pass
     playwright.chromium.launch.assert_called_once()
     playwright.chromium.launch_persistent_context.assert_not_called()
