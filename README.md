@@ -185,9 +185,10 @@ empty website and malformed saved input through generation, then checks their
 READMEs, stub help, nonzero status, and zero-request results. Successful projects
 must contain both a README and Python client files.
 
-The complete command passed at `b38200b`: 403 tests, HTTPS compatibility and separate
-runtime acceptance, including CDN/separate-API-host discovery, unsuccessful output,
-and nine generated-package checks. The [verification record](docs/verification/observed-graphql-client-assets.json)
-identifies the tested source and images. The saved example manifest also generates an
-11-operation client offline. Authenticated example execution remains unverified; it is
-a separate step from generating code with already collected evidence.
+The saved-run regression in `tests/fixtures/captured_operation_recovery` reproduces failed REST
+inference alongside usable captured GraphQL operations. Acceptance runs the normal
+generation command with the real converter and requires a usable client, README,
+and complete captured-operation inventory. It also checks missing converter
+prerequisites and regeneration from a saved manifest. These offline checks do not
+establish live authentication. See [Contributing](CONTRIBUTING.md) to run each
+component's tests independently.
