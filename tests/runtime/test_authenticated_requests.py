@@ -24,7 +24,7 @@ from website_client.generation import generate
 from website_client.native_files import convert
 from website_client.runtime_profile import HeaderCapture, ProfileError, ProfileStore, save_browser_profile
 
-FIXTURES = Path(__file__).parent / 'fixtures' / 'native_upload'
+FIXTURES = Path(__file__).parents[1] / 'fixtures' / 'native_upload'
 PAYLOAD = (FIXTURES / 'payload.bin').read_bytes()
 DIGEST = 'e6b9f47e1fdba07810e19268cb55a8496558fbcc38f5b75f17bdf66300ef90e3'
 

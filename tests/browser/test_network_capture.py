@@ -1,3 +1,5 @@
+"""Network event capture, bounded bodies and failure reporting."""
+
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock

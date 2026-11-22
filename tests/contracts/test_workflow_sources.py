@@ -8,7 +8,7 @@ from website_client.discovery_manifest.records import Manifest
 from website_client.workflow_binding import bind_sources, input_registry, report_bindings, referenced_local_files
 from website_client.privacy import sanitized_manifest
 
-FIXTURES = Path(__file__).parent / 'fixtures' / 'workflow'
+FIXTURES = Path(__file__).parents[1] / 'fixtures' / 'workflow'
 
 
 def test_relative_supplied_source_binds_exact_file_and_survives_snapshot(tmp_path):

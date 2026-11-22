@@ -7,7 +7,7 @@ from pathlib import Path
 import tomllib
 import zipfile
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parents[2]
 RESOURCES = ROOT / 'src' / 'website_client' / 'native_dependencies'
 
 

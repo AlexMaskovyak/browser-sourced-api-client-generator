@@ -1,3 +1,5 @@
+"""Passive traffic discovery, redaction and operation extraction."""
+
 import base64
 import copy
 import json

@@ -1,3 +1,5 @@
+"""Generated REST and GraphQL SDK structure and callable commands."""
+
 import http.server
 import importlib
 import json
@@ -14,7 +16,7 @@ from website_client.browser import BrowserError
 from website_client.generation import generate
 
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 @pytest.fixture(scope="module")

@@ -7,9 +7,9 @@ import sys
 
 from website_client.autonomous import run
 from website_client.generation import generate
-from test_workflow_packaging import installed_target, installed_cli, supplied_bundle
+from support.packaging import installed_target, installed_cli, supplied_bundle
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def run_installed_checks(project, target, tmp_path):

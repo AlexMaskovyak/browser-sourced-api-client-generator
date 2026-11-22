@@ -1,3 +1,5 @@
+"""Browser session selection, credential isolation and cleanup."""
+
 import io
 import signal
 import subprocess

@@ -1,3 +1,5 @@
+"""Read-only browser traversal, navigation bounds and blocked writes."""
+
 import json
 import time
 from types import SimpleNamespace

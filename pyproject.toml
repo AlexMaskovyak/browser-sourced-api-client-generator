@@ -23,6 +23,7 @@ website-client = "website_client.cli:entrypoint"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 
 [tool.poetry.dependencies]
 arazzo-runner = { path = "src/website_client/native_dependencies/arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl" }

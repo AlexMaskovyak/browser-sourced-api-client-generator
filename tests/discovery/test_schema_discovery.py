@@ -1,3 +1,5 @@
+"""Schema probing, observed endpoints and scoped authentication."""
+
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -178,7 +180,7 @@ def test_unsuccessful_introspection_is_reported_without_inventing_schema(
 
 
 def test_valid_download_uses_existing_openapi_validator(monkeypatch):
-    document = json.loads((Path(__file__).parent / "fixtures/openapi.json").read_text())
+    document = json.loads((Path(__file__).parents[1] / "fixtures/openapi.json").read_text())
     monkeypatch.setattr(
         BrowserLoginTransport,
         "for_session",

@@ -9,7 +9,7 @@ import pytest
 from website_client.workflow_admission import check_workflow, admit_workflows
 from website_client.workflow_schema import WorkflowRejected, validate_value
 
-FIXTURES = Path(__file__).parent / 'fixtures' / 'workflow'
+FIXTURES = Path(__file__).parents[1] / 'fixtures' / 'workflow'
 
 
 def documents():

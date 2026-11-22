@@ -1,3 +1,5 @@
+"""Public pipeline commands, standard streams and failure statuses."""
+
 import copy
 import json
 from pathlib import Path
@@ -25,7 +27,7 @@ from website_client.discovery import Discovery
 from website_client.normalization import choose_service, normalize_bundle
 from website_client.pipeline import generate_bundle
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def graphql_bundle(
