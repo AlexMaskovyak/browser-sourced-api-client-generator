@@ -166,7 +166,8 @@ def _add_automatic_command(commands: Any) -> None:
     automatic.add_argument(
         "--output",
         required=True,
-        help="New output directory. Writes sanitized evidence, coverage and generated packages.",
+        help="New output directory. Writes client code, instructions and coverage. "
+        "Unsupported or failed runs leave a README and an offline client.py stub.",
     )
     automatic.add_argument(
         "--name",

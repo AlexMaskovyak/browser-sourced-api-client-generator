@@ -1,0 +1,67 @@
+# Client generation needs attention
+
+$message
+
+`client.py` is a runnable local stub that explains the result. It makes
+no network requests, reads no credentials, and does not pretend that an API call
+succeeded. `coverage.json` records `unsupported` and `$reason`.
+
+## Inspect this result
+
+Python 3 is the only prerequisite. From this output directory, run:
+
+```sh
+python3 client.py --help
+python3 client.py
+python3 -m json.tool coverage.json
+```
+
+Help exits 0. Running the stub without arguments prints a JSON explanation with
+`requestsSent: 0` and exits 1 (130 if generation was cancelled). The count describes
+the stub invocation, not the earlier discovery run. These commands only read local files and print output.
+No installation, login, generator package, or browser is needed.
+
+## What was recorded
+
+| Evidence | Recorded count |
+| --- | ---: |
+| Pages inspected or attempted | $pages |
+| Requests blocked by discovery policy | $blocked_requests |
+| API-definition probes that did not find a definition | $unsuccessful_probes |
+
+These counts describe saved evidence, not a proven root cause. For a saved input
+without browser evidence, the counts are zero. Review `discovery` and `exclusions`
+in `coverage.json` for the available details. Blocked page assets can prevent an
+application from rendering; failed definition probes alone do not prove why.
+
+When present, the saved manifest in `manifest.json` contains the evidence collected.
+An input or browser failure before collection may leave no manifest.
+Regenerating that same evidence cannot recover requests that never happened or
+operations that were never discovered.
+
+## Try again with fresh evidence
+
+1. Update the generator to the revision containing the relevant discovery fix.
+   Use the generator repository and Poetry environment used for the original run.
+2. Obtain the website URL from your original command, or the path to an actual
+   OpenAPI or GraphQL definition supplied by the service. Do not use an empty
+   saved manifest as a substitute for new evidence.
+3. From that generator repository, run the following commands. After `read`, type
+   the URL or definition path and press Enter. Use a new output directory; if
+   `retry-clients` already exists, change that path before running.
+
+```sh
+read -r source
+poetry run website-client run "$$source" --output ./retry-clients
+```
+
+For a website URL, this opens a fresh login browser and makes discovery read
+requests after initial sign-in. Complete sign-in and verification, select the
+intended profile, and follow the terminal prompt. For a saved definition, generation
+runs locally without contacting the service. Both routes write new local output;
+website discovery also updates the private login profile outside the output.
+
+A successful result lists usable projects under `services` or `workflowPackage`
+in the new `coverage.json`; each project has its own installation instructions.
+If the result is still unsupported, retain both reports for comparison. Do not
+disable request guards to force generation. Further diagnosis may be needed.

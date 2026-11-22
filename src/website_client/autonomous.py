@@ -867,6 +867,8 @@ def _finish_coverage(coverage: dict, discovery_report: dict | None) -> None:
 
 
 def _persist_evidence(normalized: Manifest, output: Path, coverage: dict) -> None:
+    from .unsupported_output import write_unsupported_output
+
     # Only already-sanitized evidence is persisted. Raw HAR/source files were never copied.
     for filename, value in [
         ("manifest.json", normalized.to_dict()),
@@ -875,6 +877,7 @@ def _persist_evidence(normalized: Manifest, output: Path, coverage: dict) -> Non
         path = output / filename
         path.write_text(encoded(value))
         path.chmod(0o600)
+    write_unsupported_output(output, coverage)
 
 
 def run(
@@ -915,6 +918,20 @@ def run(
         max_depth=max_depth,
         duration_seconds=duration_seconds,
     )
+    # Claim a fresh destination before work begins so every accepted run can
+    # leave guidance on failure, without replacing someone else's files.
+    request.output.mkdir(mode=0o700)
+    try:
+        return _run_request(request)
+    except (Exception, KeyboardInterrupt) as error:
+        from .unsupported_output import write_failed_run
+
+        write_failed_run(request.output, error)
+        raise
+
+
+def _run_request(request: RunRequest) -> dict[str, Any]:
+    """Collect evidence and package usable services inside the owned output."""
     collected = _collect_inputs(request)
     manifest, conflicts = _merge_inputs(collected.manifests)
     manifest = bind_sources(manifest, collected.bindings)
@@ -922,7 +939,6 @@ def run(
     normalized = normalize_manifest(manifest)
     artifacts = {item.id: item for item in normalized.artifacts}
     coverage = _coverage_report(manifest, conflicts, collected.discovery_report)
-    request.output.mkdir(mode=0o700)
     (request.output / "services").mkdir(mode=0o700)
     for target in sorted(normalized.services, key=lambda item: item.id):
         if (

@@ -1,0 +1,31 @@
+"""Local client stub: generation did not produce a usable client. See README.md."""
+# SPDX-License-Identifier: MIT
+
+import argparse
+import json
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "This client has no callable API operations and sends no network requests. "
+            "Read README.md for the discovery outcome and recovery steps."
+        ),
+        epilog="Running without arguments prints the unsupported result and exits $exit_code.",
+    )
+    parser.parse_args()
+    result = {
+        "coverage": "unsupported",
+        "reason": $reason,
+        "message": (
+            $message
+            " Read README.md for recovery steps."
+        ),
+        "requestsSent": 0,
+    }
+    print(json.dumps(result))
+    return $exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
