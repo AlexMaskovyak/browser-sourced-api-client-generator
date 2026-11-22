@@ -11,6 +11,8 @@ import httpx
 from .browser import BrowserError, origin
 from .capture import NetworkCapture
 from .definitions import graphql_schema
+from .authenticated_http import AuthenticationRequired, TransportFailure
+from .runtime_profile import ProfileError
 from .discovery import AUTH, AUTH_OPERATION, MAX_BODY, route
 from .session_http import (
     BrowserLoginTransport,
@@ -66,19 +68,26 @@ def schema_url(base_url, href, advertised=False):
         return None
 
 
+def graphql_payload(request):
+    """Read a bounded request document in memory; never persist its variables."""
+    if request.get("method") == "GET":
+        return {
+            key: values[0]
+            for key, values in parse_qs(urlsplit(request["url"]).query).items()
+        }
+    text = request.get("postData", "")
+    if not isinstance(text, str) or len(text.encode()) > MAX_BODY:
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
 def graphql_request(request):
     """Recognize a GraphQL document without retaining variable or literal values."""
     try:
-        if request.get("method") == "GET":
-            payload = {
-                key: values[0]
-                for key, values in parse_qs(urlsplit(request["url"]).query).items()
-            }
-        else:
-            text = request.get("postData", "")
-            if not isinstance(text, str) or len(text.encode()) > MAX_BODY:
-                return False
-            payload = json.loads(text)
+        payload = graphql_payload(request)
         if not isinstance(payload, dict) or not isinstance(payload.get("query"), str):
             return False
         if AUTH_OPERATION.search(str(payload.get("operationName", ""))):
@@ -94,7 +103,7 @@ def graphql_request(request):
 class DiscoveryObserver:
     """Retain selected session headers by origin, never cookie or payload values."""
 
-    def __init__(self, url, allowed_origins=None):
+    def __init__(self, url, allowed_origins=None, *, admit_graphql_origin=None):
         self.allowed_origins = allowed_origins
         self.url = url
         self.origin = origin(url)
@@ -102,6 +111,31 @@ class DiscoveryObserver:
         self.graphql_endpoints = []
         self.schema_links = []
         self.discovering = False
+        self.admit_graphql_origin = admit_graphql_origin
+
+    def _admit_read_origin(self, request, resource_type):
+        """Only a selected website's parsed read can declare another API origin."""
+        from .exploration_policy import graphql_read
+
+        if (
+            self.admit_graphql_origin is None
+            or resource_type not in {"Fetch", "XHR"}
+            or request.get("method") not in {"GET", "POST"}
+            or AUTH.search(urlsplit(request["url"]).path)
+            or not graphql_request(request)
+            or not graphql_read(graphql_payload(request))
+        ):
+            return
+        parsed = urlsplit(request["url"])
+        endpoint = urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path or "/", "", "")
+        )
+        if (
+            self.admit_graphql_origin(endpoint)
+            and endpoint not in self.graphql_endpoints
+        ):
+            if len(self.graphql_endpoints) < MAX_CANDIDATES:
+                self.graphql_endpoints.append(endpoint)
 
     def event(self, method, params):
         if method != "Network.requestWillBeSent":
@@ -111,6 +145,9 @@ class DiscoveryObserver:
                 return
             request = params["request"]
             target_origin = origin(request["url"])
+            # Admission precedes header capture and the browser's preflight. No
+            # headers from the website origin are copied to this destination.
+            self._admit_read_origin(request, params.get("type"))
             selected = {}
             for name, value in (
                 request.get("headers", {}).items()
@@ -460,6 +497,16 @@ class SelfDiscovery:
                         if kind == "graphql"
                         else "invalid_definition"
                     )
+        except AuthenticationRequired:
+            attempt["outcome"] = "unauthorized"
+        except ProfileError as error:
+            attempt["outcome"] = {
+                "redirect_rejected": "redirect_blocked",
+                "response_exceeds_8_mib": "response_too_large",
+                "undeclared_destination": "undeclared_destination",
+            }.get(str(error), "invalid_request")
+        except TransportFailure:
+            attempt["outcome"] = "transport_failed"
         except Exception:
             # No server diagnostics, response bodies or authentication values
             # belong in this report. A failed probe is never retried.

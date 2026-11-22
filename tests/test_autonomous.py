@@ -261,6 +261,28 @@ def test_missing_node_run_reports_dependency_reason(tmp_path, monkeypatch, capsy
     assert json.loads(capsys.readouterr().err) == {'coverage': 'unsupported', 'reason': 'har_dependency_required'}
 
 
+def test_failed_rest_inference_preserves_captured_graphql_client(tmp_path, monkeypatch):
+    def invalid_contract(_safe_har):
+        return {"openapi": "3.0.3", "info": {"title": "Invalid", "version": "1"},
+                "paths": {"/read": {"get": {"responses": {}}}}}, {}
+    monkeypatch.setattr("website_client.har_inference.infer_har", invalid_contract)
+    source = tmp_path / "mixed.har"
+    source.write_text(json.dumps({"log": {"version": "1.2", "entries": [
+        {"request": {"method": "POST", "url": "https://neutral.invalid/graphql",
+                     "postData": {"text": json.dumps({"query": "query Status { status }"})}},
+         "response": {"status": 200, "content": {"mimeType": "application/json", "text": '{"data":{"status":"ready"}}'}}},
+        {"request": {"method": "GET", "url": "https://neutral.invalid/read"},
+         "response": {"status": 200, "content": {"mimeType": "application/json", "text": '{"value":7}'}}},
+    ]}}))
+    output = tmp_path / "generated"
+    report = run(source, output)
+    assert report["coverage"] == "partial"
+    assert report["services"][0]["operations"] == ["Status"]
+    assert any(item["reason"] == "har_inference_failed" for item in report["exclusions"])
+    assert not any(item["reason"] == "har_dependency_required" for item in report["exclusions"])
+    assert (output / report["services"][0]["directory"] / "README.md").is_file()
+
+
 def test_conflicting_artifact_identity_quarantines_affected_service_only(tmp_path):
     from dataclasses import replace
     first = Artifact.create('first.json', Kind.OPENAPI, json.dumps(spec('https://first.invalid')), Source.EXTERNAL)

@@ -69,14 +69,89 @@ def test_observer_keeps_headers_scoped_and_discovers_only_after_login():
     assert observer.headers == {}
 
 
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "mutation",
+        "persisted",
+        "foreign-page",
+        "asset",
+        "unknown-post",
+        "authentication",
+    ],
+)
+def test_observed_origin_admission_rejects_non_read_evidence(variant):
+    admitted = []
+    allowed = {("example.test", 443)}
+    observer = DiscoveryObserver(
+        "https://example.test/app",
+        allowed,
+        admit_graphql_origin=lambda endpoint: admitted.append(endpoint) or True,
+    )
+    event = request_event(
+        "https://api.example.test/graphql",
+        query=True,
+        headers={"Authorization": "CANARY_API_TOKEN"},
+    )
+    event["type"] = "Fetch"
+    if variant == "mutation":
+        event["request"]["postData"] = json.dumps({"query": "mutation Save { save }"})
+    elif variant == "persisted":
+        event["request"]["postData"] = json.dumps(
+            {"extensions": {"persistedQuery": {"sha256Hash": "hash"}}}
+        )
+    elif variant == "foreign-page":
+        event["documentURL"] = "https://other.test/"
+    elif variant == "asset":
+        event["type"] = "Script"
+    elif variant == "unknown-post":
+        event["request"]["postData"] = '{"value":7}'
+    else:
+        event["request"]["url"] = "https://api.example.test/login"
+    observer.event("Network.requestWillBeSent", event)
+    assert not admitted
+    assert observer.headers == {}
+    assert allowed == {("example.test", 443)}
+
+
+def test_observed_read_admits_only_its_origin_and_captures_its_own_headers():
+    from website_client.browser import origin
+
+    allowed = {origin("https://example.test")}
+    admitted = []
+
+    def admit(endpoint):
+        admitted.append(endpoint)
+        allowed.add(origin(endpoint))
+        return True
+
+    observer = DiscoveryObserver(
+        "https://example.test/app", allowed, admit_graphql_origin=admit
+    )
+    event = request_event(
+        "https://api.example.test/graphql?private=CANARY_QUERY",
+        query=True,
+        headers={"Authorization": "API_TOKEN", "Cookie": "COOKIE_CANARY"},
+    )
+    observer.event("Network.requestWillBeSent", {**event, "type": "Fetch"})
+    assert admitted == ["https://api.example.test/graphql"]
+    assert observer.headers == {
+        origin("https://api.example.test"): {"authorization": "API_TOKEN"}
+    }
+    assert observer.graphql_endpoints == ["https://api.example.test/graphql"]
+    assert "CANARY" not in repr(vars(observer))
+
 
 def request_event(url, *, headers=None, query=False):
     return {
         "documentURL": "https://example.test/app",
         "request": {
-            "url": url, "method": "POST" if query else "GET",
+            "url": url,
+            "method": "POST" if query else "GET",
             "headers": headers or {},
-            "postData": json.dumps({"query": "query Probe { __typename }"}) if query else "",
+            "postData": json.dumps({"query": "query Probe { __typename }"})
+            if query
+            else "",
         },
     }
 
@@ -85,10 +160,17 @@ def test_headerless_origins_do_not_hide_a_late_graphql_endpoint():
     observer = DiscoveryObserver("https://example.test/app")
     observer.discovering = True
     for number in range(MAX_AUTH_ORIGINS + 2):
-        observer.event("Network.requestWillBeSent", request_event(f"https://asset{number}.test/script.js"))
+        observer.event(
+            "Network.requestWillBeSent",
+            request_event(f"https://asset{number}.test/script.js"),
+        )
     observer.event(
         "Network.requestWillBeSent",
-        request_event("https://api.example.test/graphql", headers={"Authorization": "private"}, query=True),
+        request_event(
+            "https://api.example.test/graphql",
+            headers={"Authorization": "private"},
+            query=True,
+        ),
     )
     assert observer.graphql_endpoints == ["https://api.example.test/graphql"]
     assert observer.headers == {("api.example.test", 443): {"authorization": "private"}}
@@ -100,16 +182,23 @@ def test_full_header_budget_does_not_prevent_endpoint_recognition():
     for number in range(MAX_AUTH_ORIGINS):
         observer.event(
             "Network.requestWillBeSent",
-            request_event(f"https://api{number}.test/", headers={"Authorization": "private"}),
+            request_event(
+                f"https://api{number}.test/", headers={"Authorization": "private"}
+            ),
         )
     observer.event(
         "Network.requestWillBeSent",
-        request_event("https://late.example.test/graphql?private=omit", headers={"Authorization": "omit"}, query=True),
+        request_event(
+            "https://late.example.test/graphql?private=omit",
+            headers={"Authorization": "omit"},
+            query=True,
+        ),
     )
     assert observer.graphql_endpoints == ["https://late.example.test/graphql"]
     assert len(observer.headers) == MAX_AUTH_ORIGINS
     assert ("late.example.test", 443) not in observer.headers
     assert "private=omit" not in repr(vars(observer))
+
 
 def session():
     page = Mock()
@@ -192,6 +281,48 @@ def test_valid_download_uses_existing_openapi_validator(monkeypatch):
     assert any(
         kind == "openapi" for kind, _digest in engine.capture.discovery.definitions
     )
+
+
+@pytest.mark.parametrize(
+    "failure, expected",
+    [
+        ("auth", "unauthorized"),
+        ("redirect", "redirect_blocked"),
+        ("transport", "transport_failed"),
+        ("unexpected", "request_failed"),
+    ],
+)
+def test_autonomous_probe_preserves_safe_failure_category(
+    monkeypatch, failure, expected
+):
+    from website_client.authenticated_http import (
+        AuthenticationRequired,
+        TransportFailure,
+    )
+    from website_client.runtime_profile import ProfileError
+
+    failures = {
+        "auth": AuthenticationRequired(),
+        "redirect": ProfileError("redirect_rejected"),
+        "transport": TransportFailure(),
+        "unexpected": RuntimeError("CANARY_PRIVATE_DETAIL"),
+    }
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append(1)
+        raise failures[failure]
+
+    browser = session()
+    browser._context = SimpleNamespace(request=Mock())
+    monkeypatch.setattr(
+        "website_client.authenticated_http.AuthenticatedDispatch.send", fail
+    )
+    engine = SelfDiscovery(browser, DiscoveryObserver(browser._url), autonomous=True)
+    engine._probe("graphql", "https://example.test/graphql")
+    assert engine.attempts[0]["outcome"] == expected
+    assert len(calls) == 1
+    assert "CANARY" not in json.dumps(engine.attempts)
 
 
 def test_probe_limit_and_observer_cleanup(monkeypatch):

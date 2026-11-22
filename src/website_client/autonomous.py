@@ -178,11 +178,18 @@ def _har_contract(discovery: Discovery) -> Manifest:
                 discovery, group, index
             )
         except BrowserError as error:
-            if str(error).startswith("har_dependency_required") and services:
+            if services:
+                # A failed REST inference must not discard independently captured
+                # GraphQL operations or published service definitions.
+                reason = (
+                    "har_dependency_required"
+                    if str(error).startswith("har_dependency_required")
+                    else "har_inference_failed"
+                )
                 artifacts.append(
                     _report_artifact(
-                        f"har-dependency-{index:04d}.json",
-                        [{"reason": "har_dependency_required"}],
+                        f"har-failure-{index:04d}.json",
+                        [{"reason": reason}],
                     )
                 )
                 continue
@@ -412,11 +419,23 @@ def _browser_input(
     max_depth=3,
     duration_seconds=120,
 ):
-    from .self_discovery import DiscoveryObserver
+    from .self_discovery import DiscoveryObserver, MAX_AUTH_ORIGINS
     from .browser import origin
 
     allowed_origins = {origin(url)}
-    observer, credentials = DiscoveryObserver(url, allowed_origins), OriginCaptures(url)
+    credentials = OriginCaptures(url)
+
+    def admit_graphql_origin(endpoint: str) -> bool:
+        selected = origin(endpoint)
+        if selected not in allowed_origins and len(allowed_origins) >= MAX_AUTH_ORIGINS:
+            return False
+        credentials.declare(endpoint)
+        allowed_origins.add(selected)
+        return True
+
+    observer = DiscoveryObserver(
+        url, allowed_origins, admit_graphql_origin=admit_graphql_origin
+    )
 
     def observe(method, params):
         observer.event(method, params)
