@@ -42,24 +42,17 @@ def test_empty_discovery_writes_helpful_readme_and_offline_client(tmp_path):
     }
 
     # Execute under an audit hook to prove that the stub cannot silently dispatch.
-    audit = """
-import runpy, sys
-def reject_network(event, args):
-    if event.startswith('socket.'):
-        raise AssertionError('stub attempted network access')
-sys.addaudithook(reject_network)
-sys.argv = [sys.argv[1]]
-runpy.run_path(sys.argv[0], run_name='__main__')
-"""
+    audit_script = Path(__file__).parent / "helpers" / "reject_network.py"
     audited = subprocess.run(
-        [sys.executable, "-I", "-c", audit, str(script)],
+        [sys.executable, "-I", str(audit_script), str(script)],
         cwd=tmp_path,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=10,
     )
-    assert audited.returncode == 1 and audited.stdout == result.stdout
+    assert audited.returncode == 1, audited.stderr
+    assert audited.stdout == result.stdout
     assert audited.stderr == ""
 
 
