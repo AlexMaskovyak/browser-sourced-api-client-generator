@@ -128,7 +128,9 @@ def verify_unsupported_assets() -> dict:
 
     empty_output = OUTPUT / "empty-site"
     result = run(
-        "http://127.0.0.1:8765/empty",
+        # Use a different origin so this intentionally unauthenticated run does
+        # not replace the successful fixture's private login profile.
+        "http://127.0.0.1:8766/empty",
         empty_output,
         browser="chromium",
         browser_path="/work/docker/test-chromium.sh",
