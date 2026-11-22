@@ -25,6 +25,15 @@ example failure. No successful authenticated example rerun is claimed.
   unsuccessful output as well as installed working clients. Final verification of
   the follow-up is recorded separately from the original container evidence below.
 
+[PR #13](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/13)
+contains these follow-up changes on top of PR 12. All 14 output checks pass across
+successful input routes and failure/cancellation cases. Full host suite at `436bac9`:
+389 passed in 106.13s. Complete container command at clean, unchanged `fdc6cea`:
+389 passed in 135.29s, HTTPS compatibility and separate installed-runtime acceptance.
+The [verification record](verification/cdn-client-assets.json) includes the new
+CDN/unsupported-output assertions, source hash and image IDs. Later verification
+documentation changes do not change the tested application or harness.
+
 ## Current verification
 
 Tests used Python 3.12.14 and isolated Poetry 2.5.1. Commands below show `poetry` on

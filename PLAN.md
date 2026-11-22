@@ -88,6 +88,15 @@ Completion requires the regression to fail before the fix and pass afterwards,
 actual generated-client execution, and server journals proving blocked requests
 were not sent. The prior container result remains tied to `2b9c062`.
 
+Completed in [PR #13](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/13),
+based on PR 12. CDN correction: `73066a1`; failure output: `5e40b10`; local acceptance:
+`9744024` and fixture-profile isolation `fdc6cea`. Host suite at `436bac9`: 389 passed
+in 106.13s. Complete `scripts/test-docker.sh` at clean, unchanged `fdc6cea`: exit 0,
+389 tests in 135.29s, HTTPS compatibility, CDN-dependent generation, empty-site and
+invalid-input client assets, and separate installed runtime all passed. The compact
+[verification record](docs/verification/cdn-client-assets.json) records exact revisions
+and image IDs. These results do not establish live example compatibility.
+
 Planning and independent adversarial design review completed at `032072a`.
 Milestone 1 implemented at `35dc531`, corrected at `7d90c49` and independently
 reviewed/probed with no remaining material M1 findings. Full suite: 227 passed.

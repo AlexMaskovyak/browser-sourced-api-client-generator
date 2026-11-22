@@ -82,8 +82,8 @@ Repeat `--input FILE` for additional initial manifests or bundled definitions.
 Unsupported references or encodings exclude affected operations automatically.
 Saved inputs never cause remote-reference fetches. Definitions with no executable
 operations finish with an unsupported report, a root `README.md` explaining the
-evidence and recovery steps, and a runnable `client.py` stub. Run `python3 client.py
---help` from that output directory. The stub sends no requests and returns a nonzero
+evidence and recovery steps, and a runnable `client.py` stub. From that directory,
+run `python3 client.py --help`. The stub sends no requests and returns a nonzero
 status; it is not counted as a usable service. Failed or cancelled runs also retain
 these assets once their new output directory has been accepted. Existing directories
 are never overwritten, and invalid options are rejected before work begins.
@@ -183,6 +183,8 @@ empty website and malformed saved input through generation, then checks their
 READMEs, stub help, nonzero status, and zero-request results. Successful projects
 must contain both a README and Python client files.
 
-The complete command passed at `2b9c062`: 351 tests, HTTPS compatibility and separate
-runtime acceptance, including nine generated-package checks. Unit or fixture success
-does not establish compatibility with an arbitrary production website.
+The complete command passed at `fdc6cea`: 389 tests, HTTPS compatibility and separate
+runtime acceptance, including the CDN and unsuccessful-output cases and nine
+generated-package checks. The [verification record](docs/verification/cdn-client-assets.json)
+identifies the tested source and images. Unit or fixture success does not establish
+compatibility with an arbitrary production website; a live example rerun is still needed.
