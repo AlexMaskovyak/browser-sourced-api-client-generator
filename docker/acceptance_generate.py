@@ -290,6 +290,7 @@ def main() -> None:
             "-p",
             "no:cacheprovider",
             "/work/tests/test_cdn_discovery.py::test_cdn_driven_app_generates_callable_client_without_admitting_cdn[True]",
+            "/work/tests/test_captured_operation_recovery.py",
         ]
     )
     state = json.load(urlopen("http://127.0.0.1:8765/__state"))
@@ -334,6 +335,7 @@ def main() -> None:
                 "ordinary_generator_console": True,
                 "cdn_dependent_graphql": True,
                 "separate_graphql_host_without_schema": "passed",
+                "captured_operation_recovery": "passed",
                 "unsupported_client_assets": unsupported_assets,
                 "wheel_sha256": hashes,
                 "login_count": after["logins"],
