@@ -1,16 +1,25 @@
 """Saved evidence must produce a client even when independent REST inference fails."""
 
+from copy import deepcopy
 import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
+from graphql import parse
 from openapi_spec_validator import validate
 from openapi_spec_validator.validation.exceptions import UnresolvableParameterError
 
 from website_client.browser import origin
+from website_client.bundle_capture import capture_manifest
 from website_client.cli import main
+from website_client.discovery import Discovery
+from website_client.discovery_manifest.records import Kind
+from website_client.exploration_policy import request_allowed
+from website_client.privacy import sanitized_manifest
 from website_client.har_inference import infer_har
 from website_client.self_discovery import DiscoveryObserver
 
@@ -22,6 +31,75 @@ EXPECTED_OPERATIONS = json.loads((FIXTURE / "expected_operations.json").read_tex
 
 def captured_entries() -> list[dict]:
     return json.loads((FIXTURE / "capture.har").read_text())["log"]["entries"]
+
+
+def test_fixture_preserves_missing_responses_without_private_values():
+    entries = captured_entries()
+    assert len(entries) == 12
+    graphql_payloads = []
+    for entry in entries:
+        request = entry["request"]
+        assert urlsplit(request["url"]).hostname in {
+            "payroll.example.test",
+            "graphql.payroll.example.test",
+        }
+        assert request["headers"] == []
+        assert request["cookies"] == []
+        if request["method"] == "POST":
+            payload = json.loads(request["postData"]["text"])
+            graphql_payloads.append(payload)
+            assert "variables" not in payload, (
+                "Real variable values must not be fixtures"
+            )
+            assert entry["response"]["status"] == 0
+            assert entry["response"]["content"]["text"] == ""
+
+    assert sorted(p["operationName"] for p in graphql_payloads) == EXPECTED_OPERATIONS
+
+
+def test_sanitization_retains_operations_and_placeholder_across_saved_round_trip():
+    discovery = Discovery()
+    for original_entry in captured_entries():
+        entry = deepcopy(original_entry)
+        # Synthetic secrets test the real sanitizer without storing private data.
+        entry["request"]["headers"] = [
+            {"name": "Authorization", "value": "Bearer CANARY_PRIVATE_TOKEN"}
+        ]
+        entry["request"]["cookies"] = [
+            {"name": "sid", "value": "CANARY_PRIVATE_COOKIE"}
+        ]
+        if entry["request"]["method"] == "POST":
+            payload = json.loads(entry["request"]["postData"]["text"])
+            payload["variables"] = {"field2": "CANARY_PRIVATE_ACCOUNT"}
+            entry["request"]["postData"]["text"] = json.dumps(payload)
+        discovery.add(entry)
+
+    # Match the normal pipeline boundary: native REST inference owns OpenAPI.
+    captured_files = {
+        name: content
+        for name, content in discovery.files("har").items()
+        if not name.startswith("openapi-inferred")
+    }
+    manifest = capture_manifest(discovery, captured_files)
+    for _round_trip in range(2):
+        manifest = sanitized_manifest(manifest)
+        assert "CANARY_PRIVATE" not in json.dumps(manifest.to_dict())
+        assert len(manifest.services) == 1
+        service = manifest.services[0]
+        assert service.endpoint == GRAPHQL_ENDPOINT
+        captured_names = {
+            definition.name.value
+            for artifact in manifest.artifacts
+            if artifact.id in service.operation_artifacts
+            for definition in parse(artifact.content).definitions
+            if definition.kind == "operation_definition"
+        }
+        assert sorted(captured_names) == EXPECTED_OPERATIONS
+        assert service.schema_artifact is None, "A failed response is not a schema"
+        captured_har = next(a for a in manifest.artifacts if a.kind is Kind.HAR)
+        entries = json.loads(captured_har.content)["log"]["entries"]
+        rest_entry = next(e for e in entries if e["request"]["method"] == "GET")
+        assert "%7Bid_3%7D" in rest_entry["request"]["url"]
 
 
 def test_saved_rest_response_reproduces_native_converter_failure():
@@ -121,6 +199,25 @@ def test_captured_reads_admit_separate_host_but_mutation_alone_does_not():
 
         expected_endpoints = [] if "Mutation" in operation_name else [GRAPHQL_ENDPOINT]
         assert admitted_endpoints == expected_endpoints, operation_name
+        browser_request = SimpleNamespace(
+            url=request["url"],
+            method=request["method"],
+            resource_type="fetch",
+            post_data=request["postData"]["text"],
+            is_navigation_request=lambda: False,
+        )
+        blocked_reason = request_allowed(
+            browser_request,
+            origin(WEBSITE),
+            strict_origin=True,
+            api_origins=allowed_origins,
+        )
+        if expected_endpoints:
+            assert blocked_reason is None, (operation_name, blocked_reason)
+        else:
+            assert blocked_reason is not None, (
+                "Mutation evidence must not authorize dispatch"
+            )
         assert observer.headers == {}, "Saved fixtures must not introduce credentials"
 
 
