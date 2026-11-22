@@ -178,11 +178,18 @@ def _har_contract(discovery: Discovery) -> Manifest:
                 discovery, group, index
             )
         except BrowserError as error:
-            if str(error).startswith("har_dependency_required") and services:
+            if services:
+                # A failed REST inference must not discard independently captured
+                # GraphQL operations or published service definitions.
+                reason = (
+                    "har_dependency_required"
+                    if str(error).startswith("har_dependency_required")
+                    else "har_inference_failed"
+                )
                 artifacts.append(
                     _report_artifact(
-                        f"har-dependency-{index:04d}.json",
-                        [{"reason": "har_dependency_required"}],
+                        f"har-failure-{index:04d}.json",
+                        [{"reason": reason}],
                     )
                 )
                 continue
@@ -302,7 +309,9 @@ def _capture_profiles(
     state = session._context.storage_state()
     for api_origin, capture in credentials.captures.items():
         profile = _profile_id(api_origin)
-        owned = credentials.cookies_for(api_origin)
+        owned = credentials.cookies_for(
+            api_origin, browser_cookies=state.get("cookies", [])
+        )
         suppressed = sum(
             (cookie.get("name"), cookie.get("value")) not in owned
             for cookie in scoped_state(state, api_origin)["cookies"]
@@ -412,11 +421,23 @@ def _browser_input(
     max_depth=3,
     duration_seconds=120,
 ):
-    from .self_discovery import DiscoveryObserver
+    from .self_discovery import DiscoveryObserver, MAX_AUTH_ORIGINS
     from .browser import origin
 
     allowed_origins = {origin(url)}
-    observer, credentials = DiscoveryObserver(url, allowed_origins), OriginCaptures(url)
+    credentials = OriginCaptures(url)
+
+    def admit_graphql_origin(endpoint: str) -> bool:
+        selected = origin(endpoint)
+        if selected not in allowed_origins and len(allowed_origins) >= MAX_AUTH_ORIGINS:
+            return False
+        credentials.declare(endpoint)
+        allowed_origins.add(selected)
+        return True
+
+    observer = DiscoveryObserver(
+        url, allowed_origins, admit_graphql_origin=admit_graphql_origin
+    )
 
     def observe(method, params):
         observer.event(method, params)
@@ -867,6 +888,8 @@ def _finish_coverage(coverage: dict, discovery_report: dict | None) -> None:
 
 
 def _persist_evidence(normalized: Manifest, output: Path, coverage: dict) -> None:
+    from .unsupported_output import write_unsupported_output
+
     # Only already-sanitized evidence is persisted. Raw HAR/source files were never copied.
     for filename, value in [
         ("manifest.json", normalized.to_dict()),
@@ -875,6 +898,7 @@ def _persist_evidence(normalized: Manifest, output: Path, coverage: dict) -> Non
         path = output / filename
         path.write_text(encoded(value))
         path.chmod(0o600)
+    write_unsupported_output(output, coverage)
 
 
 def run(
@@ -915,6 +939,20 @@ def run(
         max_depth=max_depth,
         duration_seconds=duration_seconds,
     )
+    # Claim a fresh destination before work begins so every accepted run can
+    # leave guidance on failure, without replacing someone else's files.
+    request.output.mkdir(mode=0o700)
+    try:
+        return _run_request(request)
+    except (Exception, KeyboardInterrupt) as error:
+        from .unsupported_output import write_failed_run
+
+        write_failed_run(request.output, error)
+        raise
+
+
+def _run_request(request: RunRequest) -> dict[str, Any]:
+    """Collect evidence and package usable services inside the owned output."""
     collected = _collect_inputs(request)
     manifest, conflicts = _merge_inputs(collected.manifests)
     manifest = bind_sources(manifest, collected.bindings)
@@ -922,7 +960,6 @@ def run(
     normalized = normalize_manifest(manifest)
     artifacts = {item.id: item for item in normalized.artifacts}
     coverage = _coverage_report(manifest, conflicts, collected.discovery_report)
-    request.output.mkdir(mode=0o700)
     (request.output / "services").mkdir(mode=0o700)
     for target in sorted(normalized.services, key=lambda item: item.id):
         if (

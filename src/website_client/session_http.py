@@ -8,6 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from .browser import BrowserError, BrowserSession, origin
+from .runtime_profile import SESSION_CONTEXT_HEADERS
 
 BYTES_PER_MEBIBYTE = 1024 * 1024
 # Bound the memory used by one endpoint call, independently in each direction.
@@ -26,7 +27,7 @@ MAX_SESSION_HEADERS = 32
 REQUEST_TIMEOUT_SECONDS = 30
 BROWSER_EVENT_POLL_SECONDS = 0.1
 
-DEFAULT_HEADERS = {
+DEFAULT_HEADERS = SESSION_CONTEXT_HEADERS | {
     "authorization",
     "x-csrf-token",
     "x-xsrf-token",

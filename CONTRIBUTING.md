@@ -24,7 +24,11 @@ Run the groups in pipeline order when diagnosing generation:
 
 Each group runs independently. `tests/support` holds reusable fixture setup;
 `tests/helpers` holds programs launched in child processes. Neither contains
-collected tests. `tests/fixtures` contains public, synthetic or sanitized input data.
+collected tests. `tests/fixtures` contains synthetic input data. A real provider's
+failure may inform a regression, but replace its name, hosts, identifiers and values
+before committing any fixture or test. Keep real captures and live verification
+results outside the repository. Live testing and committed synthetic tests are
+separate activities.
 
 A failure in capture or validation should be resolved before interpreting downstream
 generation results. Tests may use neutral local HTTP servers. They must not require

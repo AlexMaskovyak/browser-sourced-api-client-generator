@@ -20,12 +20,14 @@ OUTPUT = Path("/artifacts")
 COMMAND_RESULTS: list[dict] = []
 
 
-def execute(arguments: list[str]) -> subprocess.CompletedProcess:
+def execute(
+    arguments: list[str], *, expected_exit: int = 0
+) -> subprocess.CompletedProcess:
     result = subprocess.run(
         arguments, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300
     )
     COMMAND_RESULTS.append({"command": arguments, "exit_code": result.returncode})
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == expected_exit, result.stdout + result.stderr
     return result
 
 
@@ -120,6 +122,43 @@ def initial_login_and_generate(site: Fixture, state: dict, output: Path) -> None
     )
 
 
+def verify_unsupported_assets() -> dict:
+    """The actual installed CLI must leave runnable output even on failure."""
+    from website_client.autonomous import run
+
+    empty_output = OUTPUT / "empty-site"
+    result = run(
+        # Use a different origin so this intentionally unauthenticated run does
+        # not replace the successful fixture's private login profile.
+        "http://127.0.0.1:8766/empty",
+        empty_output,
+        browser="chromium",
+        browser_path="/work/docker/test-chromium.sh",
+        login_handler=lambda _session: None,
+        headless=True,
+        duration_seconds=3,
+        max_pages=1,
+        max_actions=1,
+    )
+    assert result["coverage"] == "unsupported" and not result["services"]
+    invalid = OUTPUT / "invalid.yaml"
+    invalid.write_text("openapi: [ invalid")
+    invalid_output = OUTPUT / "invalid-input"
+    execute(
+        ["website-client", "run", str(invalid), "--output", str(invalid_output)],
+        expected_exit=1,
+    )
+    for output in (empty_output, invalid_output):
+        assert (output / "README.md").is_file()
+        assert (output / "coverage.json").is_file()
+        execute([sys.executable, "-I", str(output / "client.py"), "--help"])
+        result = execute(
+            [sys.executable, "-I", str(output / "client.py")], expected_exit=1
+        )
+        assert json.loads(result.stdout)["requestsSent"] == 0
+    return {"empty_site": "passed", "invalid_input": "passed", "stub_exit_code": 1}
+
+
 def regenerate(output: Path, after: dict) -> list[Path]:
     execute(
         [
@@ -174,6 +213,8 @@ def build_projects(projects: list[Path]) -> tuple[list[dict], Path]:
     wheelhouse.mkdir()
     catalog = []
     for project in projects:
+        assert (project / "README.md").is_file(), project
+        assert list(project.rglob("*.py")), project
         execute(["poetry", "--directory", str(project), "build", "--format", "wheel"])
         data = tomllib.loads((project / "pyproject.toml").read_text())
         scripts = data.get("project", {}).get(
@@ -238,6 +279,20 @@ def verify_generator_metadata() -> None:
 def main() -> None:
     assert os.getuid() == 1000
     verify_generator_metadata()
+    # Exercise the installed generator with independent website/CDN/API hosts,
+    # denied introspection, scoped authentication and an actual generated call.
+    execute(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "/work/tests/discovery/test_cdn_assets.py::test_cdn_driven_app_generates_callable_client_without_admitting_cdn[separate-api-no-schema]",
+            "/work/tests/generation/test_captured_operation_recovery.py",
+        ]
+    )
     state = json.load(urlopen("http://127.0.0.1:8765/__state"))
     output = OUTPUT / "generated"
     verify_generator_console(Fixture(), state)
@@ -247,9 +302,13 @@ def main() -> None:
         after["journal"]
     )
     assert after["logins"] == 2
+    # Each login and guarded reload must load the CDN script. GraphQL cannot be
+    # discovered or packaged without it; the runtime phase also calls that client.
+    assert after["cdn_assets"] >= 4, after["cdn_assets"]
     projects = regenerate(output, after)
     deterministic = compare_sources(output, projects)
     catalog, wheelhouse = build_projects(projects)
+    unsupported_assets = verify_unsupported_assets()
     verify_private_outputs(state)
     hashes = {
         file.name: hashlib.sha256(file.read_bytes()).hexdigest()
@@ -274,6 +333,10 @@ def main() -> None:
                 "har2sdk_version": "0.6.15",
                 "stdin_physically_closed_after_login": True,
                 "ordinary_generator_console": True,
+                "cdn_dependent_graphql": True,
+                "separate_graphql_host_without_schema": "passed",
+                "captured_operation_recovery": "passed",
+                "unsupported_client_assets": unsupported_assets,
                 "wheel_sha256": hashes,
                 "login_count": after["logins"],
                 "deterministic_files": deterministic,

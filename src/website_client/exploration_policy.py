@@ -94,10 +94,6 @@ def request_allowed(request, allowed_origin, strict_origin=False, api_origins=()
     try:
         parsed = urlsplit(request.url)
         target = origin(urlunsplit(parsed._replace(fragment="")))
-        if strict_origin and target != allowed_origin and target not in api_origins:
-            return "undeclared_origin"
-        if request.is_navigation_request() and target != allowed_origin:
-            return "off_site_navigation"
         static_asset = getattr(request, "resource_type", "") in {
             "script",
             "stylesheet",
@@ -105,6 +101,22 @@ def request_allowed(request, allowed_origin, strict_origin=False, api_origins=()
             "font",
             "media",
         }
+        # A page may need CDN assets to render its controls. Browser-classified
+        # asset reads do not declare API origins or grant credential capture.
+        asset_read = (
+            static_asset
+            and request.method in {"GET", "HEAD"}
+            and not request.is_navigation_request()
+        )
+        if (
+            strict_origin
+            and target != allowed_origin
+            and target not in api_origins
+            and not asset_read
+        ):
+            return "undeclared_origin"
+        if request.is_navigation_request() and target != allowed_origin:
+            return "off_site_navigation"
         if not static_asset and (
             AUTH.search(parsed.path) or WRITE_WORDS.search(unquote(parsed.path))
         ):

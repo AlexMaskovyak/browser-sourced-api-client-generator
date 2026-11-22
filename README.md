@@ -79,7 +79,20 @@ to call. An initial `--endpoint` is needed only when the input lacks that fact.
 Repeat `--input FILE` for additional initial manifests or bundled definitions.
 Unsupported references or encodings exclude affected operations automatically.
 Saved inputs never cause remote-reference fetches. Definitions with no executable
-operations finish with an unsupported report, rather than asking for setup repair.
+operations finish with an unsupported report, a root `README.md` explaining the
+evidence and recovery steps, and a runnable `client.py` stub. From that directory,
+run `python3 client.py --help`. The stub sends no requests and returns a nonzero
+status; it is not counted as a usable service. Failed or cancelled runs also retain
+these assets once their new output directory has been accepted. Existing directories
+are never overwritten, and invalid options are rejected before work begins.
+
+During URL discovery, browser-classified scripts, stylesheets, images, fonts and
+media can load from a content delivery network (CDN). This lets the page render its
+controls. It does not authorize API calls or credential capture for the CDN's origin.
+If the website itself initiates a parsed GraphQL read to another host, discovery
+can admit that API origin and capture its own observed authentication. Introspection
+may be unavailable; named captured operations still support a client. Failed REST
+traffic inference does not discard an independently usable GraphQL service.
 
 ## Install and call a generated client
 
@@ -166,6 +179,16 @@ report path. Any failed assertion exits nonzero; correct the reported failure an
 rerun the command. `scripts/test-docker.sh --help` explains prerequisites without
 building images.
 
-The complete command passed at `2b9c062`: 351 tests, HTTPS compatibility and separate
-runtime acceptance, including nine generated-package checks. Unit or fixture success
-does not establish compatibility with an arbitrary production website.
+The local fixture's GraphQL discovery depends on a script served from a second
+origin. Acceptance requires that client to be generated and called. It also runs an
+empty website and malformed saved input through generation, then checks their
+READMEs, stub help, nonzero status, and zero-request results. Successful projects
+must contain both a README and Python client files.
+
+The saved-run regression in `tests/fixtures/captured_operation_recovery` reproduces failed REST
+inference alongside usable captured GraphQL operations. Acceptance runs the normal
+generation command with the real converter and requires a usable client, README,
+and complete captured-operation inventory. It also checks missing converter
+prerequisites and regeneration from a saved manifest. These offline checks do not
+establish live authentication. See [Contributing](CONTRIBUTING.md) to run each
+component's tests independently.

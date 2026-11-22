@@ -6,6 +6,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+from threading import Thread
 from urllib.parse import parse_qs, urlsplit
 import uuid
 
@@ -13,6 +14,7 @@ from graphql import build_schema, graphql_sync
 
 ROOT = Path("/work/tests/fixtures")
 BASE = "http://127.0.0.1:8765"
+CDN = "http://127.0.0.1:8766"
 SCHEMA = build_schema((ROOT / "native_upload/schema.graphql").read_text())
 STATE = {
     "cookie": str(uuid.uuid4()),
@@ -21,6 +23,7 @@ STATE = {
     "logins": 0,
     "requests": 0,
     "api_attempts": 0,
+    "cdn_assets": 0,
 }
 SECRETS = {
     "username": "fixture-person-" + str(uuid.uuid4()),
@@ -123,6 +126,9 @@ class Handler(BaseHTTPRequestHandler):
         return (
             self.allowed()
             and self.headers.get("Authorization") == "Bearer " + SECRETS["bearer"]
+            and self.headers.get("apollographql-client-name") == "SYNTHETIC_DASHBOARD"
+            and self.headers.get("apollographql-client-version") == "SYNTHETIC_VERSION"
+            and self.headers.get("x-role-id") == "SYNTHETIC_ROLE"
         )
 
     def do_GET(self) -> None:
@@ -131,6 +137,14 @@ class Handler(BaseHTTPRequestHandler):
             STATE["requests"] += 1
         if target.path == "/__state":
             return self.send({**STATE, "secrets": SECRETS})
+        if target.path == "/assets/app.js":
+            STATE["cdn_assets"] += 1
+            return self.send(
+                Path(__file__).with_name("acceptance_app.js").read_text(),
+                kind="application/javascript",
+            )
+        if target.path == "/empty":
+            return self.send("<h1>No discoverable operations</h1>", kind="text/html")
         if target.path == "/login":
             return self.send(
                 '<form method="post" action="/login"><input name="username"><input name="password" type="password"><button>Sign in</button></form>',
@@ -164,9 +178,11 @@ class Handler(BaseHTTPRequestHandler):
         if target.path == "/app":
             return self.send(
                 '<h1>Signed in</h1><link rel="service-desc" href="/workflow.json"><link rel="service-desc" href="/openapi.json">'
-                + '<script>fetch("/graphql", {method:"POST",headers:{"Content-Type":"application/json","Authorization":'
+                + "<script>window.fixtureBearer="
                 + json.dumps("Bearer " + SECRETS["bearer"])
-                + '},body:JSON.stringify({query:"{status}"})})</script>',
+                + '</script><script src="'
+                + CDN
+                + '/assets/app.js"></script>',
                 kind="text/html",
             )
         self.send({}, 404)
@@ -305,4 +321,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    cdn_server = ThreadingHTTPServer(("127.0.0.1", 8766), Handler)
+    Thread(target=cdn_server.serve_forever, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()

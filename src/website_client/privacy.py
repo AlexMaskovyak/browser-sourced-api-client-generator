@@ -44,6 +44,7 @@ REPORT_REASONS = frozenset(
         "unknown_request_body",
         "cookie_origin_isolation",
         "har_dependency_required",
+        "har_inference_failed",
         "response_body_unknown",
         "unsupported_subscription",
         "unnamed_operation",
