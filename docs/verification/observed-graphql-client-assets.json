@@ -1,0 +1,40 @@
+{
+  "source": {
+    "revision": "b38200b910caa9ca96f0dd1d756f48022e7ebefd",
+    "dirty_files": [],
+    "dirty_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tree_sha256": "4f1bff42dfb2c93af36d427dbd991b0bb30fc3a244850ef493ad4904fa32907e"
+  },
+  "source_unchanged_during_run": true,
+  "command": "scripts/test-docker.sh",
+  "exit_code": 0,
+  "host_tests": {
+    "passed": 403,
+    "seconds": 110.64
+  },
+  "container_tests": {
+    "passed": 403,
+    "seconds": 141.32
+  },
+  "https_compatibility": "passed",
+  "separate_graphql_host_without_schema": "passed",
+  "unsupported_client_assets": {
+    "empty_site": "passed",
+    "invalid_input": "passed",
+    "stub_exit_code": 1
+  },
+  "runtime_status": "passed",
+  "images": {
+    "website-client-acceptance-70623-generation": "sha256:26664de0dae730d8876a94551871aa8320533ee282c00458740ee8b484469fd4",
+    "website-client-acceptance-70623-runtime": "sha256:885d1ae6a2aae4c80715a72c07dd9cdc658c0e85b4c1f974d380be48d0635090"
+  },
+  "example_saved_manifest_recovery": {
+    "services": 1,
+    "operations": 11,
+    "compile_and_help": "passed",
+    "wheel_build": "passed",
+    "installed_checks_passed": 3,
+    "live_requests": 0,
+    "authenticated_execution": "not_verified"
+  }
+}

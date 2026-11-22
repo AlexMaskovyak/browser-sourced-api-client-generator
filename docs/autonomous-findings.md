@@ -7,6 +7,34 @@ contains the implementation; it has not been merged or applied to a real service
 
 ## November 22 follow-up: example discovery and missing client assets
 
+### Second saved run: separate API origin and failed REST inference
+
+At `1049e74`, the user's next run saved 11 named GraphQL operations but excluded
+their service as `undeclared_origin`. It recorded 54 blocked parsed GraphQL reads.
+A separate-host neutral browser reproduction failed the same way. The correction
+admits bounded origins from explicit website-initiated GraphQL reads, captures only
+their own observed credentials, and preserves write/foreign-page restrictions.
+
+Offline regeneration of that actual manifest exposed a second blocker: invalid
+REST inference aborted its independent valid GraphQL service. The correction records
+`har_inference_failed` and preserves that service. The supplied manifest now produces
+one 11-operation client offline. Python compilation, command help, wheel build and
+three checks against the installed wheel pass. example was not opened or called.
+
+The README now explains specific recorded exclusions and known probe categories.
+The historical `har_dependency_required` error could not be reproduced in the
+current shell and remains unexplained; it is not conflated with invalid inference.
+No API-origin credential profile was captured in the old run, so live authentication
+is not established by the recovered code.
+
+At clean, unchanged `b38200b`, 403 host tests passed in 110.64s and 403 container
+tests passed in 141.32s. The full acceptance command also passed HTTPS compatibility,
+the separate-host/no-introspection case, failure-output checks and installed runtime.
+[Exact verification](verification/observed-graphql-client-assets.json) records the
+tested revision and image IDs. Later changes only clarify recovery documentation.
+
+### First saved run: blocked page assets
+
 The user's run at `6896b63` produced `unsupported/no_executable_operations`, zero
 services and workflows, and only JSON reports. Its saved report records 411 blocked
 cross-origin GET requests, including dashboard JavaScript, one page, no controls,

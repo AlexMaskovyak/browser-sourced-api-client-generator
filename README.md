@@ -187,8 +187,9 @@ empty website and malformed saved input through generation, then checks their
 READMEs, stub help, nonzero status, and zero-request results. Successful projects
 must contain both a README and Python client files.
 
-The complete command passed at `fdc6cea`: 389 tests, HTTPS compatibility and separate
-runtime acceptance, including the CDN and unsuccessful-output cases and nine
-generated-package checks. The [verification record](docs/verification/cdn-client-assets.json)
-identifies the tested source and images. Unit or fixture success does not establish
-compatibility with an arbitrary production website; a live example rerun is still needed.
+The complete command passed at `b38200b`: 403 tests, HTTPS compatibility and separate
+runtime acceptance, including CDN/separate-API-host discovery, unsuccessful output,
+and nine generated-package checks. The [verification record](docs/verification/observed-graphql-client-assets.json)
+identifies the tested source and images. The saved example manifest also generates an
+11-operation client offline. Authenticated example execution remains unverified; it is
+a separate step from generating code with already collected evidence.

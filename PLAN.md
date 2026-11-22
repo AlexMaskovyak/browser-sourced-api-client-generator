@@ -87,6 +87,14 @@ correction, the supplied manifest produces one client with 11 operations offline
 The saved manifest can establish generation behavior offline, but cannot establish
 working authentication for an API origin that was excluded during the live run.
 
+Completed in PR 13 at `b38200b`: the full host suite passed 403 tests in 110.64s;
+the complete container command passed 403 tests in 141.32s, HTTPS compatibility,
+the separate-host/no-introspection regression, and installed runtime acceptance.
+The fixed source was clean and unchanged throughout. Offline recovery of the actual
+saved example manifest produced one client with 11 operations; compilation, help,
+wheel build and three installed-package checks passed. No site was opened and no
+example request was sent. See [verification](docs/verification/observed-graphql-client-assets.json).
+
 ### November 22: CDN-dependent page loading
 
 The example run at delivery revision `6896b63` produced no client. Its saved report
@@ -103,7 +111,7 @@ do not establish that blocking scripts was the only cause.
 3. Test redirects and negative request cases, run the complete host suite, update
    the usage/architecture explanation, and commit and push a separate correction PR
    based on `feature/autonomous-integration`. PR 12 remains the base implementation.
-   A fresh authenticated example run remains required before claiming example support.
+   Authenticated example execution remains a separate unverified step.
 4. For unsupported discovery and failures after accepting a new output directory,
    also write a root README and a standalone Python
    client stub. Explain the evidence and recovery steps; the stub sends no requests,

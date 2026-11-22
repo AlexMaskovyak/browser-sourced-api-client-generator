@@ -42,17 +42,18 @@ $details
 When present, the saved manifest in `manifest.json` contains the evidence collected.
 An input or browser failure before collection may leave no manifest.
 Regenerating that same evidence cannot recover requests that never happened or
-operations that were never discovered.
+operations that were never discovered. If it already contains the needed operations,
+regenerating the saved manifest after a generator fix can produce a client offline.
 
-## Try again with fresh evidence
+## Retry using the available evidence
 
 1. Update the generator to the revision containing the relevant discovery fix.
    Use the generator repository and Poetry environment used for the original run.
-2. Obtain the website URL from your original command, or the path to an actual
-   OpenAPI or GraphQL definition supplied by the service. Do not use an empty
-   saved manifest as a substitute for new evidence.
+2. If `manifest.json` already contains the needed operations, use its path to retry
+   offline. Otherwise, obtain the original website URL or an actual OpenAPI or
+   GraphQL definition from the service. An empty manifest cannot supply new evidence.
 3. From that generator repository, run the following commands. After `read`, type
-   the URL or definition path and press Enter. Use a new output directory; if
+   the URL, saved manifest or definition path and press Enter. Use a new output directory; if
    `retry-clients` already exists, change that path before running.
 
 ```sh
@@ -60,10 +61,11 @@ read -r source
 poetry run website-client run "$$source" --output ./retry-clients
 ```
 
-For a website URL, this opens a fresh login browser and makes discovery read
+For a saved manifest or definition, generation runs locally without contacting the
+service or requiring another login. This verifies code generation, not live authentication.
+For a website URL, the command opens a fresh login browser and makes discovery read
 requests after initial sign-in. Complete sign-in and verification, select the
-intended profile, and follow the terminal prompt. For a saved definition, generation
-runs locally without contacting the service. Both routes write new local output;
+intended profile, and follow the terminal prompt. Both routes write new local output;
 website discovery also updates the private login profile outside the output.
 
 A successful result lists usable projects under `services` or `workflowPackage`
