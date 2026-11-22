@@ -1,4 +1,4 @@
-# Saved example generation regression
+# Captured-operation recovery regression
 
 This fixture reproduces failed REST inference alongside usable captured GraphQL
 operations. Run it with Node 20 or newer, npm, and the project's development
@@ -9,13 +9,13 @@ poetry run pytest -q tests/generation/test_captured_operation_recovery.py
 ```
 
 The tests generate real Python clients from the saved input. They do not contact
-example, use credentials, or replace the pinned HAR converter with a mock.
+external services, use credentials, or replace the pinned HAR converter with a mock.
 `scripts/test-docker.sh` also runs these checks with external networking disabled.
 
 ## What was preserved
 
-The source is the saved `example-capture` run. Its HTTP archive (HAR) recorded
-GraphQL requests to a separate host with no response body and no available schema.
+The HTTP archive (HAR) models captured GraphQL requests to a separate host with
+no response body and no available schema.
 The fixture retains the syntax of its 11 unique operations, including fragments,
 variables and one mutation. Generation may describe that mutation; these tests
 never execute it.
