@@ -147,6 +147,7 @@ def test_cdn_driven_app_generates_callable_client_without_admitting_cdn(
                 assert b"COOKIE_CANARY" not in path.read_bytes()
                 assert b"SYNTHETIC_DASHBOARD" not in path.read_bytes()
                 assert b"SYNTHETIC_VERSION" not in path.read_bytes()
+                assert b"SYNTHETIC_ROLE" not in path.read_bytes()
 
 
 def assert_generated_read(output, service):

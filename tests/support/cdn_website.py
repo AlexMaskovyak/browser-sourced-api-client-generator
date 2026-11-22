@@ -77,10 +77,15 @@ def fixture_server() -> Iterator[Fixture]:
                 return
             result = graphql_sync(
                 build_schema(
-                    "type Query { status: String! } type Mutation { save: String }"
+                    "type Query { status: String } type Mutation { save: String }"
                 ),
                 body["query"],
-                root_value={"status": "ready"},
+                # Missing role context can look successful while returning no data.
+                root_value={
+                    "status": "ready"
+                    if self.headers.get("x-role-id") == "SYNTHETIC_ROLE"
+                    else None
+                },
                 variable_values=body.get("variables"),
                 operation_name=body.get("operationName"),
             )
@@ -92,7 +97,7 @@ def fixture_server() -> Iterator[Fixture]:
             self.send_header(
                 "Access-Control-Allow-Headers",
                 "Authorization, Content-Type, apollographql-client-name, "
-                "apollographql-client-version",
+                "apollographql-client-version, x-role-id",
             )
             self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
             self.end_headers()

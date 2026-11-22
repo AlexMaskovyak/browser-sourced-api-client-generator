@@ -14,7 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer CDN_TEST_BEARER',
         'apollographql-client-name': 'SYNTHETIC_DASHBOARD',
-        'apollographql-client-version': 'SYNTHETIC_VERSION'
+        'apollographql-client-version': 'SYNTHETIC_VERSION',
+        'x-role-id': 'SYNTHETIC_ROLE'
       },
       body: JSON.stringify({query: 'query Status { status }', operationName: 'Status'})
     });

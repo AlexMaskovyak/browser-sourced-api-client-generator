@@ -128,6 +128,7 @@ class Handler(BaseHTTPRequestHandler):
             and self.headers.get("Authorization") == "Bearer " + SECRETS["bearer"]
             and self.headers.get("apollographql-client-name") == "SYNTHETIC_DASHBOARD"
             and self.headers.get("apollographql-client-version") == "SYNTHETIC_VERSION"
+            and self.headers.get("x-role-id") == "SYNTHETIC_ROLE"
         )
 
     def do_GET(self) -> None:
@@ -142,7 +143,8 @@ class Handler(BaseHTTPRequestHandler):
                 'fetch("/graphql", {method:"POST",headers:{"Content-Type":"application/json",'
                 '"Authorization":window.fixtureBearer,'
                 '"apollographql-client-name":"SYNTHETIC_DASHBOARD",'
-                '"apollographql-client-version":"SYNTHETIC_VERSION"},'
+                '"apollographql-client-version":"SYNTHETIC_VERSION",'
+                '"x-role-id":"SYNTHETIC_ROLE"},'
                 'body:JSON.stringify({query:"{status}"})})',
                 kind="application/javascript",
             )
