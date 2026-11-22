@@ -20,11 +20,27 @@ existing owners and describes the state and failure boundaries for implementatio
 | `workflow_api`, `workflow_cli` | One installed Python function and console command; ordinary inputs, bounded file bytes, noninteractive results and distinct local output failures. |
 | `workflow_inputs`, `project_metadata` | Input documentation from declared schemas/explicit references, installed offline contract tests and source/wheel notices. No inferred workflow connections. |
 | `result_output` | Shared flushed output boundary for SDK/workflow commands; local failure preserves the completed remote outcome without retry. |
+| `unsupported_output` | Root README and offline Python stub for unsuccessful runs. Validated counts and fixed reason strings describe the outcome without copying credentials, URLs or exception text. |
 | `client_cli` | Command-scoped native files, default endpoint/profile; ordinary noninteractive invocation; native return values and bounded diagnostics. |
 
 URL -> initial login -> guarded existing exploration -> safe manifest/definitions ->
 automatic capability filtering -> upstream generation -> existing standalone
 packaging -> installed Python/CLI execution via private profile and request driver.
+
+The ordinary run claims a fresh output directory after option/profile validation.
+Every completed run writes client assets: usable packages contain their own README
+and Python code; unsupported or failed runs receive a root README and runnable local
+stub alongside coverage. Cancellation retains exit 130; other failures retain their
+existing exception/CLI behavior. The stub never sends requests or counts as a usable
+service. Existing directories are rejected before writing. A process kill or an
+unwritable filesystem can prevent output and cannot be reported as successful.
+
+The discovery policy distinguishes page assets from API traffic using the browser's
+resource type, not a URL suffix. Cross-origin GET/HEAD asset loads are allowed;
+navigation, writes, API-origin declarations and credential ownership keep their
+existing rules. Native browser routing still checks redirected asset requests.
+Frontend source extraction remains limited to same-origin modules; permitting a CDN
+script to render the page does not make its declarations verified API contracts.
 Supplied definitions/manifests enter offline normalization directly. HAR enters
 har2sdk; captured schema-less GraphQL keeps its separate existing compiler route.
 

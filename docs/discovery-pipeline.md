@@ -34,6 +34,20 @@ Use new output paths if rerunning. If no supported operation remains, the comman
 returns a nonzero result and an unsupported report. An unsupported operation is
 excluded rather than converted into a manual setup task.
 
+Even when no operation is usable, the new output contains `README.md`, `client.py`,
+and `coverage.json`. The README describes the saved evidence and how to retry.
+From that output directory, `python3 client.py --help` displays instructions;
+`python3 client.py` prints the unsupported result, sends no network request, and
+exits 1. A cancelled run's stub exits 130. Input and browser failures after a new
+output directory is accepted leave the same guidance; an early failure may have no
+manifest. Existing output directories and rejected options remain unchanged.
+
+For a website that needs CDN JavaScript, discovery permits browser-classified page
+asset reads while retaining restrictions on undeclared API requests and writes.
+Loading a script does not grant its host API access or a private credential profile.
+After a discovery fix, rerun the original URL with a new output directory and sign
+in again. A saved manifest cannot recover operations that were never observed.
+
 To use named GraphQL operations instead of schema-only defaults, supply
 `--operations tests/fixtures/operations.graphql` as an initial input. For a HAR,
 pass its filename as SOURCE. A saved discovery directory supplies its manifest.

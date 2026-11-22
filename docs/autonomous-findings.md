@@ -2,8 +2,28 @@
 
 The authenticated runtime, autonomous discovery/generation, restricted workflow
 distribution and clean-container acceptance are complete and independently reviewed.
-All material findings below are resolved. [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12)
+The original acceptance findings below are resolved. [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12)
 contains the implementation; it has not been merged or applied to a real service.
+
+## November 22 follow-up: example discovery and missing client assets
+
+The user's run at `6896b63` produced `unsupported/no_executable_operations`, zero
+services and workflows, and only JSON reports. Its saved report records 411 blocked
+cross-origin GET requests, including dashboard JavaScript, one page, no controls,
+and six failed definition probes. Those facts do not establish every cause of the
+example failure. No successful authenticated example rerun is claimed.
+
+- The strict origin check blocked browser-classified CDN assets before the asset
+  rule could apply. A neutral browser reproduction failed with zero services before
+  the change. At `73066a1`, it generates and calls a client; the 24 focused checks
+  also cover redirects, asset types, undeclared API calls, writes and private profiles.
+- Unsuccessful generation lacked developer-facing output. Follow-up checks require
+  a README and runnable offline stub for empty discovery, malformed input, missing
+  dependencies, unexpected failure and cancellation after output acceptance. The
+  stub preserves unsupported coverage and never counts as a usable API service.
+- Local acceptance now requires a CDN script for GraphQL discovery and exercises
+  unsuccessful output as well as installed working clients. Final verification of
+  the follow-up is recorded separately from the original container evidence below.
 
 ## Current verification
 

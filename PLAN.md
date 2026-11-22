@@ -75,10 +75,14 @@ do not establish that blocking scripts was the only cause.
    the usage/architecture explanation, and commit and push a separate correction PR
    based on `feature/autonomous-integration`. PR 12 remains the base implementation.
    A fresh authenticated example run remains required before claiming example support.
-4. For unsupported discovery, also write a root README and a standalone Python
+4. For unsupported discovery and failures after accepting a new output directory,
+   also write a root README and a standalone Python
    client stub. Explain the evidence and recovery steps; the stub sends no requests,
    returns a nonzero unsupported result, and does not count as a generated service.
    Verify its help, ordinary invocation, privacy, and offline behavior.
+5. Make the standalone local fixture depend on a second-origin script for GraphQL
+   discovery. Exercise empty-site and invalid-input output through the installed
+   generator, and assert README/Python assets for every supported input route.
 
 Completion requires the regression to fail before the fix and pass afterwards,
 actual generated-client execution, and server journals proving blocked requests

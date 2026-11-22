@@ -81,7 +81,16 @@ to call. An initial `--endpoint` is needed only when the input lacks that fact.
 Repeat `--input FILE` for additional initial manifests or bundled definitions.
 Unsupported references or encodings exclude affected operations automatically.
 Saved inputs never cause remote-reference fetches. Definitions with no executable
-operations finish with an unsupported report, rather than asking for setup repair.
+operations finish with an unsupported report, a root `README.md` explaining the
+evidence and recovery steps, and a runnable `client.py` stub. Run `python3 client.py
+--help` from that output directory. The stub sends no requests and returns a nonzero
+status; it is not counted as a usable service. Failed or cancelled runs also retain
+these assets once their new output directory has been accepted. Existing directories
+are never overwritten, and invalid options are rejected before work begins.
+
+During URL discovery, browser-classified scripts, stylesheets, images, fonts and
+media can load from a content delivery network (CDN). This lets the page render its
+controls. It does not authorize API calls or credential capture for the CDN's origin.
 
 ## Install and call a generated client
 
@@ -167,6 +176,12 @@ does not establish TLS compatibility. The final line prints the machine-readable
 report path. Any failed assertion exits nonzero; correct the reported failure and
 rerun the command. `scripts/test-docker.sh --help` explains prerequisites without
 building images.
+
+The local fixture's GraphQL discovery depends on a script served from a second
+origin. Acceptance requires that client to be generated and called. It also runs an
+empty website and malformed saved input through generation, then checks their
+READMEs, stub help, nonzero status, and zero-request results. Successful projects
+must contain both a README and Python client files.
 
 The complete command passed at `2b9c062`: 351 tests, HTTPS compatibility and separate
 runtime acceptance, including nine generated-package checks. Unit or fixture success
