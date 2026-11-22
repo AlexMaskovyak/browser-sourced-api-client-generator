@@ -91,6 +91,10 @@ are never overwritten, and invalid options are rejected before work begins.
 During URL discovery, browser-classified scripts, stylesheets, images, fonts and
 media can load from a content delivery network (CDN). This lets the page render its
 controls. It does not authorize API calls or credential capture for the CDN's origin.
+If the website itself initiates a parsed GraphQL read to another host, discovery
+can admit that API origin and capture its own observed authentication. Introspection
+may be unavailable; named captured operations still support a client. Failed REST
+traffic inference does not discard an independently usable GraphQL service.
 
 ## Install and call a generated client
 

@@ -41,6 +41,15 @@ navigation, writes, API-origin declarations and credential ownership keep their
 existing rules. Native browser routing still checks redirected asset requests.
 Frontend source extraction remains limited to same-origin modules; permitting a CDN
 script to render the page does not make its declarations verified API contracts.
+
+A parsed GraphQL read initiated by the selected website's Fetch/XHR traffic can
+admit its exact API origin, including a separate host without a published schema.
+Admission is bounded by the existing origin limit. Mutation-only evidence, opaque
+POSTs, assets and foreign-page traffic do not admit origins. Credentials come only
+from requests observed at that API origin; website headers are never copied there.
+Unavailable introspection leaves captured named operations eligible for schema-less
+generation. Failed REST inference is recorded separately and cannot discard an
+independently usable GraphQL service or published definition.
 Supplied definitions/manifests enter offline normalization directly. HAR enters
 har2sdk; captured schema-less GraphQL keeps its separate existing compiler route.
 

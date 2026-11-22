@@ -58,6 +58,35 @@ neutral local services. Findings live in `docs/autonomous-findings.md`.
 
 ## Status
 
+### November 22: separate GraphQL host after the CDN correction
+
+The rerun at `1049e74` saved 11 named GraphQL operations for a separate API host,
+then excluded the service as `undeclared_origin`. Its report includes 54 blocked
+query requests, four blocked mutations, and an unexplained HAR prerequisite error.
+The stub was generated, but no functional service client was produced.
+
+1. Reproduce a browser app with CDN assets, a different GraphQL host, actual
+   per-host authentication, no advertised schema, and unavailable introspection.
+   Require automatic generation and a successful generated read call. Keep
+   mutations, unrelated traffic and foreign-page requests blocked.
+2. Admit bounded API origins from explicit, parsed GraphQL read requests initiated
+   by the selected website. Capture only credentials actually observed at that
+   origin. Preserve native serializers and existing private-profile boundaries.
+3. Classify schema-probe failures without exposing exception text. Explain known
+   exclusions in the output README; do not infer a missing prerequisite from an
+   unrelated conversion error or assume the historical shell environment.
+4. Exercise the same separate-host topology in local acceptance, run the full
+   host/container checks, and update PR 13 with targeted commits. Generate the real
+   example client from saved evidence without opening the site, as the user requested.
+
+Saved-manifest reproduction exposed a second confirmed blocker: invalid REST
+inference discarded an independently usable GraphQL service. Preserve that service
+and report `har_inference_failed` separately from missing prerequisites. After this
+correction, the supplied manifest produces one client with 11 operations offline.
+
+The saved manifest can establish generation behavior offline, but cannot establish
+working authentication for an API origin that was excluded during the live run.
+
 ### November 22: CDN-dependent page loading
 
 The example run at delivery revision `6896b63` produced no client. Its saved report

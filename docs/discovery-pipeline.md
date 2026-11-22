@@ -45,8 +45,16 @@ manifest. Existing output directories and rejected options remain unchanged.
 For a website that needs CDN JavaScript, discovery permits browser-classified page
 asset reads while retaining restrictions on undeclared API requests and writes.
 Loading a script does not grant its host API access or a private credential profile.
+The selected website's parsed GraphQL reads can establish a separate API origin;
+its actual observed credentials stay isolated from the website's profile. Mutations,
+unknown POSTs and requests from unrelated pages cannot establish that origin.
 After a discovery fix, rerun the original URL with a new output directory and sign
 in again. A saved manifest cannot recover operations that were never observed.
+If the manifest already contains named operations, retrying it after a generation
+fix can produce a client entirely offline. This verifies generation, not live
+authentication. The failure README now explains recorded exclusions and distinguishes
+known authentication, redirect and transport probe failures without exposing private
+diagnostics.
 
 To use named GraphQL operations instead of schema-only defaults, supply
 `--operations tests/fixtures/operations.graphql` as an initial input. For a HAR,
