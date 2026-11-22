@@ -76,6 +76,13 @@ URL credentials, profile/origin mismatch, insecure profile permissions and unsaf
 filesystem links. Persist atomically with owner-only modes. Never bundle profile
 files, raw secrets, target response samples or sensitive structural identifiers.
 
+A native domain cookie can be retained in more than one API profile only when an
+allowed request actually sent it to each API host and its browser-recorded domain
+covers the observed HTTPS hosts. Merely finding a matching cookie in the browser
+jar grants nothing. Host-only cookies and ambiguous sharing across ports on one
+host keep the stricter ownership rule. Runtime dispatch still permits only the
+profile's exact origin, regardless of the cookie's broader domain.
+
 ## Mutation, failure and recovery
 
 Discovery never invokes discovered writes/uploads. Initial operator-selected website

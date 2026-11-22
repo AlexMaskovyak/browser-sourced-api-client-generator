@@ -267,7 +267,7 @@ class HeaderCapture:
 
 
 class OriginCaptures:
-    """Capture only origins and authentication names selected by initial definitions."""
+    """Capture credentials only for admitted API origins and authentication headers."""
 
     def __init__(self, endpoint: str) -> None:
         self.captures = {}
@@ -335,13 +335,15 @@ class OriginCaptures:
         except Exception:
             return
 
-    def cookies_for(self, api_origin: str) -> set[tuple[str, str]]:
-        """Never seed a jar cookie observed at another origin or shared ambiguously."""
-        # Cookies do not encode port ownership. A response issuer proves a newly
-        # rotated value belongs to this exact origin even before another request.
-        # Values observed at multiple origins remain ambiguous and are omitted.
+    def cookies_for(
+        self,
+        api_origin: str,
+        *,
+        browser_cookies: Iterable[Mapping[str, Any]] = (),
+    ) -> set[tuple[str, str]]:
+        """Retain exact-origin cookies and observed, native domain-cookie sharing."""
         identities = self.cookie_owners.keys() | self.cookie_issuers.keys()
-        return {
+        owned = {
             identity
             for identity in identities
             if self.cookie_issuers.get(
@@ -349,3 +351,39 @@ class OriginCaptures:
             )
             == {api_origin}
         }
+        return owned | self._observed_domain_cookies(api_origin, browser_cookies)
+
+    def _observed_domain_cookies(
+        self, api_origin: str, browser_cookies: Iterable[Mapping[str, Any]]
+    ) -> set[tuple[str, str]]:
+        """A cookie's domain is necessary but never sufficient API-use evidence."""
+        if api_origin not in self.captures:
+            return set()
+        result = set()
+        for cookie in browser_cookies:
+            identity = (cookie.get("name"), cookie.get("value"))
+            observed = self.cookie_owners.get(identity, set())
+            if api_origin not in observed:
+                continue
+            evidence = observed | self.cookie_issuers.get(identity, set())
+            if _domain_cookie_covers_hosts(cookie.get("domain"), evidence):
+                result.add(identity)
+        return result
+
+
+def _domain_cookie_covers_hosts(domain: Any, origins: set[str]) -> bool:
+    """Preserve browser domain scope without treating ports as cookie ownership."""
+    if not isinstance(domain, str) or not domain.startswith("."):
+        return False
+    parsed = [urlsplit(origin) for origin in origins]
+    hosts = {item.hostname for item in parsed}
+    # Different ports on one host remain ambiguous. This exception is only for
+    # a native domain cookie actually observed at separate admitted HTTPS hosts.
+    if len(hosts) < 2 or len(hosts) != len(origins):
+        return False
+    if any(item.scheme != "https" or not item.hostname for item in parsed):
+        return False
+    suffix = domain[1:].lower()
+    return bool(suffix) and all(
+        host == suffix or host.endswith("." + suffix) for host in hosts
+    )

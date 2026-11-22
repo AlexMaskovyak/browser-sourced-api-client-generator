@@ -309,7 +309,9 @@ def _capture_profiles(
     state = session._context.storage_state()
     for api_origin, capture in credentials.captures.items():
         profile = _profile_id(api_origin)
-        owned = credentials.cookies_for(api_origin)
+        owned = credentials.cookies_for(
+            api_origin, browser_cookies=state.get("cookies", [])
+        )
         suppressed = sum(
             (cookie.get("name"), cookie.get("value")) not in owned
             for cookie in scoped_state(state, api_origin)["cookies"]
