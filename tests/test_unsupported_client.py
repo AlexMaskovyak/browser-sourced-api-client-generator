@@ -129,6 +129,32 @@ def test_existing_output_is_never_replaced_by_failure_assets(tmp_path):
     assert list(output.iterdir()) == [readme]
 
 
+def test_failure_readme_explains_actual_exclusions_without_copying_private_details(
+    tmp_path,
+):
+    from website_client.unsupported_output import write_unsupported_output
+
+    report = {
+        "coverage": "unsupported",
+        "reason": "no_executable_operations",
+        "exclusions": [
+            {"reason": "undeclared_origin", "service": "CANARY_SERVICE"},
+            {"reason": "har_dependency_required"},
+            {"reason": "CANARY_UNKNOWN"},
+        ],
+        "discovery": {
+            "probes": [{"outcome": "request_failed", "endpoint": "CANARY_URL"}],
+            "exploration": {"blockedRequests": [{"graphql": {"kind": "query"}}]},
+        },
+    }
+    write_unsupported_output(tmp_path, report)
+    readme = (tmp_path / "README.md").read_text()
+    assert "separate GraphQL host" in readme
+    assert "node --version" in readme and "npm --version" in readme
+    assert "cannot distinguish authentication" in readme
+    assert "CANARY" not in readme
+
+
 @pytest.mark.parametrize(
     "kind", ["openapi", "schema", "operations", "manifest", "workflow", "har"]
 )

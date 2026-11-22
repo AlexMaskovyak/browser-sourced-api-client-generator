@@ -1,6 +1,7 @@
 """Write useful local output when discovery yields no callable operations."""
 
 from dataclasses import dataclass
+from collections import Counter
 import json
 from pathlib import Path
 from string import Template
@@ -16,6 +17,22 @@ FAILURE_MESSAGES = {
     "cancelled": "Generation was cancelled. Partial project files have not been verified.",
 }
 
+EXCLUSION_GUIDANCE = {
+    "har_inference_failed": "REST traffic conversion did not yield a usable contract. Independent GraphQL operations or published definitions can still produce clients; this is not a Node/npm prerequisite failure.",
+    "undeclared_origin": "A discovered service was excluded because its API origin was not admitted. A separate GraphQL host can cause this; use a generator revision that admits observed read requests, then collect fresh evidence.",
+    "har_dependency_required": "HAR conversion could not find a usable Node 20+ and npm. Run `node --version` and `npm --version` in the same terminal used to launch the generator. This recorded prerequisite failure does not establish which executable was missing at the time.",
+    "cookie_origin_isolation": "Cookies with unproven or ambiguous origin ownership were omitted from private profiles. This may affect later authentication; it is not proof that the service has no operations.",
+    "privacy_or_capture_omission": "Some traffic was unavailable or omitted during capture/privacy filtering. This count alone does not identify the reason for a missing client.",
+}
+PROBE_GUIDANCE = {
+    "unauthorized": "A definition or introspection request was rejected by authentication or access policy.",
+    "redirect_blocked": "A definition or introspection request redirected; discovery did not follow it.",
+    "transport_failed": "The request transport failed before a usable response was returned.",
+    "request_failed": "A probe failed without a recorded cause. The saved report cannot distinguish authentication, redirects, transport or another failure.",
+    "not_found": "The probed definition path returned HTTP 404.",
+    "schema_unavailable": "The endpoint did not return a usable GraphQL schema. Named observed operations may still support a client.",
+}
+
 
 @dataclass(frozen=True)
 class DiscoveryCounts:
@@ -24,6 +41,7 @@ class DiscoveryCounts:
     pages: int
     blocked_requests: int
     unsuccessful_probes: int
+    blocked_graphql_queries: int = 0
 
     def __post_init__(self) -> None:
         if any(type(value) is not int or value < 0 for value in vars(self).values()):
@@ -38,6 +56,10 @@ class DiscoveryCounts:
             blocked_requests=len(exploration.get("blockedRequests", [])),
             unsuccessful_probes=sum(
                 probe.get("outcome") != "found" for probe in discovery.get("probes", [])
+            ),
+            blocked_graphql_queries=sum(
+                (item.get("graphql") or {}).get("kind") == "query"
+                for item in exploration.get("blockedRequests", [])
             ),
         )
 
@@ -60,6 +82,8 @@ def write_unsupported_output(output: Path, coverage: Mapping[str, Any]) -> None:
         pages=counts.pages,
         blocked_requests=counts.blocked_requests,
         unsuccessful_probes=counts.unsuccessful_probes,
+        blocked_graphql_queries=counts.blocked_graphql_queries,
+        details=_recorded_details(coverage),
     )
     client = Template(
         (templates / "unsupported_client.py.tmpl").read_text()
@@ -75,6 +99,26 @@ def write_unsupported_output(output: Path, coverage: Mapping[str, Any]) -> None:
         path = output / name
         path.write_text(content)
         path.chmod(0o600)
+
+
+def _recorded_details(coverage: Mapping[str, Any]) -> str:
+    """Explain only recognized evidence codes; untrusted report text stays out."""
+    codes = {item.get("reason") for item in coverage.get("exclusions", [])}
+    discovery = coverage.get("discovery") or {}
+    probes = Counter(item.get("outcome") for item in discovery.get("probes", []))
+    lines = [
+        f"- **{code}**: {text}"
+        for code, text in EXCLUSION_GUIDANCE.items()
+        if code in codes
+    ]
+    lines.extend(
+        f"- **{code}** ({probes[code]} probes): {text}"
+        for code, text in PROBE_GUIDANCE.items()
+        if probes[code]
+    )
+    return (
+        "\n".join(lines) or "No more specific exclusion or probe reason was recorded."
+    )
 
 
 def write_failed_run(output: Path, error: BaseException) -> None:

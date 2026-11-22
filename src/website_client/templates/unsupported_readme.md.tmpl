@@ -27,12 +27,17 @@ No installation, login, generator package, or browser is needed.
 | --- | ---: |
 | Pages inspected or attempted | $pages |
 | Requests blocked by discovery policy | $blocked_requests |
+| Blocked requests containing a parsed GraphQL query | $blocked_graphql_queries |
 | API-definition probes that did not find a definition | $unsuccessful_probes |
 
 These counts describe saved evidence, not a proven root cause. For a saved input
 without browser evidence, the counts are zero. Review `discovery` and `exclusions`
 in `coverage.json` for the available details. Blocked page assets can prevent an
 application from rendering; failed definition probes alone do not prove why.
+
+## Specific findings in this run
+
+$details
 
 When present, the saved manifest in `manifest.json` contains the evidence collected.
 An input or browser failure before collection may leave no manifest.
