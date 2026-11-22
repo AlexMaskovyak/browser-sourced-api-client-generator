@@ -6,10 +6,8 @@ selects supported operations and packages every usable service without more prom
 Installed clients run from Python, their console commands or a scheduler. No agent
 or model API is required.
 
-Implementation and verification are recorded in [PR #12](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/12).
-The authenticated runtime, autonomous generation, packaged workflows and separate
-runtime-container acceptance pass independent review. See the
-[verification record](docs/autonomous-findings.md) for exact revisions and checks.
+For development setup, component tests and code review standards, see
+[Contributing](CONTRIBUTING.md).
 
 ## Install
 

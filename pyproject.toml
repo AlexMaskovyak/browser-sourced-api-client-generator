@@ -28,12 +28,13 @@ pythonpath = ["tests"]
 [tool.poetry.dependencies]
 arazzo-runner = { path = "src/website_client/native_dependencies/arazzo_runner-0.9.6+websiteclient.1-py3-none-any.whl" }
 
-# These commands check only the integration modules introduced or refactored here:
+# Lint and format integration code and the complete component test suite:
 # poetry run ruff check
 # poetry run ruff format --check
 [tool.ruff]
 target-version = "py311"
 include = [
+    "tests/**/*.py",
     "src/website_client/cli.py",
     "src/website_client/generation.py",
     "src/website_client/operation_generation.py",
