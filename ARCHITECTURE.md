@@ -71,7 +71,11 @@ origin and profile ID. Another machine requires its own login/profile.
 
 Profile lock covers load, entire call/job, cookie renewal save and cleanup, including
 error paths. Separate origins use separate contexts/profiles. Restrict observed
-headers to known or declared authentication headers for configured origins. Reject
+headers to known or declared authentication headers and the standard Apollo
+client-name/version headers for configured origins. Some APIs require both user
+login and application identity. Capture these values only from requests to that
+API; keep them in its private profile for probes and generated-client calls.
+Never infer their values or copy them from another origin. Reject
 URL credentials, profile/origin mismatch, insecure profile permissions and unsafe
 filesystem links. Persist atomically with owner-only modes. Never bundle profile
 files, raw secrets, target response samples or sensitive structural identifiers.

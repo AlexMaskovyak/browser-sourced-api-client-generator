@@ -12,7 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer CDN_TEST_BEARER'
+        Authorization: 'Bearer CDN_TEST_BEARER',
+        'apollographql-client-name': 'SYNTHETIC_DASHBOARD',
+        'apollographql-client-version': 'SYNTHETIC_VERSION'
       },
       body: JSON.stringify({query: 'query Status { status }', operationName: 'Status'})
     });

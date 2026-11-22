@@ -58,6 +58,10 @@ def fixture_server() -> Iterator[Fixture]:
             if (
                 self.path != "/graphql"
                 or self.headers.get("Authorization") != "Bearer CDN_TEST_BEARER"
+                or self.headers.get("apollographql-client-name")
+                != "SYNTHETIC_DASHBOARD"
+                or self.headers.get("apollographql-client-version")
+                != "SYNTHETIC_VERSION"
             ):
                 self.reply(403, "application/json", "{}")
                 return
@@ -86,7 +90,9 @@ def fixture_server() -> Iterator[Fixture]:
             self.send_response(204)
             self.cors()
             self.send_header(
-                "Access-Control-Allow-Headers", "Authorization, Content-Type"
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type, apollographql-client-name, "
+                "apollographql-client-version",
             )
             self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
             self.end_headers()

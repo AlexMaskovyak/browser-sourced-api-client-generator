@@ -15,7 +15,12 @@ from urllib.parse import urlsplit
 from filelock import FileLock
 from platformdirs import user_state_path
 
-AUTH_HEADERS = frozenset(
+# APIs may require client identity in addition to the user's login. These values
+# are observed at the API origin and kept private, never inferred from the site.
+CLIENT_IDENTITY_HEADERS = frozenset(
+    {"apollographql-client-name", "apollographql-client-version"}
+)
+AUTH_HEADERS = CLIENT_IDENTITY_HEADERS | frozenset(
     {
         "authorization",
         "x-csrf-token",
@@ -243,7 +248,7 @@ def save_browser_profile(
 
 
 class HeaderCapture:
-    """Observe known authentication headers only at the configured API origin."""
+    """Observe login and client identity only at the configured API origin."""
 
     def __init__(self, endpoint: str, allowed_headers: Iterable[str] = ()) -> None:
         self.origin = service_origin(endpoint)
