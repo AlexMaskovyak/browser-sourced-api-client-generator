@@ -140,12 +140,7 @@ class Handler(BaseHTTPRequestHandler):
         if target.path == "/assets/app.js":
             STATE["cdn_assets"] += 1
             return self.send(
-                'fetch("/graphql", {method:"POST",headers:{"Content-Type":"application/json",'
-                '"Authorization":window.fixtureBearer,'
-                '"apollographql-client-name":"SYNTHETIC_DASHBOARD",'
-                '"apollographql-client-version":"SYNTHETIC_VERSION",'
-                '"x-role-id":"SYNTHETIC_ROLE"},'
-                'body:JSON.stringify({query:"{status}"})})',
+                Path(__file__).with_name("acceptance_app.js").read_text(),
                 kind="application/javascript",
             )
         if target.path == "/empty":
