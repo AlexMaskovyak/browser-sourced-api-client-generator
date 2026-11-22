@@ -5,7 +5,7 @@ operations. Run it with Node 20 or newer, npm, and the project's development
 dependencies installed:
 
 ```sh
-poetry run pytest -q tests/test_captured_operation_recovery.py
+poetry run pytest -q tests/generation/test_captured_operation_recovery.py
 ```
 
 The tests generate real Python clients from the saved input. They do not contact
@@ -40,7 +40,7 @@ are removed. No private profile or copied coverage report is included.
 
 `expected_operations.json` lists the complete expected generated inventory. The
 separate-host admission check replays these sanitized request bodies through the
-normal observer. The browser test in `test_cdn_discovery.py` covers page loading,
+normal observer. The browser test in `tests/discovery/test_cdn_assets.py` covers page loading,
 unavailable introspection, credential isolation and a successful generated read
 against local servers. This saved fixture does not establish live authentication
 or explain the original generic probe failures.

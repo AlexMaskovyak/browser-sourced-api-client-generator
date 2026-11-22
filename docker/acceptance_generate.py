@@ -289,8 +289,8 @@ def main() -> None:
             "-q",
             "-p",
             "no:cacheprovider",
-            "/work/tests/test_cdn_discovery.py::test_cdn_driven_app_generates_callable_client_without_admitting_cdn[True]",
-            "/work/tests/test_captured_operation_recovery.py",
+            "/work/tests/discovery/test_cdn_assets.py::test_cdn_driven_app_generates_callable_client_without_admitting_cdn[separate-api-no-schema]",
+            "/work/tests/generation/test_captured_operation_recovery.py",
         ]
     )
     state = json.load(urlopen("http://127.0.0.1:8765/__state"))

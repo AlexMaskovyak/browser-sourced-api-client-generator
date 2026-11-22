@@ -42,7 +42,7 @@ def test_empty_discovery_writes_helpful_readme_and_offline_client(tmp_path):
     }
 
     # Execute under an audit hook to prove that the stub cannot silently dispatch.
-    audit_script = Path(__file__).parent / "helpers" / "reject_network.py"
+    audit_script = Path(__file__).parents[1] / "helpers" / "reject_network.py"
     audited = subprocess.run(
         [sys.executable, "-I", str(audit_script), str(script)],
         cwd=tmp_path,
@@ -152,7 +152,7 @@ def test_failure_readme_explains_actual_exclusions_without_copying_private_detai
     "kind", ["openapi", "schema", "operations", "manifest", "workflow", "har"]
 )
 def test_successful_input_routes_always_write_readme_and_python_client(tmp_path, kind):
-    fixtures = Path(__file__).parent / "fixtures"
+    fixtures = Path(__file__).parents[1] / "fixtures"
     sources = {
         "openapi": fixtures / "openapi.json",
         "schema": fixtures / "schema.graphql",
@@ -209,7 +209,7 @@ def test_failed_packaging_also_leaves_readable_runnable_output(tmp_path, monkeyp
     output = tmp_path / "failed"
     with pytest.raises(RuntimeError):
         run(
-            Path(__file__).parent / "fixtures" / "openapi.json",
+            Path(__file__).parents[1] / "fixtures" / "openapi.json",
             output,
             endpoint="https://neutral.invalid",
         )

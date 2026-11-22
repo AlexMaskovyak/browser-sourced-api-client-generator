@@ -23,7 +23,7 @@ from website_client.privacy import sanitized_manifest
 from website_client.har_inference import infer_har
 from website_client.self_discovery import DiscoveryObserver
 
-FIXTURE = Path(__file__).parent / "fixtures" / "captured_operation_recovery"
+FIXTURE = Path(__file__).parents[1] / "fixtures" / "captured_operation_recovery"
 WEBSITE = "https://payroll.example.test"
 GRAPHQL_ENDPOINT = "https://graphql.payroll.example.test/"
 EXPECTED_OPERATIONS = json.loads((FIXTURE / "expected_operations.json").read_text())

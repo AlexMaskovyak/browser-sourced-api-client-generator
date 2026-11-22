@@ -75,23 +75,45 @@ def test_observer_keeps_headers_scoped_and_discovers_only_after_login():
 
 
 @pytest.mark.parametrize(
-    "variant",
+    "request_changes,event_changes",
     [
-        "mutation",
-        "persisted",
-        "foreign-page",
-        "asset",
-        "unknown-post",
-        "authentication",
+        pytest.param(
+            {"postData": json.dumps({"query": "mutation Save { save }"})},
+            {},
+            id="mutation",
+        ),
+        pytest.param(
+            {
+                "postData": json.dumps(
+                    {"extensions": {"persistedQuery": {"sha256Hash": "hash"}}}
+                )
+            },
+            {},
+            id="opaque-persisted-query",
+        ),
+        pytest.param({}, {"documentURL": "https://other.test/"}, id="foreign-page"),
+        pytest.param({}, {"type": "Script"}, id="script-asset"),
+        pytest.param({"postData": '{"value":7}'}, {}, id="unknown-post"),
+        pytest.param(
+            {"url": "https://api.example.test/login"}, {}, id="authentication-path"
+        ),
     ],
 )
-def test_observed_origin_admission_rejects_non_read_evidence(variant):
-    admitted = []
-    allowed = {("example.test", 443)}
+def test_observed_origin_admission_rejects_non_read_evidence(
+    request_changes, event_changes
+):
+    admitted_endpoints = []
+    original_origins = {("example.test", 443)}
+    allowed_origins = original_origins.copy()
+
+    def admit(endpoint):
+        admitted_endpoints.append(endpoint)
+        return True
+
     observer = DiscoveryObserver(
         "https://example.test/app",
-        allowed,
-        admit_graphql_origin=lambda endpoint: admitted.append(endpoint) or True,
+        allowed_origins,
+        admit_graphql_origin=admit,
     )
     event = request_event(
         "https://api.example.test/graphql",
@@ -99,24 +121,18 @@ def test_observed_origin_admission_rejects_non_read_evidence(variant):
         headers={"Authorization": "CANARY_API_TOKEN"},
     )
     event["type"] = "Fetch"
-    if variant == "mutation":
-        event["request"]["postData"] = json.dumps({"query": "mutation Save { save }"})
-    elif variant == "persisted":
-        event["request"]["postData"] = json.dumps(
-            {"extensions": {"persistedQuery": {"sha256Hash": "hash"}}}
-        )
-    elif variant == "foreign-page":
-        event["documentURL"] = "https://other.test/"
-    elif variant == "asset":
-        event["type"] = "Script"
-    elif variant == "unknown-post":
-        event["request"]["postData"] = '{"value":7}'
-    else:
-        event["request"]["url"] = "https://api.example.test/login"
+    event["request"].update(request_changes)
+    event.update(event_changes)
+
     observer.event("Network.requestWillBeSent", event)
-    assert not admitted
-    assert observer.headers == {}
-    assert allowed == {("example.test", 443)}
+
+    assert admitted_endpoints == [], (
+        "Unsafe evidence reached the origin admission callback"
+    )
+    assert observer.headers == {}, "An unadmitted API origin supplied credentials"
+    assert allowed_origins == original_origins, (
+        "Unsafe evidence expanded allowed origins"
+    )
 
 
 def test_observed_read_admits_only_its_origin_and_captures_its_own_headers():

@@ -1,17 +1,13 @@
 """CDN assets render the app without admitting the CDN as an API origin."""
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import subprocess
 import sys
-from threading import Thread
 from types import SimpleNamespace
-from typing import Iterator
 
-from graphql import build_schema, graphql_sync
 import pytest
+
+from support.cdn_website import fixture_server
 
 from website_client.autonomous import run
 from website_client.browser import origin
@@ -66,7 +62,13 @@ def browser_request(
     )
 
 
-@pytest.mark.parametrize("separate_api", [False, True])
+@pytest.mark.parametrize(
+    "separate_api",
+    [
+        pytest.param(False, id="same-origin-api"),
+        pytest.param(True, id="separate-api-no-schema"),
+    ],
+)
 def test_cdn_driven_app_generates_callable_client_without_admitting_cdn(
     tmp_path, monkeypatch, separate_api
 ):
@@ -108,12 +110,14 @@ def test_cdn_driven_app_generates_callable_client_without_admitting_cdn(
 
         # Before the fix the fresh guarded tab cannot load the script, so this
         # assertion fails with unsupported/no_executable_operations.
-        assert report["services"], report["reason"]
+        assert report["services"], report
         service = next(
             item for item in report["services"] if "Status" in item["operations"]
         )
         exploration = report["discovery"]["exploration"]
-        assert exploration["actions"]
+        assert exploration["actions"], (
+            "The CDN script must render an actionable Records tab"
+        )
         assert {"/entry.js", "/create-app.js"} <= {path for _, path in cdn.calls}
         assert all(path in {"/entry.js", "/create-app.js"} for _, path in cdn.calls)
         assert ("POST", "/write") not in app.calls
@@ -128,7 +132,7 @@ def test_cdn_driven_app_generates_callable_client_without_admitting_cdn(
         assert_generated_read(output, service)
         target = api if separate_api else app
         assert sum(path == "/graphql" for _, path in target.calls) >= 3
-        assert target.mutations == 0
+        assert target.mutations == 0, "Discovery dispatched a GraphQL mutation"
         if separate_api:
             assert any(
                 probe["kind"] == "graphql" and probe["outcome"] == "unauthorized"
@@ -160,133 +164,3 @@ def assert_generated_read(output, service):
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"status": "ready"}
-
-
-@dataclass
-class Fixture:
-    """Independent server journal and neutral response definitions."""
-
-    url: str = ""
-    cdn: str = ""
-    api: str = ""
-    website: str = ""
-    introspection: bool = True
-    mutations: int = 0
-    cookies: list[str] = field(default_factory=list)
-    calls: list[tuple[str, str]] = field(default_factory=list)
-
-    def get(self, path: str) -> tuple[int, str, str]:
-        if path == "/login":
-            return 200, "text/html", "<p>Initial login</p>"
-        if path == "/dashboard":
-            return 200, "text/html", f'<script src="{self.cdn}/entry.js"></script>'
-        if path == "/create-app.js":
-            return 200, "application/javascript", dashboard_script(self.url, self.api)
-        return 404, "application/json", "{}"
-
-
-@contextmanager
-def fixture_server() -> Iterator[Fixture]:
-    fixture = Fixture()
-
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-
-        def do_GET(self):
-            fixture.calls.append(("GET", self.path))
-            if self.path == "/entry.js":
-                self.send_response(302)
-                self.send_header("Location", "/create-app.js")
-                self.end_headers()
-                return
-            status, content_type, body = fixture.get(self.path)
-            self.reply(status, content_type, body)
-
-        def do_POST(self):
-            fixture.calls.append(("POST", self.path))
-            raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-            if (
-                self.path != "/graphql"
-                or self.headers.get("Authorization") != "Bearer CDN_TEST_BEARER"
-            ):
-                self.reply(403, "application/json", "{}")
-                return
-            body = json.loads(raw)
-            fixture.cookies.append(self.headers.get("Cookie", ""))
-            if "mutation " in body["query"]:
-                fixture.mutations += 1
-            if (
-                not fixture.introspection
-                and body.get("operationName") == "IntrospectionQuery"
-            ):
-                self.reply(403, "application/json", "{}")
-                return
-            result = graphql_sync(
-                build_schema(
-                    "type Query { status: String! } type Mutation { save: String }"
-                ),
-                body["query"],
-                root_value={"status": "ready"},
-                variable_values=body.get("variables"),
-                operation_name=body.get("operationName"),
-            )
-            self.reply(200, "application/json", json.dumps(result.formatted))
-
-        def do_OPTIONS(self):
-            self.send_response(204)
-            self.cors()
-            self.send_header(
-                "Access-Control-Allow-Headers", "Authorization, Content-Type"
-            )
-            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-            self.end_headers()
-
-        def cors(self):
-            if fixture.website:
-                self.send_header("Access-Control-Allow-Origin", fixture.website)
-                self.send_header("Access-Control-Allow-Credentials", "true")
-
-        def reply(self, status, content_type, body):
-            content = body.encode()
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(content)))
-            self.cors()
-            self.end_headers()
-            self.wfile.write(content)
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    fixture.url = f"http://127.0.0.1:{server.server_port}"
-    thread = Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield fixture
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
-
-
-def dashboard_script(cdn_url: str, api_url: str = "") -> str:
-    return f"""
-document.addEventListener('DOMContentLoaded', () => {{
-  const button = document.createElement('button');
-  button.setAttribute('role', 'tab');
-  button.textContent = 'Records';
-  button.onclick = () => {{
-    fetch({json.dumps(api_url + "/graphql")}, {{
-      method: 'POST', credentials: 'include', headers: {{'Content-Type': 'application/json', Authorization: 'Bearer CDN_TEST_BEARER'}},
-      body: JSON.stringify({{query: 'query Status {{ status }}', operationName: 'Status'}})
-    }});
-    fetch({json.dumps(api_url + "/graphql")}, {{
-      method: 'POST', headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{query: 'mutation Save {{ save }}'}})
-    }}).catch(() => {{}});
-    fetch('/write', {{method: 'POST'}}).catch(() => {{}});
-    fetch({json.dumps(cdn_url)} + '/api/private.js').catch(() => {{}});
-    fetch({json.dumps(cdn_url)} + '/write', {{method: 'POST'}}).catch(() => {{}});
-  }};
-  document.body.appendChild(button);
-}});
-"""
