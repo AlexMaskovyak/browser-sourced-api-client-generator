@@ -17,6 +17,8 @@ def test_generated_client_opens_its_own_login_browser(tmp_path, monkeypatch):
     from test_login import assert_container_environment
 
     assert_container_environment()
+    # The fixture installs a test CA in the browser user's certificate database.
+    monkeypatch.setenv("HOME", str(tmp_path))
     site = Site(tmp_path)
     unfinished = tmp_path / "unfinished-client"
     output = tmp_path / "confirmed-client"
