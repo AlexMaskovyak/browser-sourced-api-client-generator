@@ -21,11 +21,12 @@ def main(args=None):
         help="Open a browser and sign in manually.",
         description="Open a temporary browser, sign in and complete verification codes there, "
         "then press Enter in this terminal. The browser closes afterward. This does not save "
-        "a login or generate a client. Ctrl+C cancels.",
+        "a login. A Python client is written before the browser opens. Ctrl+C cancels.",
     )
     login.add_argument(
         "--url", required=True, help="HTTPS address of the website to sign into."
     )
+    login.add_argument("--output", help="New directory for the login client (default: a new directory under ~/website-clients).")
     login.add_argument("--browser", choices=["chrome", "chromium"], default="chrome")
     login.add_argument(
         "--browser-path",
@@ -324,6 +325,11 @@ def main(args=None):
                 )
             )
             return 0
+        from .login_generation import default_login_output, generate_login_client
+
+        output = new_output(options.output or default_login_output())
+        generate_login_client(options.url, output)
+        print(f"Login client written to {output}", file=sys.stderr, flush=True)
         origin(options.url)
         if not sys.stdin.isatty():
             raise BrowserError(
@@ -338,7 +344,7 @@ def main(args=None):
             options.url, options.browser, options.browser_path
         ) as session:
             result = session.confirm_login()
-        print(json.dumps({**result, "sessionClosed": True, "clientGenerated": False}))
+        print(json.dumps({**result, "sessionClosed": True, "clientGenerated": True}))
         return 0
     except KeyboardInterrupt:
         print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
