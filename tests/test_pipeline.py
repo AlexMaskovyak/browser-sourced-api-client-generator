@@ -66,8 +66,10 @@ def graphql_bundle(
     )
 
 
-def openapi_bundle(*, inferred=False):
+def openapi_bundle(*, inferred=False, paths=None):
     spec = json.loads((FIXTURES / "openapi.json").read_text())
+    if paths is not None:
+        spec["paths"] = paths
     if inferred:
         spec["x-discovery-inferred"] = True
     item = artifact(
@@ -347,6 +349,19 @@ def test_cli_import_and_normalize_accept_standard_input_and_merge(tmp_path):
         "Normalized services" in normalized.stderr
         and "Normalized services" not in normalized.stdout
     )
+
+
+def test_generate_from_manifest_preserves_an_api_with_zero_endpoints(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    write_bundle(openapi_bundle(paths={}), manifest)
+    output = tmp_path / "empty-client"
+
+    report = generate_bundle(manifest, output, "empty-client")
+
+    assert report["generator"] == "openapi-python-client"
+    assert report["operations"] == []
+    assert (output / "empty_client/client.py").is_file()
+    assert (output / "empty_client/_login.py").is_file()
 
 
 def test_generation_from_only_a_manifest_is_offline_and_records_hashes(tmp_path):

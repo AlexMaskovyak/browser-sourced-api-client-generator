@@ -16,7 +16,7 @@ import tempfile
 from graphql import build_schema, parse, print_ast, validate
 
 from .browser import BrowserError
-from .definitions import graphql_schema, openapi_document, read_document
+from .definitions import graphql_schema, openapi_document, openapi_operations, read_document
 from .discovery import new_output
 
 GENERATOR_TIMEOUT_SECONDS = 120
@@ -49,10 +49,10 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=JSON_INDENT_SPACES) + "\n")
 
 
-def render_template(filename, *, name, package):
+def render_template(filename, **values):
     """Render a packaged project template with validated distribution and module names."""
     template = Template((TEMPLATE_DIRECTORY / filename).read_text())
-    return template.substitute(name=name, package=package)
+    return template.substitute(values)
 
 
 def package_name_for(name):
@@ -130,8 +130,6 @@ def operation_metadata(project, package):
             "description": method + " endpoint",
         }
 
-    if not operations:
-        raise BrowserError("No callable OpenAPI operations were generated.")
     return operations
 
 
@@ -184,9 +182,49 @@ def generate_openapi_project(stage, name, package, source):
         stage,
     )
     operations = operation_metadata(project, package)
+    if not operations and openapi_operations(spec):
+        raise BrowserError("No callable OpenAPI operations were generated for the declared endpoints.")
     configure_openapi_package(project, name, package)
     write_json(project / "openapi.json", spec)
     return GeneratedProject(project, package, operations, "openapi-python-client")
+
+
+def generate_openapi_client(output, name, source, *, website=None, lineage=None):
+    """Generate and publish one SDK for an OpenAPI document of any endpoint count."""
+    output = new_output(output)
+    package = package_name_for(name)
+    with tempfile.TemporaryDirectory(prefix="website-client-generation-") as directory:
+        project = generate_openapi_project(Path(directory), name, package, source)
+        write_runtime_files(project)
+        if project.operations:
+            write_project_readme(project, name)
+        add_browser_login(project, website)
+        report = write_generation_report(project, source, lineage=lineage)
+        publish_tree(project.directory, output)
+        return report
+
+
+def add_browser_login(project, website):
+    """Add a browser launcher to the upstream SDK and preserve its generated files."""
+    login_module = render_template("login_client.py.tmpl", website=repr(website))
+    root = project.directory
+    (root / project.package_name / "_login.py").write_text(login_module)
+    launcher = render_template("login_launcher.py.tmpl", package=project.package_name)
+    (root / "client.py").write_text(launcher)
+    # Install the SDK and its declared dependencies using the existing setup command.
+    (root / "requirements.txt").write_text(".\n")
+    distribution = importlib.metadata.distribution("browser-sourced-api-client-generator")
+    license_file = next(
+        entry for entry in distribution.files or ()
+        if entry.name == "LICENSE" and ".dist-info/" in str(entry)
+    )
+    (root / "LICENSE").write_text(license_file.read_text())
+    readme = root / "README.md"
+    instructions = (TEMPLATE_DIRECTORY / "login_readme.md.tmpl").read_text()
+    endpoint_guide = readme.read_text() if project.operations else (
+        "This OpenAPI definition contains zero endpoints. Browser login is available.\n"
+    )
+    readme.write_text(instructions + "\n" + endpoint_guide)
 
 
 def validated_graphql_operations(schema_sdl, operations_path):
@@ -377,24 +415,19 @@ def generate(
     Read local OpenAPI or GraphQL definitions, invoke the selected backend in private
     staging and add shared runtime files. Existing output is never overwritten.
     Operation-only generation is dispatched separately by pipeline.generate_bundle."""
+    if openapi:
+        return generate_openapi_client(output, name, read_document(openapi), lineage=lineage)
+
     output = new_output(output)
     package = package_name_for(name)
-    source = read_document(openapi or schema)
-    operations_source = (
-        read_document(operations) if not openapi and operations else None
-    )
-
-    # Each backend writes into private staging. Shared packaging and publication
-    # occur only after upstream generation and metadata extraction succeed.
+    source = read_document(schema)
+    operations_source = read_document(operations) if operations else None
     with tempfile.TemporaryDirectory(prefix="website-client-generation-") as directory:
         stage = Path(directory)
         if operations_source is not None:
             operations = stage / "input-operations.graphql"
             operations.write_text(operations_source, encoding="utf-8")
-        if openapi:
-            project = generate_openapi_project(stage, name, package, source)
-        else:
-            project = generate_graphql_project(stage, name, package, source, operations)
+        project = generate_graphql_project(stage, name, package, source, operations)
         write_runtime_files(project)
         write_project_readme(project, name)
         report = write_generation_report(project, source, operations_source, lineage)

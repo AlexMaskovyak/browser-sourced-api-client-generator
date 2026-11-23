@@ -125,27 +125,39 @@ reports failures but cannot undo downstream output after a late producer failure
 For implementing another producer, see the [manifest format](docs/discovery-manifest-format.md)
 and [create_discovery_manifest.py](examples/create_discovery_manifest.py).
 
-## Check browser login only
+## Sign in and generate a login-only client
 
-Replace `https://app.example.com` below with the website you want to use. This optional command checks
-only the login browser; it is not a prerequisite for discovery:
+To verify only this capability from the repository root, start Docker and run
+`scripts/test-login-client.sh`. It builds and installs the generator wheel, then
+tests both login programs against a local HTTPS site. A successful run reports
+passing browser and generation tests. Docker needs network access for an uncached image build.
+
+With Python 3.11 or newer, the project dependencies and Chrome installed, run
+the following from the repository root. Replace the example URL with your
+website's HTTPS login address. Choose an output directory that does not exist.
 
 ```sh
-poetry run website-client login --url https://app.example.com
+poetry run website-client login --url https://app.example.com --output my-login-client
 ```
 
-1. A separate temporary Chrome window opens.
-2. Sign in normally, including any verification code. Enter credentials only into
-   the website, never the terminal.
-3. Return to the requested website if sign-in redirected to another service.
-4. Press Enter in the terminal. The command checks the current page, closes the
-   temporary browser and reports user-confirmed readiness.
+The command generates a Python package from an OpenAPI definition with zero endpoints,
+adds the browser login command, and prints its location before opening Chrome.
+Sign in on the website, complete MFA, and press Enter in the terminal after the
+dashboard appears. If you cancel or login fails, the client files are still
+available for retry. Without `--output`, each run creates a new directory under
+`~/website-clients/`.
 
-This command does not save a login, generate a client, or verify an authenticated
-API request. The login command performs no endpoint discovery or record collection. Website
-scripts run normally while you log in. A subsequent invocation starts logged out.
-Ctrl+C cancels and closes the browser. Closing the browser ends the command with
-an error. The command requires an interactive terminal, not piped input.
+To sign in from the generated client itself:
+
+```sh
+cd my-login-client
+python3 -m pip install -r requirements.txt
+python3 client.py login
+```
+
+This opens a fresh browser at the website's origin. Use `--url` if you need a
+specific login path. Credentials stay in the temporary browser. Login requires an
+interactive terminal. Completion reports user confirmation, not API verification.
 
 Chromium users select `--browser chromium`. If your installation is in an unusual
 location, supply `--browser-path /absolute/path/to/browser`. Failure to find a

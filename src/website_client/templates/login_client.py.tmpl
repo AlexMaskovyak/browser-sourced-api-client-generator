@@ -1,0 +1,43 @@
+"""Open this website in a fresh browser and complete interactive login."""
+
+import argparse
+from contextlib import contextmanager
+import json
+import sys
+
+from .browser import BrowserError, BrowserSession
+
+WEBSITE = $website
+
+
+@contextmanager
+def login(url=WEBSITE, *, browser="chrome", browser_path=None):
+    """Yield the signed-in browser session until the caller exits the context."""
+    with BrowserSession(url, browser, browser_path) as session:
+        session.confirm_login()
+        yield session
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=["login"])
+    parser.add_argument("--url", default=WEBSITE, help="Override the website's starting URL.")
+    parser.add_argument("--browser", choices=["chrome", "chromium"], default="chrome")
+    parser.add_argument("--browser-path", help="Path to the installed browser executable.")
+    args = parser.parse_args()
+    if not args.url:
+        parser.error("Supply the website login address with --url https://...")
+    try:
+        with login(args.url, browser=args.browser, browser_path=args.browser_path):
+            pass
+    except BrowserError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    print(json.dumps({"authentication": "user-confirmed", "sessionClosed": True}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
