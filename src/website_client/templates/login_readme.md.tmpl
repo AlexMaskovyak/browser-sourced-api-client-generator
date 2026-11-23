@@ -1,22 +1,27 @@
 # Sign in with your Python client
 
-Install Python 3.11 or newer and Chrome or Chromium. From the directory containing
-this README, run the first command to install the Python dependency. The second
-command opens the website in its own temporary browser.
+Install Python 3.11 or newer and Chrome or Chromium. From this directory, install
+the generated package and its dependencies in your Python environment.
 
 ```sh
 python3 -m pip install -r requirements.txt
-python3 client.py login
 ```
 
-Sign in and complete MFA in the browser. Once you see the intended dashboard,
-return to the terminal and press Enter. The command closes its browser and prints
-`{"authentication": "user-confirmed", "sessionClosed": true}`. It exits zero.
-If the site uses a separate starting path, pass its HTTPS login URL with
-`--url`. Use `--browser chromium` for Chromium or `--browser-path` to specify
-the installed executable. Cancel with Ctrl+C and retry from a fresh terminal if
-sign-in is interrupted.
+If you generated this client with a website login URL, run `python3 client.py login`.
+To choose the starting page yourself, enter the website's HTTPS login address when prompted
+by these shell commands.
 
-This version provides login only. From Python, `with client.login() as session:`
-keeps the signed-in browser open for the duration of the block. Each invocation
-starts fresh. The generated directory contains no passwords or cookies.
+```sh
+printf 'Website login URL: '
+read -r login_url
+python3 client.py login --url "$login_url"
+```
+
+Complete sign-in and MFA in the browser. Once you see the intended dashboard,
+return to the terminal and press Enter. The command closes its browser and prints
+`{"authentication": "user-confirmed", "sessionClosed": true}`. Use
+`--browser chromium` for Chromium or `--browser-path` for a specific executable.
+Cancel with Ctrl+C and run the same command again to retry.
+
+Each login starts a fresh browser. The generated directory contains no passwords
+or cookies.

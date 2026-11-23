@@ -1,11 +1,11 @@
 """Publish a login-capable Python client independently of the browser login result."""
 
-from importlib import metadata, resources
+import json
 from pathlib import Path
 from uuid import uuid4
 
 from .browser import BrowserError, origin
-from .discovery import publish
+from .generation import generate_openapi_client
 
 
 def default_login_output() -> Path:
@@ -26,24 +26,12 @@ def _website_default(url: str) -> str | None:
 
 
 def generate_login_client(url: str, output: Path) -> None:
-    """Export the shared browser implementation and a credential-free entry point."""
-    website = _website_default(url)
-    package = resources.files("website_client")
-    templates = package.joinpath("templates")
-    source = templates.joinpath("login_client.py.tmpl").read_text()
-    distribution = metadata.distribution("browser-sourced-api-client-generator")
-    license_text = next(
-        entry.read_text()
-        for entry in distribution.files or ()
-        if entry.name == "LICENSE" and ".dist-info/" in str(entry)
-    )
-    publish(
-        output,
-        {
-            "client.py": source.replace("DEFAULT_WEBSITE", repr(website)),
-            "_browser.py": package.joinpath("browser.py").read_text(),
-            "requirements.txt": "playwright>=1.58,<2\n",
-            "README.md": templates.joinpath("login_readme.md.tmpl").read_text(),
-            "LICENSE": license_text,
-        },
+    """Generate the first SDK before authentication or endpoint discovery."""
+    definition = {
+        "openapi": "3.0.3",
+        "info": {"title": "Login client", "version": "1.0.0"},
+        "paths": {},
+    }
+    generate_openapi_client(
+        output, "login-client", json.dumps(definition), website=_website_default(url)
     )

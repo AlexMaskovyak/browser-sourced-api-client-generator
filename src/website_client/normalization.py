@@ -10,7 +10,7 @@ from .discovery_manifest.records import (
     Artifact, Confidence, Kind, Manifest, Normalization, Protocol,
     Service, Source, SourceBundle, Stage, Status,
 )
-from .definitions import MAX_DOCUMENT, graphql_schema, openapi_document
+from .definitions import MAX_DOCUMENT, graphql_schema, openapi_document, openapi_operations
 from .operation_contracts import compile_operations
 
 
@@ -135,14 +135,7 @@ def normalize_openapi(target: Service, source: Artifact, artifacts: ArtifactInde
     if target.operation_artifacts:
         raise BrowserError("OpenAPI services must not contain GraphQL operation documents.")
     spec = openapi_document(source.content)
-    methods = [
-        definition
-        for path in spec.get("paths", {}).values()
-        for method, definition in path.items()
-        if method.lower() in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
-    ]
-    if not methods:
-        raise BrowserError("OpenAPI contains no endpoint operations.")
+    methods = openapi_operations(spec)
     schema_id = artifacts.derive(
         "normalized-openapi.json", Kind.OPENAPI, encoded(spec), (source.id,),
     )

@@ -1,5 +1,6 @@
 """The login client's files are deterministic and contain only the website origin."""
 
+import json
 import subprocess
 import sys
 
@@ -18,10 +19,36 @@ def test_repeat_generation_is_identical_and_excludes_login_query(tmp_path):
             "https://app.example.test/sign-in?token=PRIVATE_TEST_VALUE", directory
         )
 
-    first_files = {p.name: p.read_bytes() for p in first.iterdir()}
-    assert first_files == {p.name: p.read_bytes() for p in second.iterdir()}
-    assert b"https://app.example.test" in first_files["client.py"]
+    first_files = project_files(first)
+    assert first_files == project_files(second)
+    assert b"https://app.example.test" in first_files["login_client/_login.py"]
     assert all(b"PRIVATE_TEST_VALUE" not in data for data in first_files.values())
+
+
+def project_files(root):
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    }
+
+
+def test_login_generates_an_openapi_package_with_no_endpoints(tmp_path):
+    output = tmp_path / "client"
+    generate_login_client("https://example.test", output)
+
+    definition = json.loads((output / "openapi.json").read_text())
+    report = json.loads((output / "generation.json").read_text())
+    assert definition["paths"] == {}
+    assert report["generator"] == "openapi-python-client"
+    assert report["operations"] == []
+    assert "zero endpoints" in (output / "README.md").read_text()
+
+    # Import the upstream SDK from its published directory in a new interpreter.
+    subprocess.run(
+        [sys.executable, "-c", "from login_client import Client; Client(base_url='https://example.test')"],
+        cwd=output,
+        check=True,
+    )
 
 
 @pytest.mark.parametrize(
@@ -52,6 +79,5 @@ def test_invalid_url_still_creates_client_in_default_directory(tmp_path, monkeyp
     assert main(["login", "--url", "bad-url-PRIVATE_TEST_VALUE"]) == 1
     [directory] = (tmp_path / "website-clients").iterdir()
     assert (directory / "README.md").is_file()
-    source = (directory / "client.py").read_text()
-    assert "PRIVATE_TEST_VALUE" not in source
-    compile(source, "client.py", "exec")
+    assert all(b"PRIVATE_TEST_VALUE" not in data for data in project_files(directory).values())
+    subprocess.run([sys.executable, str(directory / "client.py"), "--help"], check=True)

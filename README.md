@@ -140,7 +140,8 @@ website's HTTPS login address. Choose an output directory that does not exist.
 poetry run website-client login --url https://app.example.com --output my-login-client
 ```
 
-The command writes the client first and prints its location, then opens Chrome.
+The command generates a Python package from an OpenAPI definition with zero endpoints,
+adds the browser login command, and prints its location before opening Chrome.
 Sign in on the website, complete MFA, and press Enter in the terminal after the
 dashboard appears. If you cancel or login fails, the client files are still
 available for retry. Without `--output`, each run creates a new directory under

@@ -77,12 +77,13 @@ The website remains authoritative for authentication and business records. A
 human signs in through the temporary browser. Credentials remain in that browser
 or process memory; discovery exports sanitized evidence, not a reusable login.
 
-Login output is independent of capture. Before attempting interactive login,
-the login client writer publishes a new directory. It copies
-the existing BrowserSession module, which also owns login and cleanup when the
-emitted client runs. Only the website's HTTPS origin is embedded. Python callers
-can keep the new signed-in session open with the generated login context manager.
-
+Login starts with a valid OpenAPI document with empty paths. The same
+`openapi-python-client` generation function handles that document and imported
+definitions with endpoints. It owns the Python SDK. We add a browser login
+command, package dependencies and the operation inventory before publishing the
+directory. The launcher uses the packaged BrowserSession. Only the HTTPS origin
+of the login URL is embedded. Publication finishes before the browser opens, so
+an interrupted login can be retried from the generated directory.
 
 Discovery and client execution are separate sessions. A generated client's
 `--login` operation opens a fresh browser. Its HTTPX adapter sends the typed

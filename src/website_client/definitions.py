@@ -48,6 +48,18 @@ def openapi_document(value):
         raise BrowserError("OpenAPI definition is invalid. Validate or bundle the source document first.") from None
 
 
+def openapi_operations(spec):
+    """Return declared endpoint operations, skipping path metadata and extensions."""
+    methods = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+    return [
+        operation
+        for path, definition in spec.get("paths", {}).items()
+        if path.startswith("/")
+        for method, operation in definition.items()
+        if method in methods
+    ]
+
+
 def graphql_schema(value):
     try:
         if isinstance(value, str):
