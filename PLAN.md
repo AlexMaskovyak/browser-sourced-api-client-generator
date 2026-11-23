@@ -1,3 +1,13 @@
+# One dashboard link
+
+1. After interactive login, inspect the dashboard once and select its first eligible
+   same-origin page link in document order. Discovery must send zero link requests.
+2. Give its literal GET path, or an empty paths object, to the existing OpenAPI
+   generator. Publish one client in the requested new directory.
+3. On the local HTTPS fixture, run the generated method after fresh login and compare
+   the response body with the protected page. With no links, run the emitted login
+   command and confirm the dashboard visit. Run the full local suite before opening the PR.
+
 # Current work
 
 Make generated Python clients understandable and verify repeatable generation.
