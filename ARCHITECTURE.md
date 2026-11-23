@@ -85,6 +85,14 @@ directory. The launcher uses the packaged BrowserSession. Only the HTTPS origin
 of the login URL is embedded. Publication finishes before the browser opens, so
 an interrupted login can be retried from the generated directory.
 
+The optional `discover-link` command takes a single snapshot of the confirmed
+dashboard. The browser resolves ordinary anchor addresses, including relative
+links. The page-link module selects the first eligible path within the login
+origin. It supplies a GET operation with an HTML response to the same OpenAPI
+generator used for login. An empty selection or interrupted sign-in leaves a
+login client. Only the generated client's explicit read sends a request to the
+linked page, using a new browser session.
+
 Discovery and client execution are separate sessions. A generated client's
 `--login` operation opens a fresh browser. Its HTTPX adapter sends the typed
 method's request through that session, scoped to the selected API origin and

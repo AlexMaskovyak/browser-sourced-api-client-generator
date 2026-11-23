@@ -1,11 +1,17 @@
 """Publish a login-capable Python client independently of the browser login result."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from .browser import BrowserError, origin
 from .generation import generate_openapi_client
+
+if TYPE_CHECKING:
+    from .page_link import PageLink
 
 
 def default_login_output() -> Path:
@@ -25,13 +31,13 @@ def _website_default(url: str) -> str | None:
     return f"https://{hostname}" + (f":{port}" if port != 443 else "")
 
 
-def generate_login_client(url: str, output: Path) -> None:
-    """Generate the first SDK before authentication or endpoint discovery."""
+def generate_login_client(url: str, output: Path, *, link: PageLink | None = None) -> dict:
+    """Package browser login and the discovered page, if any, in one SDK."""
     definition = {
         "openapi": "3.0.3",
         "info": {"title": "Login client", "version": "1.0.0"},
-        "paths": {},
+        "paths": link.openapi_paths() if link else {},
     }
-    generate_openapi_client(
+    return generate_openapi_client(
         output, "login-client", json.dumps(definition), website=_website_default(url)
     )

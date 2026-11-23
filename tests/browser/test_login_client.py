@@ -1,52 +1,101 @@
-"""Exercise both login programs against the protected HTTPS container fixture."""
+"""Exercise generated login and page reads against the protected HTTPS fixture."""
 
+import json
 from pathlib import Path
+import ssl
 import os
 import sys
 
+import httpx
 import pytest
 
 
-@pytest.mark.skipif(
+pytestmark = pytest.mark.skipif(
     not Path("/work/docker/test-chromium.sh").is_file(),
     reason="Requires the repository's installed-wheel Chromium test container",
 )
-def test_generated_client_opens_its_own_login_browser(tmp_path, monkeypatch):
+
+BROWSER = ["--browser", "chromium", "--browser-path", "/work/docker/test-chromium.sh"]
+
+
+@pytest.fixture
+def site(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend("/work/docker")
     from fixture_site import Site
     from test_login import assert_container_environment
 
     assert_container_environment()
-    # The fixture installs a test CA in the browser user's certificate database.
     monkeypatch.setenv("HOME", str(tmp_path))
-    site = Site(tmp_path)
+    fixture = Site(tmp_path)
+    try:
+        yield fixture
+    finally:
+        fixture.close()
+
+
+def test_generated_client_opens_its_own_login_browser(tmp_path, site):
     unfinished = tmp_path / "unfinished-client"
     output = tmp_path / "confirmed-client"
-    browser = [
-        "--browser",
-        "chromium",
-        "--browser-path",
-        "/work/docker/test-chromium.sh",
-    ]
-    generate = ["login", "--url", site.url, "--output", str(output), *browser]
-    try:
-        attempt = ["login", "--url", site.url, "--output", str(unfinished), *browser]
-        sign_in(site, attempt, finish=False)
-        assert (unfinished / "README.md").is_file()
-        assert site.counts == {"password": 0, "mfa": 0, "app": 0}
+    attempt = ["login", "--url", site.url, "--output", str(unfinished), *BROWSER]
+    sign_in(site, attempt, finish=False)
+    assert (unfinished / "README.md").is_file()
+    assert site.counts == {"password": 0, "mfa": 0, "app": 0}
 
-        assert '"clientGenerated": true' in sign_in(site, generate)
-        assert site.counts == {"password": 1, "mfa": 1, "app": 1}
-        assert (output / "README.md").is_file()
+    generate = ["login", "--url", site.url, "--output", str(output), *BROWSER]
+    assert '"clientGenerated": true' in sign_in(site, generate)
+    assert site.counts == {"password": 1, "mfa": 1, "app": 1}
+    assert (output / "README.md").is_file()
 
-        # Retry using the file emitted by the unfinished attempt. Enter the new browser's credentials
-        # again and require a second authenticated dashboard visit on the server.
-        generated = [str(unfinished / "client.py"), "login", *browser]
-        console = sign_in(site, generated, executable=sys.executable)
-        assert '"authentication": "user-confirmed"' in console
-        assert site.counts == {"password": 2, "mfa": 2, "app": 2}
-    finally:
-        site.close()
+    generated = [str(unfinished / "client.py"), "login", *BROWSER]
+    console = sign_in(site, generated, executable=sys.executable)
+    assert '"authentication": "user-confirmed"' in console
+    assert site.counts == {"password": 2, "mfa": 2, "app": 2}
+
+
+def discover_dashboard(site, output):
+    sign_in(site, ["discover-link", "--url", site.url, "--output", str(output), *BROWSER])
+    return json.loads((output / "openapi.json").read_text())["paths"]
+
+
+def test_installed_client_reads_the_discovered_protected_page(tmp_path, site):
+    from test_login import install_generated_wheel
+
+    site.show_guide_link = True
+    origin = site.url.rsplit("/", 1)[0]
+    trust = ssl.create_default_context(cafile=str(tmp_path / "ca.crt"))
+    assert httpx.get(origin + "/team/guide", verify=trust).status_code == 401
+
+    project = tmp_path / "one-link"
+    paths = discover_dashboard(site, project)
+    assert list(paths) == ["/team/guide"]
+    assert list(paths["/team/guide"]) == ["get"]
+    assert site.guide_reads == 0
+
+    installed = tmp_path / "installed"
+    install_generated_wheel(project, installed)
+    # Change the page after generation. Only a fresh authenticated GET can return it.
+    site.guide_html = "<main>Updated team guide</main>"
+    response = tmp_path / "page.json"
+    sign_in(
+        site,
+        ["read_linked_page", "--url", origin, "--login", *BROWSER, "--output", str(response)],
+        executable=str(installed / "bin/login-client"),
+    )
+    assert json.loads(response.read_text()) == site.guide_html
+    assert site.guide_reads == 1
+    assert site.counts["mfa"] == 2
+
+
+def test_dashboard_without_links_generates_a_working_login_client(tmp_path, site):
+    project = tmp_path / "no-links"
+    assert discover_dashboard(site, project) == {}
+    report = json.loads((project / "generation.json").read_text())
+    assert report["operations"] == []
+    assert (project / "README.md").is_file()
+
+    sign_in(site, [str(project / "client.py"), "login", *BROWSER], executable=sys.executable)
+    assert site.counts == {"password": 2, "mfa": 2, "app": 2}
+    assert site.guide_reads == 0
 
 
 def sign_in(site, args, *, executable=None, finish=True):

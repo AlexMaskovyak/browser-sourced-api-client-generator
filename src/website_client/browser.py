@@ -218,6 +218,13 @@ class BrowserSession:
         # rather than treating Playwright's cached URL as the login result.
         return self._connection.call("Page.getFrameTree")["frameTree"]["frame"]["url"]
 
+    def dashboard_links(self):
+        """Snapshot the document address and resolved anchor URLs without following them."""
+        return self._page.evaluate("""() => [
+            document.URL,
+            Array.from(document.querySelectorAll('a[href]:not([download])'), a => a.href)
+        ]""")
+
     def _password_visible(self):
         return self._page.locator('input[type="password"]:visible').count() > 0
 

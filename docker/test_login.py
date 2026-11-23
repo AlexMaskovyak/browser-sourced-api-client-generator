@@ -236,6 +236,21 @@ def generate_and_install_client(kind, capture_output, root):
         assert report["schemaValidated"] is False
     assert lineage["service"]["id"] == target["id"]
     assert lineage["sourceBundles"]
+    environment = root / (kind + "-installed")
+    install_generated_wheel(project, environment)
+    executable = environment / "bin" / name
+    help_result = run_program([str(executable), "--help"])
+    read_operation = "get_item" if kind == "openapi" else "GetItem"
+    assert read_operation in help_result.stdout
+    print(
+        f"PASS installed generated Python client: {kind} wheel and endpoint help",
+        flush=True,
+    )
+    return GeneratedClient(kind=kind, executable=executable)
+
+
+def install_generated_wheel(project, environment):
+    """Install the generated client in an independent, offline environment."""
     run_program(
         [
             "poetry",
@@ -247,7 +262,6 @@ def generate_and_install_client(kind, capture_output, root):
         ]
     )
 
-    environment = root / (kind + "-installed")
     run_program([sys.executable, "-m", "venv", str(environment)])
     runtime_python = environment / "bin/python"
     wheel = next((project / "dist").glob("*.whl"))
@@ -273,16 +287,6 @@ def generate_and_install_client(kind, capture_output, root):
         "    assert importlib.util.find_spec(package) is None, package\n"
     )
     run_program([str(runtime_python), "-c", runtime_check])
-
-    executable = environment / "bin" / name
-    help_result = run_program([str(executable), "--help"])
-    read_operation = "get_item" if kind == "openapi" else "GetItem"
-    assert read_operation in help_result.stdout
-    print(
-        f"PASS installed generated Python client: {kind} wheel and endpoint help",
-        flush=True,
-    )
-    return GeneratedClient(kind=kind, executable=executable)
 
 
 def verify_self_discovery(site, root, *, disabled=False):

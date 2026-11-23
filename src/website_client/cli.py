@@ -32,6 +32,13 @@ def main(args=None):
         "--browser-path",
         help="Absolute path to an installed browser executable, if needed.",
     )
+    commands.add_parser(
+        "discover-link", parents=[login], add_help=False,
+        help="Sign in and generate a client for the first same-origin page link.",
+        description="Sign in and press Enter on the dashboard. Inspect its links without "
+        "opening them, then write one Python client. A dashboard with no eligible "
+        "links produces a login client.",
+    )
     discover = commands.add_parser(
         "discover",
         help="Find schemas or capture traffic after login, or import a HAR offline.",
@@ -328,6 +335,8 @@ def main(args=None):
         from .login_generation import default_login_output, generate_login_client
 
         output = new_output(options.output or default_login_output())
+        if options.command == "discover-link":
+            return discover_link_client(options, output)
         generate_login_client(options.url, output)
         print(f"Login client written to {output}", file=sys.stderr, flush=True)
         origin(options.url)
@@ -358,6 +367,32 @@ def main(args=None):
             file=sys.stderr,
         )
         return 1
+
+
+def discover_link_client(options, output):
+    """Inspect the confirmed dashboard and publish a client for zero or one page."""
+    from .login_generation import generate_login_client
+    from .page_link import first_page_link
+
+    try:
+        origin(options.url)
+        if not sys.stdin.isatty():
+            raise BrowserError("Login requires an interactive terminal.")
+        with BrowserSession(options.url, options.browser, options.browser_path) as session:
+            session.confirm_login()
+            dashboard, hrefs = session.dashboard_links()
+            link = first_page_link(options.url, dashboard, hrefs)
+        report = generate_login_client(options.url, output, link=link)
+    except (Exception, KeyboardInterrupt):
+        # Preserve the same retry command if sign-in or reading the dashboard failed.
+        if not output.exists():
+            generate_login_client(options.url, output)
+            print(f"Login client written to {output}", file=sys.stderr)
+        raise
+
+    print(f"Client written to {output}", file=sys.stderr)
+    print(json.dumps({"clientGenerated": True, "operations": report["operations"]}))
+    return 0
 
 
 def entrypoint():

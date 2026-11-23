@@ -478,3 +478,39 @@ and verification-code fixture. The container has no host mounts or external
 network during execution. Playwright's bundled Node driver runs inside the
 container. No production credentials are used.
 These tests do not establish production service compatibility.
+
+## Generate a client for one dashboard link
+
+With the same prerequisites as browser login, enter the HTTPS origin of the
+website (scheme and host, plus a port if needed) and the URL where sign-in starts.
+From the repository root, run these commands in a shell.
+
+```sh
+printf 'Website origin: '
+read -r website_origin
+printf 'Website login URL: '
+read -r login_url
+poetry run website-client discover-link --url "$login_url" --output one-link-client
+```
+
+Sign in and press Enter when the dashboard is ready. The command reads its links
+in document order without visiting them. It selects at most one same-origin
+page with a literal path. Links with query strings, fragments, numeric or unique IDs,
+or recognized account actions are skipped. Choose a new output
+directory on each run.
+
+If the command reports `read_linked_page`, run the generated client from that
+directory. The operation signs in again, reads the page once and saves the HTML
+as a JSON string in a new file.
+
+```sh
+cd one-link-client
+python3 -m pip install -r requirements.txt
+login-client read_linked_page --url "$website_origin" --login --login-url "$login_url" --output page.json
+```
+
+If the command reports an empty operations list, the directory contains a
+login client. From that directory, install it using the same pip command and
+run `python3 client.py login --url "$login_url"`. An interrupted sign-in also
+leaves a login client. To try discovery again, rerun the generator with a new
+directory.
