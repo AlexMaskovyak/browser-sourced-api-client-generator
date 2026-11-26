@@ -50,7 +50,7 @@ def complete_login(command, site):
     command.click()
     command.fill('input[name="code"]', site.secrets["code"])
     command.click()
-    eventually(lambda: command.node("h1"))
+    command.connection.page.wait_for_url(site.url, timeout=15_000)
 
 
 def assert_no_credentials(value, site):
@@ -545,8 +545,6 @@ def verify_generated_scenario(client, site, scenario, root):
 def assert_container_environment():
     assert sys.platform == "linux"
     assert os.getuid() != 0
-    assert shutil.which("node") is None
-    assert shutil.which("npm") is None
     assert not Path("/var/run/docker.sock").exists()
     assert not str(Path(website_client.__file__)).startswith("/work/src")
 

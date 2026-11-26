@@ -17,17 +17,9 @@ from exploration_site import response as exploration_response
 MAX_FIXTURE_REQUEST_BODY_BYTES = 4 * 1024
 FIXTURES_DIRECTORY = Path(__file__).resolve().parents[1] / "tests/fixtures"
 
-LOGIN_FORM = (
-    '<form method="post" action="/login">'
-    '<label>Username<input name="username"></label>'
-    '<label>Password<input name="password" type="password"></label>'
-    "<button>Sign in</button></form>"
-)
-VERIFICATION_FORM = (
-    '<form method="post" action="/mfa">'
-    '<label>Verification code<input name="code"></label>'
-    "<button>Verify</button></form>"
-)
+SITE_PAGES = Path(__file__).with_name("message_app")
+LOGIN_FORM = (SITE_PAGES / "login.html").read_text()
+VERIFICATION_FORM = (SITE_PAGES / "mfa.html").read_text()
 
 
 def run_certificate_command(*args):
