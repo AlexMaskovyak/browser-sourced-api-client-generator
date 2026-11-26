@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from website_client.operation_contracts import compile_operations, validate_variables
 
-DOC = (Path(__file__).parent / "fixtures/captured-operations.graphql").read_text()
+DOC = (Path(__file__).resolve().parents[1] / "fixtures/captured-operations.graphql").read_text()
 
 
 @pytest.mark.parametrize(

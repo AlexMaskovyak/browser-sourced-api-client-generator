@@ -18,7 +18,7 @@ from website_client.discovery_manifest import (
 )
 from website_client.pipeline import generate_bundle
 
-DOC = (Path(__file__).parent / "fixtures/captured-operations.graphql").read_text()
+DOC = (Path(__file__).resolve().parents[1] / "fixtures/captured-operations.graphql").read_text()
 
 
 def manifest(tmp_path, text=DOC, *, observed=False):

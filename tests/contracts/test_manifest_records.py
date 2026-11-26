@@ -17,7 +17,7 @@ from website_client.normalization import normalize_manifest
 def example_manifest():
     item = artifact(
         "api.json", "openapi",
-        (Path(__file__).parent / "fixtures/openapi.json").read_text(),
+        (Path(__file__).resolve().parents[1] / "fixtures/openapi.json").read_text(),
         "external",
     )
     return new_bundle(
@@ -191,7 +191,7 @@ def test_capture_transport_and_api_selection_exchange_records(tmp_path):
     from website_client.discovery_manifest.transport import read_manifest, write_manifest
     from website_client.normalization import select_service
 
-    spec = json.loads((Path(__file__).parent / "fixtures/openapi.json").read_text())
+    spec = json.loads((Path(__file__).resolve().parents[1] / "fixtures/openapi.json").read_text())
     spec["servers"] = [{"url": "https://example.test/"}]
     content = json.dumps(spec)
     captured = capture_manifest(Discovery(), {"openapi-downloaded-0001.json": content})
