@@ -1,9 +1,10 @@
 # One dashboard link
 
-1. After interactive login, inspect the dashboard once and select its first eligible
+1. On the normal `website-client login` command, publish the initial login client.
+   After interactive login, inspect the dashboard once and select its first eligible
    same-origin page link in document order. Discovery must send zero link requests.
 2. Give its literal GET path, or an empty paths object, to the existing OpenAPI
-   generator. Publish one client in the requested new directory.
+   generator. Upgrade the initial client in its original directory after generation succeeds.
 3. On the local HTTPS fixture, run the generated method after fresh login and compare
    the response body with the protected page. With no links, run the emitted login
    command and confirm the dashboard visit. Run the full local suite before opening the PR.

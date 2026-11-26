@@ -52,9 +52,12 @@ def test_generated_client_opens_its_own_login_browser(tmp_path, site):
     assert site.counts == {"password": 2, "mfa": 2, "app": 2}
 
 
-def discover_dashboard(site, output):
-    sign_in(site, ["discover-link", "--url", site.url, "--output", str(output), *BROWSER])
-    return json.loads((output / "openapi.json").read_text())["paths"]
+def login_and_read_paths(site, output):
+    console = sign_in(site, ["login", "--url", site.url, "--output", str(output), *BROWSER])
+    result = json.loads(console.splitlines()[-1])
+    paths = json.loads((output / "openapi.json").read_text())["paths"]
+    assert result["linkedPath"] == next(iter(paths), None)
+    return paths
 
 
 def test_installed_client_reads_the_discovered_protected_page(tmp_path, site):
@@ -66,7 +69,7 @@ def test_installed_client_reads_the_discovered_protected_page(tmp_path, site):
     assert httpx.get(origin + "/team/guide", verify=trust).status_code == 401
 
     project = tmp_path / "one-link"
-    paths = discover_dashboard(site, project)
+    paths = login_and_read_paths(site, project)
     assert list(paths) == ["/team/guide"]
     assert list(paths["/team/guide"]) == ["get"]
     assert site.guide_reads == 0
@@ -88,7 +91,7 @@ def test_installed_client_reads_the_discovered_protected_page(tmp_path, site):
 
 def test_dashboard_without_links_generates_a_working_login_client(tmp_path, site):
     project = tmp_path / "no-links"
-    assert discover_dashboard(site, project) == {}
+    assert login_and_read_paths(site, project) == {}
     report = json.loads((project / "generation.json").read_text())
     assert report["operations"] == []
     assert (project / "README.md").is_file()

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import tempfile
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -41,3 +43,35 @@ def generate_login_client(url: str, output: Path, *, link: PageLink | None = Non
     return generate_openapi_client(
         output, "login-client", json.dumps(definition), website=_website_default(url)
     )
+
+
+def project_snapshot(directory: Path) -> dict:
+    """Identify the published tree so an upgrade cannot discard local edits."""
+    snapshot = {}
+    for path in (directory, *directory.rglob("*")):
+        info = path.lstat()
+        snapshot[path.relative_to(directory)] = (
+            info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns,
+        )
+    return snapshot
+
+
+def upgrade_login_client(url: str, output: Path, link: PageLink, initial: dict) -> dict:
+    """Build the linked client in full before replacing this run's initial package."""
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".linked-client-") as stage:
+        linked = Path(stage) / "client"
+        report = generate_login_client(url, linked, link=link)
+        if project_snapshot(output) != initial:
+            raise BrowserError("The login client changed during sign-in. Retry in a new directory.")
+
+        # Keep the original outside staging so even a failed restoration leaves it recoverable.
+        previous = output.with_name(f".login-backup-{uuid4().hex}")
+        output.rename(previous)
+        try:
+            linked.rename(output)
+        except BaseException:
+            if not output.exists():
+                previous.rename(output)
+            raise
+        shutil.rmtree(previous)
+        return report

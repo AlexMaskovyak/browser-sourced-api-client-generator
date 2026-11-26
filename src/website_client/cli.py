@@ -17,11 +17,12 @@ def main(args=None):
     )
     commands = parser.add_subparsers(dest="command", required=True)
     login = commands.add_parser(
-        "login",
-        help="Open a browser and sign in manually.",
+        "login", aliases=["discover-link"],
+        help="Sign in and generate a client for the first eligible dashboard link.",
         description="Open a temporary browser, sign in and complete verification codes there, "
-        "then press Enter in this terminal. The browser closes afterward. This does not save "
-        "a login. A Python client is written before the browser opens. Ctrl+C cancels.",
+        "then press Enter in the terminal when the dashboard is ready. The command selects one "
+        "eligible link, closes the browser and does not save the session. "
+        "A working login client is written before the browser opens. Ctrl+C cancels.",
     )
     login.add_argument(
         "--url", required=True, help="HTTPS address of the website to sign into."
@@ -31,13 +32,6 @@ def main(args=None):
     login.add_argument(
         "--browser-path",
         help="Absolute path to an installed browser executable, if needed.",
-    )
-    commands.add_parser(
-        "discover-link", parents=[login], add_help=False,
-        help="Sign in and generate a client for the first same-origin page link.",
-        description="Sign in and press Enter on the dashboard. Inspect its links without "
-        "opening them, then write one Python client. A dashboard with no eligible "
-        "links produces a login client.",
     )
     discover = commands.add_parser(
         "discover",
@@ -332,29 +326,7 @@ def main(args=None):
                 )
             )
             return 0
-        from .login_generation import default_login_output, generate_login_client
-
-        output = new_output(options.output or default_login_output())
-        if options.command == "discover-link":
-            return discover_link_client(options, output)
-        generate_login_client(options.url, output)
-        print(f"Login client written to {output}", file=sys.stderr, flush=True)
-        origin(options.url)
-        if not sys.stdin.isatty():
-            raise BrowserError(
-                "Login requires an interactive terminal, without piped input."
-            )
-        print(
-            "Opening a temporary browser. Enter credentials only into the website.",
-            file=sys.stderr,
-            flush=True,
-        )
-        with BrowserSession(
-            options.url, options.browser, options.browser_path
-        ) as session:
-            result = session.confirm_login()
-        print(json.dumps({**result, "sessionClosed": True, "clientGenerated": True}))
-        return 0
+        return login_and_generate(options)
     except KeyboardInterrupt:
         print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
         return 130
@@ -369,29 +341,32 @@ def main(args=None):
         return 1
 
 
-def discover_link_client(options, output):
-    """Inspect the confirmed dashboard and publish a client for zero or one page."""
-    from .login_generation import generate_login_client
+def login_and_generate(options):
+    """Leave a runnable client before login, then add one link from the dashboard."""
+    from .login_generation import (
+        default_login_output, generate_login_client, project_snapshot, upgrade_login_client,
+    )
     from .page_link import first_page_link
 
-    try:
-        origin(options.url)
-        if not sys.stdin.isatty():
-            raise BrowserError("Login requires an interactive terminal.")
-        with BrowserSession(options.url, options.browser, options.browser_path) as session:
-            session.confirm_login()
-            dashboard, hrefs = session.dashboard_links()
-            link = first_page_link(options.url, dashboard, hrefs)
-        report = generate_login_client(options.url, output, link=link)
-    except (Exception, KeyboardInterrupt):
-        # Preserve the same retry command if sign-in or reading the dashboard failed.
-        if not output.exists():
-            generate_login_client(options.url, output)
-            print(f"Login client written to {output}", file=sys.stderr)
-        raise
+    output = new_output(options.output or default_login_output())
+    report = generate_login_client(options.url, output)
+    print(f"Login client written to {output}", file=sys.stderr, flush=True)
+    origin(options.url)
+    if not sys.stdin.isatty():
+        raise BrowserError("Login requires an interactive terminal, without piped input.")
 
-    print(f"Client written to {output}", file=sys.stderr)
-    print(json.dumps({"clientGenerated": True, "operations": report["operations"]}))
+    initial = project_snapshot(output)
+    with BrowserSession(options.url, options.browser, options.browser_path) as session:
+        result = session.confirm_login()
+        dashboard, hrefs = session.dashboard_links()
+        link = first_page_link(options.url, dashboard, hrefs)
+
+    if link is not None:
+        report = upgrade_login_client(options.url, output, link, initial)
+    print(json.dumps({
+        **result, "sessionClosed": True, "clientGenerated": True,
+        "linkedPath": link.path if link else None, "operations": report["operations"],
+    }))
     return 0
 
 

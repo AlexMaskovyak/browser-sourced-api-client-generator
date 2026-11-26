@@ -125,7 +125,7 @@ reports failures but cannot undo downstream output after a late producer failure
 For implementing another producer, see the [manifest format](docs/discovery-manifest-format.md)
 and [create_discovery_manifest.py](examples/create_discovery_manifest.py).
 
-## Sign in and generate a login-only client
+## Sign in and generate a client
 
 To verify only this capability from the repository root, start Docker and run
 `scripts/test-login-client.sh`. It builds and installs the generator wheel, then
@@ -143,7 +143,10 @@ poetry run website-client login --url https://app.example.com --output my-login-
 The command generates a Python package from an OpenAPI definition with zero endpoints,
 adds the browser login command, and prints its location before opening Chrome.
 Sign in on the website, complete MFA, and press Enter in the terminal after the
-dashboard appears. If you cancel or login fails, the client files are still
+dashboard appears. The command reads its links and reports the selected path in
+`linkedPath`. When it finds one, the client in the same directory gains the
+`read_linked_page` operation. With zero eligible links, `linkedPath` is null and
+the login client is ready to use. If you cancel or login fails, the client files are still
 available for retry. Without `--output`, each run creates a new directory under
 `~/website-clients/`.
 
@@ -490,7 +493,7 @@ printf 'Website origin: '
 read -r website_origin
 printf 'Website login URL: '
 read -r login_url
-poetry run website-client discover-link --url "$login_url" --output one-link-client
+poetry run website-client login --url "$login_url" --output one-link-client
 ```
 
 Sign in and press Enter when the dashboard is ready. The command reads its links
