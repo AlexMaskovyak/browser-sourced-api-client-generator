@@ -26,6 +26,8 @@ subprocess.run(
         "/opt/client-wheels",
         "--constraint",
         str(constraints),
+        # pip install . builds with the backend used by Poetry 2.5.1 in this image.
+        "poetry-core==2.5.0",
         *(
             f"{name}=={versions[name]}"
             for name in ("httpx", "attrs", "pydantic", "playwright", "graphql-core", "filelock", "platformdirs")

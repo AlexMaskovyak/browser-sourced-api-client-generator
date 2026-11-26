@@ -1,9 +1,13 @@
 # Read this website with Python or the command line
 
-Install Python 3.11 or newer. From this generated directory, run:
+Install Python 3.11 or newer. From the directory containing this README and
+`pyproject.toml`, create an environment for the client and install it. On macOS
+or Linux, run:
 
 ```sh
-python3 -m pip install .
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
 ```
 
 The generator's confirmed login is stored privately on this machine, outside this
@@ -19,13 +23,16 @@ Replace the profile example with your chosen directory. Leave this variable unse
 when using the default profile. Profiles must belong to your user and allow no
 access to other users. Credentials never belong in this package or its output.
 
-Python reads return upstream generated models, whose fields are attributes:
+Use the activated environment for the Python and shell examples below. Python
+reads return generated models. Access individual fields as attributes, or
+use `to_dict()` to display the complete record.
 
 ```python
 from $package import Client
 
 client = Client()
 $python_examples
+print(result.to_dict())
 ```
 
 The command line calls the same Python methods and prints JSON:
