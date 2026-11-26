@@ -1,0 +1,7 @@
+    def $name(self$signature) -> $annotation:
+        """Read the recorded endpoint and return its upstream response model."""
+        arguments = {$arguments}
+        supplied = {
+            key: value for key, value in arguments.items() if value is not _OMITTED
+        }
+        return self._execute($quoted_name, supplied)

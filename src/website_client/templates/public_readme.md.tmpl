@@ -1,0 +1,57 @@
+# Read this website with Python or the command line
+
+Install Python 3.11 or newer. From this generated directory, run:
+
+```sh
+python3 -m pip install .
+```
+
+The generator's confirmed login is stored privately on this machine, outside this
+package. By default, each website has a separate profile in the operating system's
+user state directory. If generation used `--profile DIR`, select that same absolute
+directory before calling this client:
+
+```sh
+export WEBSITE_CLIENT_PROFILE=/absolute/path/to/your/private/profile
+```
+
+Replace the profile example with your chosen directory. Leave this variable unset
+when using the default profile. Profiles must belong to your user and allow no
+access to other users. Credentials never belong in this package or its output.
+
+Python reads return upstream generated models, whose fields are attributes:
+
+```python
+from $package import Client
+
+client = Client()
+$python_examples
+```
+
+The command line calls the same Python methods and prints JSON:
+
+```sh
+$cli_examples
+```
+
+These are examples. Replace `value` and numeric values with actual inputs from the
+website. Command help lists required flags. Reads run without a browser or terminal
+input. TLS certificates must be trusted by Playwright's request runtime.
+
+A missing record raises `not_found (HTTP 404)`. Expired or missing login reports
+`authentication_required`. To recover, explicitly sign in again:
+
+```sh
+printf 'Website login URL: '
+read -r login_url
+$name login --url "$$login_url"
+```
+
+Complete sign-in and MFA, then return to the terminal and press Enter when the
+dashboard is ready. This renews the selected profile. Use `--browser chromium` or
+`--browser-path /absolute/browser/path` to select an installed browser. The standalone
+`python3 client.py login` command also works.
+
+Reads never prompt for login, follow redirects or retry automatically. This public
+interface supports captured same-origin GET operations returning JSON objects with
+scalar query arguments. Other request shapes continue to use the upstream SDK.
