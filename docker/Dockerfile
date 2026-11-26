@@ -28,4 +28,4 @@ RUN poetry build --format wheel && python -m pip install --no-deps dist/*.whl
 RUN useradd --create-home --uid 1000 tester
 USER tester
 ENV HOME=/home/tester
-CMD ["sh", "-c", "xvfb-run -a python -m pytest -q -p no:cacheprovider tests && xvfb-run -a python docker/test_login.py"]
+CMD ["sh", "-c", "xvfb-run -a python -m pytest -v --tb=short -p no:cacheprovider tests && xvfb-run -a python docker/test_login.py"]
