@@ -3,6 +3,7 @@
 import http.server
 import json
 from pathlib import Path
+import secrets
 import ssl
 import subprocess
 import threading
@@ -304,7 +305,7 @@ class Site:
             "password": str(uuid.uuid4()),
             "cookie": str(uuid.uuid4()),
             "challenge": str(uuid.uuid4()),
-            "code": "123456",
+            "code": f"{secrets.randbelow(10**8):08d}",
         }
         self.counts = {"password": 0, "mfa": 0, "app": 0}
         self.api_reads = 0

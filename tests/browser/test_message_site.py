@@ -78,14 +78,13 @@ def observe_natural_message(command, site):
     }
 
 
-def test_installed_login_observes_only_natural_message_fetch(site, tmp_path):
+def run_browser_sign_in(site, args, *, executable=None):
     from terminal_command import Command, eventually
     from test_login import assert_no_credentials
 
-    project = tmp_path / "message-client"
-    command = Command(site, args=[
-        "login", "--url", site.url, "--output", str(project), *BROWSER,
-    ])
+    before = site.counts.copy()
+    initial_reads = len(site.message_requests)
+    command = Command(site, args=args, executable=executable)
     try:
         eventually(command.ready)
         command.connect()
@@ -94,26 +93,54 @@ def test_installed_login_observes_only_natural_message_fetch(site, tmp_path):
         assert command.wait() == 0, command.output
         command.cleanup_verified()
         assert_no_credentials(command.output, site)
-        assert site.sessions_active
-        assert site.counts == {"password": 1, "mfa": 1, "app": 1}
-        assert site.message_requests == [natural]
-        assert json.loads(command.output.splitlines()[-1])["clientGenerated"] is True
-        report = json.loads((project / "generation.json").read_text())
-        print("OBSERVED natural browser/server exchange: " + json.dumps(natural), flush=True)
-        print("OBSERVED installed login output: " + json.dumps({
-            "operationCount": len(report["operations"]), "operations": report["operations"],
-        }), flush=True)
-        if os.environ.get("REQUIRE_MESSAGE_GET") == "1":
-            spec = json.loads((project / "openapi.json").read_text())
-            assert "get" in spec["paths"].get("/message", {}), (
-                "Browser and backend verified GET /message, but the generated "
-                "OpenAPI has no GET /message operation."
-            )
-        print("PASS natural login + MFA and one page-owned JSON fetch; HTML and rendered "
-              "subject checked independently. Generated application-method behavior "
-              "was not exercised.", flush=True)
+        assert site.counts == {step: count + 1 for step, count in before.items()}
+        assert site.message_requests[initial_reads:] == [natural]
+        return json.loads(command.output.splitlines()[-1])
     finally:
         command.stop()
+
+
+def test_generator_and_installed_client_complete_sign_in(site, tmp_path):
+    from test_login import install_generated_wheel
+
+    project = tmp_path / "message-client"
+    generated = run_browser_sign_in(site, [
+        "login", "--url", site.url, "--output", str(project), *BROWSER,
+    ])
+    assert generated["clientGenerated"] is True
+
+    environment = tmp_path / "installed"
+    install_generated_wheel(project, environment)
+    # Isolated Python imports the installed wheel even beside the generated source.
+    signed_in = run_browser_sign_in(site, [
+        "-I", str(project / "client.py"), "login", "--url", site.url, *BROWSER,
+    ], executable=str(environment / "bin/python"))
+    assert signed_in == {"authentication": "user-confirmed", "sessionClosed": True}
+    print("PASS generator and installed client each completed password and MFA, "
+          "opened the protected dashboard and received message m1.", flush=True)
+
+    report = json.loads((project / "generation.json").read_text())
+    print("Generated operations: " + json.dumps(report["operations"]), flush=True)
+    if os.environ.get("REQUIRE_MESSAGE_GET") == "1":
+        spec = json.loads((project / "openapi.json").read_text())
+        assert "get" in spec["paths"].get("/message", {}), (
+            "Browser and backend verified GET /message, but the generated "
+            "OpenAPI has no GET /message operation."
+        )
+
+
+def test_password_alone_and_wrong_mfa_cannot_read_messages(site, http_client):
+    password = http_client.post("/login", data={
+        key: site.secrets[key] for key in ("username", "password")
+    })
+    assert password.status_code == 303
+    assert password.headers["location"] == "/mfa"
+    assert http_client.get("/message?message_id=m1").status_code == 401
+
+    rejected = http_client.post("/mfa", data={"code": "incorrect"})
+    assert rejected.status_code == 401
+    assert http_client.get("/message?message_id=m1").status_code == 401
+    assert site.counts == {"password": 1, "mfa": 0, "app": 0}
 
 
 def test_fixture_rejects_unauthenticated_message_read(site, http_client):
