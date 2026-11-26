@@ -29,7 +29,7 @@ The CLI parses the flag, calls the public Python method and prints its result. T
 
 ### How we prove it, one milestone at a time
 
-**Use Docker for routine development and review.** Run [`./scripts/test-message-site.sh`](scripts/test-message-site.sh) from the repository root. The fixture owns its website, backend, credentials and expected records. The driver automates only the initial sign-in on behalf of a user. No real account or personal data is needed.
+**Use Docker for routine development and review.** Run [`./scripts/test-message-site.sh`](scripts/test-message-site.sh) from the repository root. The fixture owns its website, backend, credentials and expected records. The fixture issues a username, password and MFA code in memory for each test. The driver enters them through the real forms for both the generator and the installed generated client. Each must reach the protected dashboard in its own browser and receive the expected message from the backend. The backend must deny a message read after the password alone or an incorrect MFA code. Contributors only need Docker.
 
 | Milestone | Pass condition |
 | --- | --- |
