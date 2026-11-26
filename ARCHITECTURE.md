@@ -130,3 +130,10 @@ Unit tests exercise parsing and policies. Docker installs the built wheel and
 checks browser login, discovery, command chaining and both generated client types
 against a local HTTPS fixture. Compatibility with a real service requires its
 own verification.
+
+## Planned public operation names and groups
+
+- Identify a service by protocol and normalized endpoint. Identify a REST operation by verb and validated route template. For GraphQL, use operation kind, name and canonical document with its referenced fragments. Repeated observations add evidence to an operation. Conflicting contracts produce a reported exclusion.
+- For inferred REST, use the verb and literal route segments. A path parameter becomes `by_<parameter>`. Thus `GET /message?message_id=m1` gives `get_message(message_id=...)`. Preserve wire argument names in the mapping. When available, use the authored OpenAPI operation ID or GraphQL operation name. Use the root field for a supported schema-only GraphQL operation.
+- Generate one canonical service subclient from protocol, host, non-default port and endpoint path. Use the first declared OpenAPI tag as a group. For traffic-only REST, a shared literal collection path and its parameterized member path can establish a resource group. Otherwise keep the operation on the service. A unique public method also appears on the root client. Record page-to-method associations separately so a method used on two screens has one implementation.
+- Normalize public names to snake case with the existing acronym and camel-case rules. Preserve existing public aliases and reserve lifecycle names. Prefix invalid leading digits, keywords and reserved names according to scope (`operation_`, `service_`, `group_`). Sort by canonical identity. For collisions within a scope, append the first eight hexadecimal characters of its SHA-256 identity digest and extend until unique. Omit ambiguous root aliases. CLI names follow the same mapping using hyphens and qualified command words. Use an explicit package name when provided, otherwise the normalized starting hostname plus `-client`.
