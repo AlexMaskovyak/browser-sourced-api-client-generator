@@ -17,11 +17,12 @@ def main(args=None):
     )
     commands = parser.add_subparsers(dest="command", required=True)
     login = commands.add_parser(
-        "login",
-        help="Open a browser and sign in manually.",
+        "login", aliases=["discover-link"],
+        help="Sign in and generate a client for the first eligible dashboard link.",
         description="Open a temporary browser, sign in and complete verification codes there, "
-        "then press Enter in this terminal. The browser closes afterward. This does not save "
-        "a login. A Python client is written before the browser opens. Ctrl+C cancels.",
+        "then press Enter in the terminal when the dashboard is ready. The command selects one "
+        "eligible link, closes the browser and does not save the session. "
+        "A working login client is written before the browser opens. Ctrl+C cancels.",
     )
     login.add_argument(
         "--url", required=True, help="HTTPS address of the website to sign into."
@@ -325,27 +326,7 @@ def main(args=None):
                 )
             )
             return 0
-        from .login_generation import default_login_output, generate_login_client
-
-        output = new_output(options.output or default_login_output())
-        generate_login_client(options.url, output)
-        print(f"Login client written to {output}", file=sys.stderr, flush=True)
-        origin(options.url)
-        if not sys.stdin.isatty():
-            raise BrowserError(
-                "Login requires an interactive terminal, without piped input."
-            )
-        print(
-            "Opening a temporary browser. Enter credentials only into the website.",
-            file=sys.stderr,
-            flush=True,
-        )
-        with BrowserSession(
-            options.url, options.browser, options.browser_path
-        ) as session:
-            result = session.confirm_login()
-        print(json.dumps({**result, "sessionClosed": True, "clientGenerated": True}))
-        return 0
+        return login_and_generate(options)
     except KeyboardInterrupt:
         print("Command cancelled. The temporary browser was closed.", file=sys.stderr)
         return 130
@@ -358,6 +339,35 @@ def main(args=None):
             file=sys.stderr,
         )
         return 1
+
+
+def login_and_generate(options):
+    """Leave a runnable client before login, then add one link from the dashboard."""
+    from .login_generation import (
+        default_login_output, generate_login_client, project_snapshot, upgrade_login_client,
+    )
+    from .page_link import first_page_link
+
+    output = new_output(options.output or default_login_output())
+    report = generate_login_client(options.url, output)
+    print(f"Login client written to {output}", file=sys.stderr, flush=True)
+    origin(options.url)
+    if not sys.stdin.isatty():
+        raise BrowserError("Login requires an interactive terminal, without piped input.")
+
+    initial = project_snapshot(output)
+    with BrowserSession(options.url, options.browser, options.browser_path) as session:
+        result = session.confirm_login()
+        dashboard, hrefs = session.dashboard_links()
+        link = first_page_link(options.url, dashboard, hrefs)
+
+    if link is not None:
+        report = upgrade_login_client(options.url, output, link, initial)
+    print(json.dumps({
+        **result, "sessionClosed": True, "clientGenerated": True,
+        "linkedPath": link.path if link else None, "operations": report["operations"],
+    }))
+    return 0
 
 
 def entrypoint():

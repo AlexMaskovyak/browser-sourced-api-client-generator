@@ -1,11 +1,19 @@
 """Publish a login-capable Python client independently of the browser login result."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
+import shutil
+import tempfile
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from .browser import BrowserError, origin
 from .generation import generate_openapi_client
+
+if TYPE_CHECKING:
+    from .page_link import PageLink
 
 
 def default_login_output() -> Path:
@@ -25,13 +33,46 @@ def _website_default(url: str) -> str | None:
     return f"https://{hostname}" + (f":{port}" if port != 443 else "")
 
 
-def generate_login_client(url: str, output: Path) -> None:
-    """Generate the first SDK before authentication or endpoint discovery."""
+def generate_login_client(url: str, output: Path, *, link: PageLink | None = None) -> dict:
+    """Package browser login and the discovered page, if any, in one SDK."""
     definition = {
         "openapi": "3.0.3",
         "info": {"title": "Login client", "version": "1.0.0"},
-        "paths": {},
+        "paths": link.openapi_paths() if link else {},
     }
-    generate_openapi_client(
-        output, "login-client", json.dumps(definition), website=_website_default(url)
+    return generate_openapi_client(
+        output, "login-client", json.dumps(definition), website=_website_default(url),
+        linked_page=link.path if link else None,
     )
+
+
+def project_snapshot(directory: Path) -> dict:
+    """Identify the published tree so an upgrade cannot discard local edits."""
+    snapshot = {}
+    for path in (directory, *directory.rglob("*")):
+        info = path.lstat()
+        snapshot[path.relative_to(directory)] = (
+            info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns,
+        )
+    return snapshot
+
+
+def upgrade_login_client(url: str, output: Path, link: PageLink, initial: dict) -> dict:
+    """Build the linked client in full before replacing this run's initial package."""
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".linked-client-") as stage:
+        linked = Path(stage) / "client"
+        report = generate_login_client(url, linked, link=link)
+        if project_snapshot(output) != initial:
+            raise BrowserError("The login client changed during sign-in. Retry in a new directory.")
+
+        # Keep the original outside staging so even a failed restoration leaves it recoverable.
+        previous = output.with_name(f".login-backup-{uuid4().hex}")
+        output.rename(previous)
+        try:
+            linked.rename(output)
+        except BaseException:
+            if not output.exists():
+                previous.rename(output)
+            raise
+        shutil.rmtree(previous)
+        return report

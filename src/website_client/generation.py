@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 from string import Template
 import subprocess
 import sys
@@ -189,7 +190,9 @@ def generate_openapi_project(stage, name, package, source):
     return GeneratedProject(project, package, operations, "openapi-python-client")
 
 
-def generate_openapi_client(output, name, source, *, website=None, lineage=None):
+def generate_openapi_client(
+    output, name, source, *, website=None, lineage=None, linked_page=None
+):
     """Generate and publish one SDK for an OpenAPI document of any endpoint count."""
     output = new_output(output)
     package = package_name_for(name)
@@ -199,6 +202,16 @@ def generate_openapi_client(output, name, source, *, website=None, lineage=None)
         if project.operations:
             write_project_readme(project, name)
         add_browser_login(project, website)
+        if linked_page is not None:
+            # This login variant needs one concrete request guide, without the
+            # upstream README's competing generic API examples.
+            (project.directory / "README.md").write_text(
+                render_template(
+                    "linked_page_readme.md.tmpl", website=website,
+                    shell_website=shlex.quote(website), path=linked_page, name=name,
+                    operation=next(iter(project.operations)),
+                )
+            )
         report = write_generation_report(project, source, lineage=lineage)
         publish_tree(project.directory, output)
         return report

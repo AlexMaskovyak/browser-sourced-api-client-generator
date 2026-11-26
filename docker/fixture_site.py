@@ -1,6 +1,7 @@
 """Local HTTPS service for browser login and generated endpoint tests."""
 
 import http.server
+from html import escape
 import json
 from pathlib import Path
 import ssl
@@ -191,6 +192,13 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content[1].encode())
                 return
+        if target.path == "/team/guide":
+            if not self.authenticated:
+                self.send_error(401)
+            else:
+                self.site.guide_reads += 1
+                self.send_html(self.site.guide_html)
+            return
         if target.path == "/redirect-target":
             self.site.redirect_hits += 1
             self.send_error(500)
@@ -209,6 +217,8 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
         elif self.authenticated:
             self.site.counts["app"] += 1
             content = "<h1>Signed in</h1>"
+            for href in self.site.dashboard_hrefs:
+                content += f'<a href="{escape(href, quote=True)}">Linked page</a>'
             if self.site.self_discovery:
                 # The fixture page makes an ordinary GraphQL read without
                 # project JavaScript. Discovery must observe it, not replay it.
@@ -301,6 +311,9 @@ class Site:
         self.api_reads = 0
         self.api_writes = 0
         self.redirect_hits = 0
+        self.dashboard_hrefs = []
+        self.guide_reads = 0
+        self.guide_html = "<h1>Team guide</h1>"
         self.self_discovery = False
         self.introspection_disabled = False
         self.introspection_reads = 0

@@ -1,26 +1,69 @@
-# Current work
+# Generate a Python client from the website’s server operations
 
-Make generated Python clients understandable and verify repeatable generation.
+A developer installs the generated package, constructs `Client()`, and calls a method with ordinary Python arguments. The CLI exposes the same operations and calls those public methods. Assume the website publishes no API specification. For ordinary HTTP operations, our generator produces an OpenAPI document from observed browser requests and server responses. It passes that document to `openapi-python-client` to generate Python code. After the initial sign-in, discovery and generation run without human direction or an agent.
 
-1. Review all Python implementation files changed in the PR, documenting component
-   contracts and non-obvious validation, inference, ownership and failure decisions.
-   Generate class and method docstrings from operation contracts: read/write
-   behavior, declared variable types, omission, return values and failure behavior.
-   Explain shared runtime ownership and validation limits in its public API.
-2. Test documentation on a freshly generated client, including required inputs,
-   defaults and mutation permission. Generate twice from identical saved inputs
-   and compare output bytes. Run the full suite and container checks.
-3. Regenerate the example package from its saved normalized manifest, compare it
-   with the repository, and update both PRs. Keep private inputs out of Git.
+## Where the OpenAPI document comes from
 
-The generator owns executable SDK files. Repository packaging, tests and prose
-remain separate unless the comparison proves they are generated. Do not perform
-live writes or claim whole-repository reproducibility from a package comparison.
+For the first application read, the website supplies only traffic. Capture the paired exchanges in a sanitized HTTP Archive (HAR). Pass that archive to har2sdk’s `generateFromHar()` and consume its inferred OpenAPI document, warnings and privacy findings. Validate the inferred operations, assign public names from the saved evidence, and save the accepted definition as `openapi.json` with its evidence references in the generation report. From this point the Python package can be built offline. The inferred document describes the supported exchanges we observed; unknown required fields, unobserved endpoints and business intent cannot be established from a successful sample alone.
 
-## Verification
+A published or user-supplied definition is an optional input for sites that have one. GraphQL takes its own path using captured operation documents and an available schema. The traffic-only HTTP acceptance fixture must expose no OpenAPI document and supply none to the generator.
 
-The implementation documentation review is complete. The generator emitted two
-byte-identical 27-file example projects from the same saved normalized manifest.
-The SDK package is copied entirely from that output, with no hand-edited methods.
-Repository prose, development tests and Poetry lock remain maintained separately.
-Required custom session-header names remain explicit runtime flags.
+## What the developer gets
+
+For example, suppose a local message application calls `GET /message?message_id=m1` and its server returns a message object. The literal route supplies `message` and the query key supplies `message_id`. The proposed Python and CLI interfaces for this traffic-only fixture are:
+
+```python
+from mail_client import Client
+
+c = Client()
+message = c.get_message(message_id="m2")
+print(message.subject)
+```
+
+```sh
+mail-client get-message --message-id m2
+```
+
+The CLI parses the ID, calls `c.get_message(message_id="m2")`, and prints the returned message as JSON. Python returns the native result directly. Both use the same authenticated session handling, generated request builder, response parsing and server-error handling. Preserve existing CLI spellings as aliases when needed.
+
+The installed client owns its default server address and authentication setup. Initial login and MFA are explicit. Subsequent calls, including scheduled CLI runs, reuse valid authorized state without prompting. If the server requires sign-in again, surface `authentication_required` so the caller can recover through explicit login. Keep credentials outside the distributable package.
+
+## What works today
+
+- [PR #14](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/14) generates an installable login client before opening the browser. An unfinished login leaves a working client.
+- [PR #15](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/15) selects one dashboard link and gives its literal GET path to the OpenAPI generator. Its installed CLI can sign in again and return that page’s HTML. With zero eligible links, it still produces a working login client. Preserve both cases and deterministic generation from saved inputs.
+- The one-link test proves authenticated page retrieval. It leaves three product requirements open: capturing the application request behind a page, exposing it as a method on `Client`, and invoking that same public method from the CLI using an existing login. The current Python caller has to supply browser transport and call a generated module function.
+
+## How capture selects operations and assigns public names
+
+These are implementation requirements. Today the dashboard-link command selects the first eligible anchor and assigns the fixed name `read_linked_page`. The existing HTTP capture exporter uses a verb and digest for inferred operation IDs. Neither establishes the public names for application operations.
+
+1. **Observe and pair.** Attach the existing network observer before the confirmed dashboard loads its data, including traffic initiated during the final login redirect. Use browser request IDs to pair requests with their responses and keep redirect hops distinct. Retain only authorized application evidence after privacy filtering. The built-in scope, traversal order and limits drive discovery after initial login. A page label, anchor or HTTP 200 alone cannot select a data method.
+2. **Identify and deduplicate.** Use the existing service identity (protocol plus normalized endpoint). For REST, use the declared server base or the observed in-scope origin when there is no declared base. For GraphQL, use the exact endpoint, including its path. Within a service, identify REST operations by HTTP verb and validated route template; identify GraphQL operations by operation kind, name and canonical document including referenced fragments. A retry, a new sample argument or a different response row adds evidence to the same operation. Keep wire names and serialization rules independent of Python names.
+3. **Decide eligibility before naming.** By default, use the inferred HTTP definition or captured GraphQL document. When a validated definition is independently available, match it to the service. Keep supported definition-backed operations even if they were never invoked. For traffic-only HTTP require a paired exchange and enough evidence to build the request and parse its result. Exclude static assets, login traffic, ambiguous contracts and unsupported encodings with a recorded reason. Handle HTML navigation separately as a page read. Package every eligible operation within the configured scope; the one-operation milestone uses a fixture with one eligible application read. Network arrival order never chooses the winner.
+4. **Derive the method.** For traffic-only HTTP, derive the name from the lowercase verb and route segments in order, spelling a template parameter `by_<parameter>`. Thus `GET /messages/{message_id}` becomes `get_messages_by_message_id`. The generator assigns the resulting operation ID; the site need not supply a method name or tags. For an independently supplied definition use its authored operation ID when present. For GraphQL use the named operation or the declared root field for supported schema-only builders. Normalize to valid Python snake_case; preserve actual wire argument names in the operation mapping. Do not guess that `POST` means “create,” singularize a resource, or derive a name from account data, button text or an example response.
+5. **Build the clients.** Generate one installable package per input website with one public `Client`. Use the explicit package name when supplied; otherwise derive it from the normalized starting hostname and a `-client` suffix. For the canonical service attribute, join the protocol label (`rest` or `graphql`), hostname, non-default port if present, and endpoint path in order. Normalize those tokens to a Python identifier. Within a service, use its first declared OpenAPI operation tag as an optional group. Untagged REST and GraphQL operations stay directly on the service subclient. Also expose a method on the root when its name is unique across the package and available there. Root and grouped access delegate to the same implementation. For example, an OpenAPI operation `GetMessage` tagged `Messages` at `https://api.example.test/v1` is available as `c.rest_api_example_test_v1.messages.get_message(...)` and, when unique, `c.get_message(...)`. Never split services by the number of dashboard tabs or invent a “payroll” or “mail” subclient from UI text.
+6. **Resolve names once, offline.** Split acronym and camel-case boundaries using the existing operation-name rules, lowercase the tokens, replace runs of non-identifier characters with one underscore, and trim edge underscores. Prefix a digit-leading, keyword or lifecycle method name with `operation_`; use `service_` and `group_` in the corresponding scopes. Reserve generated attributes and existing public interface names before adding aliases. Sort by canonical identity before emitting code. When distinct identities normalize to the same name within one scope, suffix the colliding names with the first eight hex characters of SHA-256 of the sanitized canonical identity, extending the prefix until unique. Across services, keep ambiguous short names off the root and expose the qualified calls. Conflicting evidence about a wire contract stays excluded; a suffix cannot repair it. Save the identity, name source, qualified Python method, CLI spelling, backend target and sanitized evidence reference in the generation report. The CLI uses this same mapping, with hyphenated command words and flags, and dispatches to the public method. The unique root method `c.get_message(message_id=...)` maps to `get-message --message-id ...`; qualified methods use a command word for each service and group component before the method.
+
+**Acceptance for the algorithm.** Use provider-neutral fixtures for a declared operation, a traffic-only route, named GraphQL operations sharing an endpoint, two services with the same method name, and a candidate that must be excluded. Reorder independent capture events while preserving request/response pairs, repeat a request and change its sample values. With the same contracts, settings and generator versions, require identical public names, group assignments, Python-to-CLI mappings and exclusion reasons. Check the exact request made by the installed client. A human or model choosing a nicer name fails this test.
+
+## Next milestone: one captured application read, end to end
+
+Use a synthetic message application. Its dashboard returns HTML and makes one authenticated request for message data. The request path, verb, argument and response must come from the website’s exchange. Keep fixture-specific names and paths out of generator logic.
+
+1. **Capture the exchange.** Start at the fixture’s login URL. After login, record the application request and its corresponding response through the existing capture module. Save sanitized evidence of the method, request target, inputs, status and response structure. Verify against the fixture server’s request log. If one sample cannot distinguish a literal value from a parameter, use another observed call of the same operation or an advertised definition. Verify that discovery sends zero writes. Prove this step before changing generation.
+2. **Generate one Python method.** Generate the inferred OpenAPI document from the saved HAR with har2sdk. Assert the document contains the observed verb, route, query argument and response structure before passing it to `openapi-python-client`. The generated public method delegates to the upstream request function and returns its native model. Put authentication and transport setup behind `Client`. Build the wheel, install it in a clean environment, and call the public method using a different valid message ID from the one captured. The server must see that ID and the caller must receive its current subject.
+3. **Run the CLI through that method.** Verify that the CLI passes the parsed argument to the public method. Then run the installed executable in a separate process with stdin closed. Check the same request and application result as in Python, including the ID and subject. Exercise a rejected request through both interfaces. The CLI must preserve the error meaning in its exit status and diagnostic.
+4. **Stop at one proven operation.** Keep the zero-link and one-link tests passing. Generate twice from the same saved evidence and compare the packages. A fresh user of the installed package must be able to run the documented Python and CLI examples without coaching, access to the generator checkout, or knowledge of the server route. Use separate people or agents for implementation, adversarial review, running the generator, and consuming the package. Agents are development roles only.
+
+## Expand one operation at a time
+
+Reuse existing generation backends. For REST, OpenAPI Python Client owns serialization, HTTP calls and models. For GraphQL, reuse Ariadne Codegen for schema-backed operations and the existing operation-document path for captured named operations without a schema. Each backend feeds the same public Python and CLI contract. Do not hand-code a parallel request implementation for either interface.
+
+Apply the same acceptance test to each later capability: a list with pagination, a named GraphQL read, a settings change, a file download or an upload. For a download, verify the actual bytes. For a write or upload, verify the server received the intended arguments or file and performed the expected change on an isolated fixture. Discovery never executes a write to learn what it does. Explicit invocation by the caller is the execution boundary. Never retry a write with an uncertain outcome.
+
+Generate only operations whose inputs and results the evidence supports. Record a reason for unsupported operations. A zero-operation run still produces the login client and reports its coverage. Reaching a page, finding an anchor, generating files, or receiving HTTP 200 alone cannot establish that a business operation works.
+
+## Record IDs in dashboard links
+
+Before publishing the one-link client, exclude paths containing a 24-character hexadecimal record ID using the shared route classifier. Verify both generated outputs against the unfixed selector first. A dashboard containing only the record link must produce the login client with empty OpenAPI paths. If an ordinary link follows the record link, its GET must be the only generated path. Run the same cases after the change and run the Docker regressions before updating the stacked application-client PR.

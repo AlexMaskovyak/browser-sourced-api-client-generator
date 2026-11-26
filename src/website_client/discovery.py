@@ -22,6 +22,7 @@ MAX_HAR = 32 * 1024 * 1024
 AUTH = re.compile(r"(?:^|[/_.-])(login|log_in|sign_in|signin|sign-in|oauth|token|password|credential|authorize|authentication|session)(?:$|[/_.-])", re.I)
 AUTH_OPERATION = re.compile(r"auth|token|password|credential|session|log.?in|sign.?in", re.I)
 FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
+HEX_RECORD_ID = re.compile(r"[0-9a-f]{24}", re.IGNORECASE)
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f-]{27,}$", re.I)
 
 
@@ -35,7 +36,13 @@ def route(url):
         if re.fullmatch(r"\{id_\d+\}", segment):
             segments.append(segment)
             parameters.append(segment[1:-1])
-        elif segment.isdigit() or UUID.match(segment) or len(segment) >= 32 or "@" in segment:
+        elif (
+            segment.isdigit()
+            or UUID.match(segment)
+            or HEX_RECORD_ID.fullmatch(segment)
+            or len(segment) >= 32
+            or "@" in segment
+        ):
             name = f"id_{index}"
             segments.append("{" + name + "}")
             parameters.append(name)

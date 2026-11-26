@@ -125,7 +125,7 @@ reports failures but cannot undo downstream output after a late producer failure
 For implementing another producer, see the [manifest format](docs/discovery-manifest-format.md)
 and [create_discovery_manifest.py](examples/create_discovery_manifest.py).
 
-## Sign in and generate a login-only client
+## Sign in and generate a client
 
 To verify only this capability from the repository root, start Docker and run
 `scripts/test-login-client.sh`. It builds and installs the generator wheel, then
@@ -143,7 +143,10 @@ poetry run website-client login --url https://app.example.com --output my-login-
 The command generates a Python package from an OpenAPI definition with zero endpoints,
 adds the browser login command, and prints its location before opening Chrome.
 Sign in on the website, complete MFA, and press Enter in the terminal after the
-dashboard appears. If you cancel or login fails, the client files are still
+dashboard appears. The command reads its links and reports the selected path in
+`linkedPath`. When it finds one, the client in the same directory gains the
+`read_linked_page` operation. With zero eligible links, `linkedPath` is null and
+the login client is ready to use. If you cancel or login fails, the client files are still
 available for retry. Without `--output`, each run creates a new directory under
 `~/website-clients/`.
 
@@ -478,3 +481,38 @@ and verification-code fixture. The container has no host mounts or external
 network during execution. Playwright's bundled Node driver runs inside the
 container. No production credentials are used.
 These tests do not establish production service compatibility.
+
+## Generate a client for one dashboard link
+
+With the same prerequisites as browser login, enter the HTTPS URL where sign-in starts.
+From the repository root, run these commands in a shell.
+
+```sh
+printf 'Website login URL: '
+read -r login_url
+poetry run website-client login --url "$login_url" --output one-link-client
+```
+
+Sign in and press Enter when the dashboard is ready. The command reads its links
+in document order without visiting them. It selects at most one same-origin
+page with a literal path. Links with query strings, fragments, numeric or unique IDs,
+or recognized account actions are skipped. Choose a new output
+directory on each run.
+
+If the command reports `read_linked_page`, open `one-link-client/README.md`.
+Follow its isolated Python 3.11 or newer installation steps, then its concrete
+`.venv/bin/login-client` command. That command includes the actual website origin
+and the generated operation; the README explains its exact GET path. Supply a
+fresh login URL when prompted. The original login path and query are not saved.
+
+Keep the documented `--url` origin unchanged. The generated request appends its
+page path, so passing the full page URL duplicates that path. The operation signs
+in again, reads the page once and saves raw HTML as a JSON string in a new file.
+HTML source can differ from browser-rendered content.
+
+If the command reports an empty operations list, the directory contains a
+login client. From that directory, install it with
+`python3 -m pip install -r requirements.txt` and
+run `python3 client.py login --url "$login_url"`. An interrupted sign-in also
+leaves a login client. To try discovery again, rerun the generator with a new
+directory.
