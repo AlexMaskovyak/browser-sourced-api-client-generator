@@ -63,3 +63,7 @@ Reuse existing generation backends. For REST, OpenAPI Python Client owns seriali
 Apply the same acceptance test to each later capability: a list with pagination, a named GraphQL read, a settings change, a file download or an upload. For a download, verify the actual bytes. For a write or upload, verify the server received the intended arguments or file and performed the expected change on an isolated fixture. Discovery never executes a write to learn what it does. Explicit invocation by the caller is the execution boundary. Never retry a write with an uncertain outcome.
 
 Generate only operations whose inputs and results the evidence supports. Record a reason for unsupported operations. A zero-operation run still produces the login client and reports its coverage. Reaching a page, finding an anchor, generating files, or receiving HTTP 200 alone cannot establish that a business operation works.
+
+## Record IDs in dashboard links
+
+Before publishing the one-link client, exclude paths containing a 24-character hexadecimal record ID using the shared route classifier. Verify both generated outputs against the unfixed selector first. A dashboard containing only the record link must produce the login client with empty OpenAPI paths. If an ordinary link follows the record link, its GET must be the only generated path. Run the same cases after the change and run the Docker regressions before updating the stacked application-client PR.

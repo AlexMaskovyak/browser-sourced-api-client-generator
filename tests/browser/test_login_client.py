@@ -63,7 +63,7 @@ def login_and_read_paths(site, output):
 def test_installed_client_reads_the_discovered_protected_page(tmp_path, site):
     from test_login import install_generated_wheel
 
-    site.show_guide_link = True
+    site.dashboard_hrefs = ["team/guide"]
     origin = site.url.rsplit("/", 1)[0]
     trust = ssl.create_default_context(cafile=str(tmp_path / "ca.crt"))
     assert httpx.get(origin + "/team/guide", verify=trust).status_code == 401
@@ -99,6 +99,28 @@ def test_dashboard_without_links_generates_a_working_login_client(tmp_path, site
     sign_in(site, [str(project / "client.py"), "login", *BROWSER], executable=sys.executable)
     assert site.counts == {"password": 2, "mfa": 2, "app": 2}
     assert site.guide_reads == 0
+
+
+def test_only_record_link_generates_login_client_without_endpoints(tmp_path, site):
+    site.dashboard_hrefs = ["/records/507f1f77bcf86cd799439011"]
+    project = tmp_path / "record-only"
+
+    paths = login_and_read_paths(site, project)
+
+    assert paths == {}
+    report = json.loads((project / "generation.json").read_text())
+    assert report["operations"] == []
+    assert "zero endpoints" in (project / "README.md").read_text()
+
+
+def test_record_link_before_help_generates_only_help_endpoint(tmp_path, site):
+    site.dashboard_hrefs = ["/records/507f1f77bcf86cd799439011", "/help"]
+    project = tmp_path / "record-then-help"
+
+    paths = login_and_read_paths(site, project)
+
+    assert list(paths) == ["/help"]
+    assert list(paths["/help"]) == ["get"]
 
 
 def sign_in(site, args, *, executable=None, finish=True):
