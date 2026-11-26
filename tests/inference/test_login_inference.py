@@ -86,15 +86,3 @@ def test_observed_json_and_selected_html_link_survive_the_same_generation(
     [specification] = generated
     assert specification["paths"]["/records"]["get"]["operationId"] == "get_records"
     assert specification["paths"]["/help"]["get"]["operationId"] == "read_linked_page"
-
-
-def test_identifier_link_is_skipped_and_next_ordinary_link_is_retained():
-    from website_client.page_link import PageLink, first_page_link
-
-    website = "https://example.test"
-    dashboard = website + "/app"
-    identifier_link = website + "/records/0123456789abcdef01234567"
-    assert first_page_link(website, dashboard, [identifier_link]) is None
-    assert first_page_link(
-        website, dashboard, [identifier_link, website + "/help"]
-    ) == PageLink("/help")

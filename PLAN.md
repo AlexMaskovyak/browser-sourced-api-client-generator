@@ -57,3 +57,5 @@ Each stage has a named input and an observable output. The primary implementer m
 4. Run the default Docker test, including missing-record and expired-session cases. A missing operation fails the default test. The local site's own sign-in and rendering checks diagnose failures separately. Run the existing regressions before pushing.
 
 A zero-link dashboard with no observed API read still produces a login client. Add another capability only after the installed-client example passes. The total count of tests is never a milestone result.
+
+The page-link regressions from PR #15 also apply here. With no observed API read, a 24-character hexadecimal record ID as the only link leaves the login client with empty OpenAPI paths. When an ordinary link follows it, the client exposes only that link.

@@ -1,6 +1,7 @@
 """Local HTTPS service for browser login and generated endpoint tests."""
 
 import http.server
+from html import escape
 import json
 from pathlib import Path
 import secrets
@@ -209,8 +210,8 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
         elif self.authenticated:
             self.site.counts["app"] += 1
             content = "<h1>Signed in</h1>"
-            if self.site.show_guide_link:
-                content += '<a href="team/guide">Team guide</a>'
+            for href in self.site.dashboard_hrefs:
+                content += f'<a href="{escape(href, quote=True)}">Linked page</a>'
             if self.site.self_discovery:
                 # The fixture page makes an ordinary GraphQL read without
                 # project JavaScript. Discovery must observe it, not replay it.
@@ -303,7 +304,7 @@ class Site:
         self.api_reads = 0
         self.api_writes = 0
         self.redirect_hits = 0
-        self.show_guide_link = False
+        self.dashboard_hrefs = []
         self.guide_reads = 0
         self.guide_html = "<h1>Team guide</h1>"
         self.self_discovery = False
