@@ -110,6 +110,12 @@ from compiled contracts; it does not invent business descriptions from names.
 Shared runtime docstrings explain HTTP client ownership and failure behavior.
 Identical saved manifests and generator versions must produce identical output.
 
+## One captured JSON read
+
+The login milestone uses a fresh temporary browser. The recorder attaches before its first navigation. On confirmation it supplies sanitized, same-origin HTTP exchanges to har2sdk for offline inference. The publisher gives an eligible JSON GET to OpenAPI Python Client, which owns query serialization and response models. The public `Client` method calls that generated operation. Its CLI adapter parses arguments and calls the same method. An interrupted login leaves the initial package available.
+
+The website owns account records and session validity. The local runtime profile holds only the selected origin's authorization from the user's explicit sign-in. It lives outside the package. A new consumer process opens a Playwright API request context using that profile. The transport restricts the destination, applies TLS verification, and serializes updates to the local session state. An authentication rejection ends the call. The caller signs in again explicitly.
+
 ## Failure and recovery
 
 A valid manifest can contain blocked APIs. Normalization records their issues;

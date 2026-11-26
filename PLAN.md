@@ -2,23 +2,23 @@
 
 **Input:** a website URL and an output directory. **Output:** an installable Python package whose methods call the server operations the website uses. Assume the website publishes no API description. The user supplies the initial login and MFA. Everything after confirmation runs programmatically.
 
-### What a developer should be able to do
+## The installed Python interface
 
-For a message application observed fetching `GET /message?message_id=m1`, the target interface is:
+The first milestone builds an installable distribution named `login-client`. Its Python import is `login_client`. The example application loads a message after sign-in by requesting `GET /message?message_id=m1`. A developer who installs the generated wheel can ask the backend for a different message:
 
 ```python
-from mail_client import Client
+from login_client import Client
 
-c = Client()
-message = c.get_message(message_id="m2")
+client = Client()
+message = client.get_message(message_id="m2")
 print(message.subject)
 ```
 
-```sh
-mail-client get-message --message-id m2
-```
+`Client()` uses the website origin recorded at generation and the current user's private sign-in profile. `get_message` sends an authenticated GET with the caller's keyword argument. It returns a generated Python model with `id` and `subject` attributes. Changing the subject on the server after installation must change what the caller receives. Neither the sample message nor its subject belongs in the wheel.
 
-The CLI parses the flag, calls the public Python method and prints its result. The client owns the server address, authentication, request construction and response parsing. Both interfaces must work with the initial browser closed and stdin closed. Reuse valid authorization from a private profile outside the package. On expiry, return `authentication_required`; explicit login starts recovery.
+The installed shell command is `login-client get-message --message-id m2`. It calls the same Python method and prints the returned model as JSON. Both interfaces work after the original browser exits, with standard input closed. A missing record reports HTTP 404. An expired session reports `authentication_required` and requires a new explicit login. The calling process never asks for a password or MFA code.
+
+For this milestone the method is directly on `Client`. A dashboard link and a background GET have different contracts. The link returns HTML. The GET returns the inferred data model. The dashboard identifies where the request occurred. The HTTP verb, route and query names determine the method and its arguments. The [architecture](ARCHITECTURE.md#planned-public-operation-names-and-groups) specifies how later milestones group multiple services and resources.
 
 ### What the generator must do
 
@@ -39,4 +39,11 @@ The CLI parses the flag, calls the public Python method and prints its result. T
 | Installed application client | Install the wheel in a clean environment. Change the backend’s `m2` subject after generation. Run the Python and CLI examples above in separate processes. Verify both the received argument on the server and the updated subject in each result. Exercise missing IDs and expired sessions. A fresh reader must succeed from the package documentation without coaching. |
 | Next capabilities | Add one proven behavior at a time: pagination, a GraphQL read, a settings change, a download or an upload. Compare downloaded bytes and verify the exact server effect of each explicitly invoked write. Never retry an uncertain write. |
 
-Keep implementation, adversarial review, generator execution and independent package use separate. The local site and Chromium agree on the authenticated JSON response for `m1`. The installed login command emits zero operations on that dashboard. Run `./scripts/test-message-site.sh --require-message-get` to reproduce the missing GET in its generated OpenAPI. The next implementation step is capturing the page’s natural request in the generator itself. Installed public-method execution and unattended reuse remain pending.
+## Acceptance and delivery order
+
+1. An independent adversary writes the installed-client test against this public interface. Run it against the current generator and commit the failing test before changing product code.
+2. Attach the recorder before the dashboard loads, infer the operation from the dashboard's request and generate the wheel. Confirm the recorded operation, query parameter and response fields.
+3. Install the wheel in a clean environment. Give it a private local profile from the initial sign-in. Invoke Python and the CLI in separate processes. For each, change the backend subject first and compare both the caller's result and the backend's request log.
+4. Run the default Docker test, including missing-record and expired-session cases. A missing operation fails the default test. The local site's own sign-in and rendering checks diagnose failures separately. Run the existing regressions before pushing.
+
+A zero-link dashboard with no observed API read still produces a login client. Add another capability only after the installed-client example passes. The total count of tests is never a milestone result.
