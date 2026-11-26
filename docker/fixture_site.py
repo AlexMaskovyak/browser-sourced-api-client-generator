@@ -298,7 +298,7 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
 class Site:
     """Own the local service, fixture credentials and request counters."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, handler=SiteRequestHandler):
         self.secrets = {
             "username": f"user-{uuid.uuid4()}@example.test",
             "password": str(uuid.uuid4()),
@@ -324,7 +324,7 @@ class Site:
         certificate_path, key_path = prepare_tls(root)
         self.server = http.server.ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            SiteRequestHandler,
+            handler,
         )
         self.server.site = self
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

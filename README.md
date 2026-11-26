@@ -11,6 +11,18 @@ named operation documents generate callable methods directly. If a complete sche
 is supplied or discovered, Ariadne Codegen adds schema-based models and validation.
 Other API contract formats do not yet have dedicated generation support.
 
+## Run a local website and backend
+
+Start Docker and run this from the repository root:
+
+```sh
+./scripts/test-message-site.sh
+```
+
+The script builds the test image, starts a disposable HTTPS message website and its backend, and runs the installed `website-client login` command in Chromium. The test driver completes the password and MFA forms with local fixture credentials. The first image build requires network access for dependencies. The actual test runs on container loopback with external networking disabled and removes the container on exit.
+
+After login, the dashboard’s JavaScript requests `GET /message?message_id=m1`. The test compares the JSON returned to the browser and the subject it renders with the backend’s own record. The site publishes no OpenAPI specification. The script reports the generator’s actual operations separately. A passing website check proves the exchange was available to observe. To require the generated OpenAPI to contain the observed GET, run `./scripts/test-message-site.sh --require-message-get`. This check currently fails: the login command generates zero operations on this dashboard. Once that check passes, the [product specification](PLAN.md) still requires executing the installed Python method and CLI against changed server data. If the Docker image build fails, check that Docker is running and can download dependencies, then rerun the same command.
+
 ## Start here: website to client
 
 Run these steps from the repository root, where `pyproject.toml` is located.
