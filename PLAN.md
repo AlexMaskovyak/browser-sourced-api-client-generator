@@ -41,6 +41,16 @@ For this milestone the method is directly on `Client`. A dashboard link and a ba
 
 ## Acceptance and delivery order
 
+Each stage has a named input and an observable output. The primary implementer may write unit tests for a component. A different author writes acceptance tests from these contracts before implementation. Keep the original failing result with the test commit. Change an expectation only when the contract changes or an independent review identifies an incorrect test.
+
+| Stage | Input | Required output and evidence |
+| --- | --- | --- |
+| Sign-in | Starting URL and valid fixture credentials entered through both forms | The backend accepts the password and MFA and serves the protected dashboard. The dashboard makes its own authenticated read. |
+| Capture | Browser events from the dashboard's first navigation onward | A paired same-origin GET and successful JSON response with the route, argument name and field types. The capture must exclude credential and sample values. |
+| Inference | Sanitized HTTP exchanges with the browser closed | Valid OpenAPI with a GET on the observed path, its string query parameter and the response object's fields. |
+| Generation | That operation definition | An installable wheel with a discoverable public method, result model, CLI command and instructions. Empty input still produces a package with login. |
+| Installed use | The installed wheel, private profile and a caller-supplied argument | Both Python and CLI make one request each. Each returns the backend value set for that call. Missing data and expired authorization produce distinct errors. |
+
 1. An independent adversary writes the installed-client test against this public interface. Run it against the current generator and commit the failing test before changing product code.
 2. Attach the recorder before the dashboard loads, infer the operation from the dashboard's request and generate the wheel. Confirm the recorded operation, query parameter and response fields.
 3. Install the wheel in a clean environment. Give it a private local profile from the initial sign-in. Invoke Python and the CLI in separate processes. For each, change the backend subject first and compare both the caller's result and the backend's request log.
