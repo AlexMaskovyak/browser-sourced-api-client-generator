@@ -11,17 +11,29 @@ named operation documents generate callable methods directly. If a complete sche
 is supplied or discovered, Ariadne Codegen adds schema-based models and validation.
 Other API contract formats do not yet have dedicated generation support.
 
-## Run a local website and backend
+## Try the installed message client in Docker
 
-Start Docker and run this from the repository root:
+Start Docker, then run this from the repository root:
 
 ```sh
 ./scripts/test-message-site.sh
 ```
 
-The script builds the test image, starts a disposable HTTPS message website and its backend, and runs the installed `website-client login` command in Chromium. Each test site creates its own username, password and MFA code in memory. The driver fills in both forms, first for the generator and then in a fresh browser for the installed generated client. The driver passes the protected starting URL with `--url` on both runs. You need no account, credentials file or manual sign-in. The first image build requires network access for dependencies. The actual test runs on container loopback with external networking disabled and removes the container on exit.
+The script builds and installs the generator, signs in to a disposable website, and installs the Python client it generates. The fixture supplies its own password and verification code. Docker needs network access to build the image. The tests run on container loopback with external networking disabled.
 
-After login, the dashboard’s JavaScript requests `GET /message?message_id=m1`. For each sign-in, the test compares the JSON returned to the browser and the subject it renders with the backend’s own record. It also checks that the backend denies access after the password alone and after an incorrect MFA code. The site publishes no OpenAPI specification. The script reports the generator’s actual operations separately. A passing website check proves the exchange was available to observe. To require the generated OpenAPI to contain the observed GET, run `./scripts/test-message-site.sh --require-message-get`. This check currently fails: the login command generates zero operations on this dashboard. Once that check passes, the [product specification](PLAN.md) still requires executing the installed Python method and CLI against changed server data. If the Docker image build fails, check that Docker is running and can download dependencies, then rerun the same command.
+The dashboard fetches `m1` after login. The website supplies no schema. The generator must infer the GET and its query parameter, and the installed wheel must support this call:
+
+```python
+from login_client import Client
+
+client = Client()
+message = client.get_message(message_id="m2")
+print(message.subject)
+```
+
+The corresponding installed command is `login-client get-message --message-id m2`. Before each invocation the test changes the subject for `m2`. It checks what the caller receives and what the backend actually served. Both callers run after the original browser exits, with standard input closed.
+
+The default run checks sign-in, capture, the inferred contract and installed behavior. Each test appears by name. If one fails, use the [test guide](tests/README.md) to identify which input or output failed. If the image fails to build, check Docker and its network access, then rerun. The [product specification](PLAN.md) defines the installed Python and CLI interfaces.
 
 ## Start here: website to client
 
@@ -494,9 +506,9 @@ network during execution. Playwright's bundled Node driver runs inside the
 container. No production credentials are used.
 These tests do not establish production service compatibility.
 
-## Generate a client for one dashboard link
+## Generate a client during browser login
 
-With the same prerequisites as browser login, enter the HTTPS URL where sign-in starts.
+Use Python 3.11 or newer, Poetry, and Chrome or Chromium as in the browser login instructions. Inferring an API from observed traffic also requires Node 20 or newer and npm. The first inference installs the pinned converter in your local cache. Enter the HTTPS URL where sign-in starts.
 From the repository root, run these commands in a shell.
 
 ```sh
@@ -505,7 +517,9 @@ read -r login_url
 poetry run website-client login --url "$login_url" --output one-link-client
 ```
 
-Sign in and press Enter when the dashboard is ready. The command reads its links
+Sign in and press Enter after the dashboard has loaded its data. During sign-in the recorder observes same-origin browser requests. For a supported JSON GET it generates a Python method and a matching CLI command. Open the generated README for their names and arguments. On this machine the client can use the private sign-in profile for that origin. For a separate account or test run, pass `--profile DIR` at generation and set `WEBSITE_CLIENT_PROFILE` to that directory before calling the client. Keep the directory outside the generated package.
+
+The command also reads dashboard links
 in document order without visiting them. It selects at most one same-origin
 page with a literal path. Links with query strings, fragments, numeric or unique IDs,
 or recognized account actions are skipped. Choose a new output

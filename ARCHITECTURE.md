@@ -74,8 +74,9 @@ control request authorization. This policy belongs to `exploration_policy.py`.
 ## Authentication and service changes
 
 The website remains authoritative for authentication and business records. A
-human signs in through the temporary browser. Credentials remain in that browser
-or process memory; discovery exports sanitized evidence, not a reusable login.
+human signs in through a temporary browser. Discovery exports sanitized evidence.
+For a generated application read the runtime saves the confirmed session in a
+private profile tied to the website origin, outside the generated directory.
 
 Login starts with a valid OpenAPI document with empty paths. The same
 `openapi-python-client` generation function handles that document and imported
@@ -90,8 +91,8 @@ dashboard. The browser resolves ordinary anchor addresses, including relative
 links. The page-link module selects the first eligible path within the login
 origin. It supplies a GET operation with an HTML response to the same OpenAPI
 generator used for login. The completed package replaces the original client in
-the same directory after checking for local edits. An empty selection or interrupted sign-in leaves a
-login client. Only the generated client's explicit read sends a request to the
+the same directory after checking for local edits. When neither a link nor a supported JSON read is available, or sign-in is
+interrupted, the original login client remains available. Only the generated client's explicit read sends a request to the
 linked page, using a new browser session.
 
 Discovery and client execution are separate sessions. A generated client's
