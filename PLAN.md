@@ -1,49 +1,46 @@
-# One dashboard link
+# Generate a Python client from the website’s server operations
 
-1. On the normal `website-client login` command, publish the initial login client.
-   After interactive login, inspect the dashboard once and select its first eligible
-   same-origin page link in document order. Discovery must send zero link requests.
-2. Give its literal GET path, or an empty paths object, to the existing OpenAPI
-   generator. Upgrade the initial client in its original directory after generation succeeds.
-3. On the local HTTPS fixture, run the generated method after fresh login and compare
-   the response body with the protected page. With no links, run the emitted login
-   command and confirm the dashboard visit. Run the full local suite before opening the PR.
+A developer installs the generated package, constructs `Client()`, and calls a method with ordinary Python arguments. The CLI exposes the same operations and calls those public methods. The generator gets its description of each operation from browser-observed requests and responses or a service definition. After the initial sign-in, discovery and generation run without human direction or an agent.
 
-# Current work
+## What the developer gets
 
-## Linked-page instructions repair
+For example, suppose a local message application fetches a message by ID and its server returns a message object. These are proposed interfaces for that fixture:
 
-1. Keep the OpenAPI definition and generated request builder authoritative for the
-   page request. Render linked-login instructions in private staging before
-   publication, using only the website origin and selected literal path.
-2. Give the reader isolated installation steps and one exact operation command,
-   with a newly entered login URL and raw HTML JSON output expectations. Preserve
-   zero-link and other generation instructions; update the repository entry point.
-3. Add a synthetic generation regression for the exact origin, GET path, install
-   command, secret exclusion and absence of competing examples. Run affected
-   generation tests; coordinator runs the full suite before handoff.
+```python
+from mail_client import Client
 
-Make generated Python clients understandable and verify repeatable generation.
+c = Client()
+message = c.get_message(message_id="m2")
+print(message.subject)
+```
 
-1. Review all Python implementation files changed in the PR, documenting component
-   contracts and non-obvious validation, inference, ownership and failure decisions.
-   Generate class and method docstrings from operation contracts: read/write
-   behavior, declared variable types, omission, return values and failure behavior.
-   Explain shared runtime ownership and validation limits in its public API.
-2. Test documentation on a freshly generated client, including required inputs,
-   defaults and mutation permission. Generate twice from identical saved inputs
-   and compare output bytes. Run the full suite and container checks.
-3. Regenerate the example package from its saved normalized manifest, compare it
-   with the repository, and update both PRs. Keep private inputs out of Git.
+```sh
+mail-client get-message --message-id m2
+```
 
-The generator owns executable SDK files. Repository packaging, tests and prose
-remain separate unless the comparison proves they are generated. Do not perform
-live writes or claim whole-repository reproducibility from a package comparison.
+The CLI parses the ID, calls `c.get_message(message_id="m2")`, and prints the returned message as JSON. Python returns the native result directly. Both use the same authenticated session handling, generated request builder, response parsing and server-error handling. Preserve existing CLI spellings as aliases when needed.
 
-## Verification
+The installed client owns its default server address and authentication setup. Initial login and MFA are explicit. Subsequent calls, including scheduled CLI runs, reuse valid authorized state without prompting. If the server requires sign-in again, surface `authentication_required` so the caller can recover through explicit login. Keep credentials outside the distributable package.
 
-The implementation documentation review is complete. The generator emitted two
-byte-identical 27-file example projects from the same saved normalized manifest.
-The SDK package is copied entirely from that output, with no hand-edited methods.
-Repository prose, development tests and Poetry lock remain maintained separately.
-Required custom session-header names remain explicit runtime flags.
+## What works today
+
+- [PR #14](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/14) generates an installable login client before opening the browser. An unfinished login leaves a working client.
+- [PR #15](https://github.com/AlexMaskovyak/browser-sourced-api-client-generator/pull/15) selects one dashboard link and gives its literal GET path to the OpenAPI generator. Its installed CLI can sign in again and return that page’s HTML. With zero eligible links, it still produces a working login client. Preserve both cases and deterministic generation from saved inputs.
+- The one-link test proves authenticated page retrieval. It leaves three product requirements open: capturing the application request behind a page, exposing it as a method on `Client`, and invoking that same public method from the CLI using an existing login. The current Python caller has to supply browser transport and call a generated module function.
+
+## Next milestone: one captured application read, end to end
+
+Use a synthetic message application. Its dashboard returns HTML and makes one authenticated request for message data. The request path, verb, argument and response must come from the website’s exchange. Keep fixture-specific names and paths out of generator logic.
+
+1. **Capture the exchange.** Start at the fixture’s login URL. After login, record the application request and its corresponding response through the existing capture module. Save sanitized evidence of the method, request target, inputs, status and response structure. Verify against the fixture server’s request log. If one sample cannot distinguish a literal value from a parameter, use another observed call of the same operation or an advertised definition. Verify that discovery sends zero writes. Prove this step before changing generation.
+2. **Generate one Python method.** Feed the saved exchange through the existing HTTP inference and OpenAPI generation path. The generated public method delegates to the upstream request function and returns its native model. Put authentication and transport setup behind `Client`. Build the wheel, install it in a clean environment, and call the public method using a different valid message ID from the one captured. The server must see that ID and the caller must receive its current subject.
+3. **Run the CLI through that method.** Verify that the CLI passes the parsed argument to the public method. Then run the installed executable in a separate process with stdin closed. Check the same request and application result as in Python, including the ID and subject. Exercise a rejected request through both interfaces. The CLI must preserve the error meaning in its exit status and diagnostic.
+4. **Stop at one proven operation.** Keep the zero-link and one-link tests passing. Generate twice from the same saved evidence and compare the packages. A fresh user of the installed package must be able to run the documented Python and CLI examples without coaching, access to the generator checkout, or knowledge of the server route. Use separate people or agents for implementation, adversarial review, running the generator, and consuming the package. Agents are development roles only.
+
+## Expand one operation at a time
+
+Reuse existing generation backends. For REST, OpenAPI Python Client owns serialization, HTTP calls and models. For GraphQL, reuse Ariadne Codegen for schema-backed operations and the existing operation-document path for captured named operations without a schema. Each backend feeds the same public Python and CLI contract. Do not hand-code a parallel request implementation for either interface.
+
+Apply the same acceptance test to each later capability: a list with pagination, a named GraphQL read, a settings change, a file download or an upload. For a download, verify the actual bytes. For a write or upload, verify the server received the intended arguments or file and performed the expected change on an isolated fixture. Discovery never executes a write to learn what it does. Explicit invocation by the caller is the execution boundary. Never retry a write with an uncertain outcome.
+
+Generate only operations whose inputs and results the evidence supports. Record a reason for unsupported operations. A zero-operation run still produces the login client and reports its coverage. Reaching a page, finding an anchor, generating files, or receiving HTTP 200 alone cannot establish that a business operation works.
