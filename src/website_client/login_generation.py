@@ -41,7 +41,8 @@ def generate_login_client(url: str, output: Path, *, link: PageLink | None = Non
         "paths": link.openapi_paths() if link else {},
     }
     return generate_openapi_client(
-        output, "login-client", json.dumps(definition), website=_website_default(url)
+        output, "login-client", json.dumps(definition), website=_website_default(url),
+        linked_page=link.path if link else None,
     )
 
 

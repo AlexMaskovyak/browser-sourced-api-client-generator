@@ -11,6 +11,18 @@
 
 # Current work
 
+## Linked-page instructions repair
+
+1. Keep the OpenAPI definition and generated request builder authoritative for the
+   page request. Render linked-login instructions in private staging before
+   publication, using only the website origin and selected literal path.
+2. Give the reader isolated installation steps and one exact operation command,
+   with a newly entered login URL and raw HTML JSON output expectations. Preserve
+   zero-link and other generation instructions; update the repository entry point.
+3. Add a synthetic generation regression for the exact origin, GET path, install
+   command, secret exclusion and absence of competing examples. Run affected
+   generation tests; coordinator runs the full suite before handoff.
+
 Make generated Python clients understandable and verify repeatable generation.
 
 1. Review all Python implementation files changed in the PR, documenting component

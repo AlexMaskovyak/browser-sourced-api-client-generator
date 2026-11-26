@@ -1,0 +1,45 @@
+# Read the linked page
+
+This client reads `GET $path` from `$website` using the
+`$operation` operation. It saves the HTTP response body as a JSON string
+containing raw HTML. HTML source can differ from browser-rendered content.
+
+## Install in this directory
+
+Use Python 3.11 or newer and Chrome or Chromium. Open a terminal in the generated
+directory containing this README. Check `python3 --version`; if it is older than
+3.11, use an available newer interpreter such as `python3.12` in place of
+`python3` below. This creates a local environment and installs the client and
+dependencies.
+
+```sh
+python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
+```
+
+If environment creation or installation fails, resolve the reported error before continuing.
+No environment activation or Poetry installation is needed.
+
+## Sign in and save the page
+
+Enter a fresh HTTPS login URL supplied by you for this website. The original
+login path and query were not saved. Keep `--url $website` exactly as shown:
+the generated request already appends `$path`. Supplying the full page URL
+would duplicate its path.
+
+```sh
+printf 'Fresh website login URL: '
+read -r login_url
+.venv/bin/$name $operation --url $shell_website --login --login-url "$$login_url" --output page.json
+```
+
+Complete sign-in and verification codes in Chrome. When the intended dashboard
+is ready, return to the terminal and press Enter. The command reads the page once,
+closes its temporary browser and saves `page.json` in this directory. Its JSON
+value is a string containing the raw HTML, such as `"<!doctype html>..."`, rather
+than an object or a list of records. That abbreviated value is an example only.
+
+The output file must not already exist. Choose a new output filename for each
+run. Each run needs fresh sign-in. Ctrl+C cancels; session state is not saved.
+For Chromium, add `--browser chromium`; for a custom browser executable, add
+`--browser-path` followed by its absolute path. If login or the request fails,
+resolve the reported error and rerun with a new output filename.

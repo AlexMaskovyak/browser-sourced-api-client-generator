@@ -484,13 +484,10 @@ These tests do not establish production service compatibility.
 
 ## Generate a client for one dashboard link
 
-With the same prerequisites as browser login, enter the HTTPS origin of the
-website (scheme and host, plus a port if needed) and the URL where sign-in starts.
+With the same prerequisites as browser login, enter the HTTPS URL where sign-in starts.
 From the repository root, run these commands in a shell.
 
 ```sh
-printf 'Website origin: '
-read -r website_origin
 printf 'Website login URL: '
 read -r login_url
 poetry run website-client login --url "$login_url" --output one-link-client
@@ -502,18 +499,20 @@ page with a literal path. Links with query strings, fragments, numeric or unique
 or recognized account actions are skipped. Choose a new output
 directory on each run.
 
-If the command reports `read_linked_page`, run the generated client from that
-directory. The operation signs in again, reads the page once and saves the HTML
-as a JSON string in a new file.
+If the command reports `read_linked_page`, open `one-link-client/README.md`.
+Follow its isolated Python 3.11 or newer installation steps, then its concrete
+`.venv/bin/login-client` command. That command includes the actual website origin
+and the generated operation; the README explains its exact GET path. Supply a
+fresh login URL when prompted. The original login path and query are not saved.
 
-```sh
-cd one-link-client
-python3 -m pip install -r requirements.txt
-login-client read_linked_page --url "$website_origin" --login --login-url "$login_url" --output page.json
-```
+Keep the documented `--url` origin unchanged. The generated request appends its
+page path, so passing the full page URL duplicates that path. The operation signs
+in again, reads the page once and saves raw HTML as a JSON string in a new file.
+HTML source can differ from browser-rendered content.
 
 If the command reports an empty operations list, the directory contains a
-login client. From that directory, install it using the same pip command and
+login client. From that directory, install it with
+`python3 -m pip install -r requirements.txt` and
 run `python3 client.py login --url "$login_url"`. An interrupted sign-in also
 leaves a login client. To try discovery again, rerun the generator with a new
 directory.
