@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Verify sign-in</title></head>
+<body>
+  <main>
+    <h1>Verify sign-in</h1>
+    <form method="post" action="/mfa">
+      <label>Verification code <input name="code" inputmode="numeric" autocomplete="one-time-code" required></label>
+      <button>Verify</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -212,9 +212,33 @@ def generate_openapi_client(
                     operation=next(iter(project.operations)),
                 )
             )
+        add_public_client(project, name, source, website)
         report = write_generation_report(project, source, lineage=lineage)
         publish_tree(project.directory, output)
         return report
+
+
+def add_public_client(project, name, source, website):
+    """Package supported website reads while preserving upstream SDK modules."""
+    if not website:
+        return
+    from .public_generation import public_operations, write_public_readme, write_public_sources
+
+    operations = public_operations(project, openapi_document(source))
+    if not operations:
+        return
+    write_public_sources(project, website, operations)
+    write_public_readme(project, name, website, operations)
+    metadata = project.directory / "pyproject.toml"
+    text = metadata.read_text().replace(
+        f"{project.package_name}._cli:entrypoint",
+        f"{project.package_name}.public_cli:entrypoint",
+    )
+    text = text.replace(
+        "[tool.poetry.dependencies]\n",
+        '[tool.poetry.dependencies]\nfilelock = ">=3.20,<4"\nplatformdirs = ">=4,<5"\n',
+    )
+    metadata.write_text(text)
 
 
 def add_browser_login(project, website):

@@ -1,3 +1,8 @@
+FROM node:22.16.0-bookworm-slim@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34 AS har_inference
+WORKDIR /opt/website-client-har
+COPY src/website_client/har_backend/package*.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
 FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
 WORKDIR /work
 RUN apt-get update && apt-get install -y --no-install-recommends chromium xvfb xauth openssl libnss3-tools && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -12,6 +17,9 @@ COPY pyproject.toml poetry.lock poetry.toml README.md LICENSE ./
 RUN --mount=type=cache,target=/root/.cache/pypoetry poetry sync --with dev --no-root
 COPY docker/cache_client_dependencies.py ./docker/cache_client_dependencies.py
 RUN --mount=type=cache,target=/root/.cache/pip python docker/cache_client_dependencies.py
+COPY --from=har_inference /usr/local/bin/node /usr/local/bin/node
+COPY --from=har_inference /opt/website-client-har /opt/website-client-har
+ENV WEBSITE_CLIENT_HAR_BACKEND=/opt/website-client-har
 COPY src ./src
 COPY tests ./tests
 COPY docker ./docker
@@ -20,4 +28,4 @@ RUN poetry build --format wheel && python -m pip install --no-deps dist/*.whl
 RUN useradd --create-home --uid 1000 tester
 USER tester
 ENV HOME=/home/tester
-CMD ["sh", "-c", "xvfb-run -a python -m pytest -q -p no:cacheprovider tests && xvfb-run -a python docker/test_login.py"]
+CMD ["sh", "-c", "xvfb-run -a python -m pytest -v --tb=short -p no:cacheprovider tests && xvfb-run -a python docker/test_login.py"]

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 
 from .browser import BrowserSession, BrowserError, origin
@@ -18,10 +19,12 @@ def main(args=None):
     commands = parser.add_subparsers(dest="command", required=True)
     login = commands.add_parser(
         "login", aliases=["discover-link"],
-        help="Sign in and generate a client for the first eligible dashboard link.",
+        help="Sign in and generate a client for observed JSON reads and one dashboard link.",
         description="Open a temporary browser, sign in and complete verification codes there, "
         "then press Enter in the terminal when the dashboard is ready. The command selects one "
-        "eligible link, closes the browser and does not save the session. "
+        "eligible link and records natural JSON reads. It closes the temporary browser and "
+        "does not save its browser profile. Supported JSON reads reuse only this site's "
+        "confirmed session in a private directory outside the package. "
         "A working login client is written before the browser opens. Ctrl+C cancels.",
     )
     login.add_argument(
@@ -29,6 +32,9 @@ def main(args=None):
     )
     login.add_argument("--output", help="New directory for the login client (default: a new directory under ~/website-clients).")
     login.add_argument("--browser", choices=["chrome", "chromium"], default="chrome")
+    login.add_argument(
+        "--profile", help="Private directory for this site's reusable session, outside the generated package."
+    )
     login.add_argument(
         "--browser-path",
         help="Absolute path to an installed browser executable, if needed.",
@@ -342,32 +348,80 @@ def main(args=None):
 
 
 def login_and_generate(options):
-    """Leave a runnable client before login, then add one link from the dashboard."""
+    """Leave a runnable client, then infer the dashboard's natural JSON reads."""
     from .login_generation import (
-        default_login_output, generate_login_client, project_snapshot, upgrade_login_client,
+        default_login_output,
+        generate_login_client,
+        project_snapshot,
+        upgrade_login_client,
     )
-    from .page_link import first_page_link
 
     output = new_output(options.output or default_login_output())
     report = generate_login_client(options.url, output)
     print(f"Login client written to {output}", file=sys.stderr, flush=True)
     origin(options.url)
     if not sys.stdin.isatty():
-        raise BrowserError("Login requires an interactive terminal, without piped input.")
+        raise BrowserError(
+            "Login requires an interactive terminal, without piped input."
+        )
 
     initial = project_snapshot(output)
-    with BrowserSession(options.url, options.browser, options.browser_path) as session:
+    result, link, captured = _capture_login(options, output)
+    if captured.definition is not None or link is not None:
+        report = upgrade_login_client(
+            options.url,
+            output,
+            link,
+            initial,
+            definition=captured.definition,
+            evidence=captured.evidence,
+        )
+    print(
+        json.dumps(
+            {
+                **result,
+                "sessionClosed": True,
+                "clientGenerated": True,
+                "linkedPath": link.path if link else None,
+                "operations": report["operations"],
+            }
+        )
+    )
+    return 0
+
+
+def _capture_login(options, output):
+    """Observe a fresh sign-in and save state only for accepted JSON operations."""
+    from .login_capture import LoginCapture
+    from .page_link import first_page_link
+    from .runtime_profile import profile_directory
+
+    profile = profile_directory(options.url, options.profile)
+    resolved_profile = profile.resolve()
+    if (
+        resolved_profile == output.resolve()
+        or resolved_profile in output.resolve().parents
+        or output.resolve() in resolved_profile.parents
+    ):
+        raise BrowserError(
+            "Keep the private session profile outside the generated client directory."
+        )
+    session = BrowserSession(
+        options.url,
+        options.browser,
+        options.browser_path or os.environ.get("WEBSITE_CLIENT_BROWSER_PATH"),
+    )
+    capture = LoginCapture(session)
+    session.observe_network(capture.event)
+    with session:
         result = session.confirm_login()
         dashboard, hrefs = session.dashboard_links()
         link = first_page_link(options.url, dashboard, hrefs)
+        captured = capture.finish()
+        if captured.definition is not None:
+            session.save_session_state(profile)
 
-    if link is not None:
-        report = upgrade_login_client(options.url, output, link, initial)
-    print(json.dumps({
-        **result, "sessionClosed": True, "clientGenerated": True,
-        "linkedPath": link.path if link else None, "operations": report["operations"],
-    }))
-    return 0
+    return result, link, captured
 
 
 def entrypoint():

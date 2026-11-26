@@ -3,6 +3,7 @@
 import argparse
 from contextlib import contextmanager
 import json
+from importlib.resources import files
 import sys
 
 from .browser import BrowserError, BrowserSession
@@ -13,18 +14,25 @@ WEBSITE = $website
 @contextmanager
 def login(url=WEBSITE, *, browser="chrome", browser_path=None):
     """Yield the signed-in browser session until the caller exits the context."""
+    is_application = files(__package__).joinpath("_public.json").is_file()
+    if is_application:
+        from .runtime_profile import save_browser_profile, service_origin
+        if service_origin(url) != service_origin(WEBSITE):
+            raise BrowserError("Login URL must use the generated website origin.")
     with BrowserSession(url, browser, browser_path) as session:
         session.confirm_login()
+        if is_application:
+            save_browser_profile(session._context, None, WEBSITE)
         yield session
 
 
-def main():
+def main(args=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["login"])
     parser.add_argument("--url", default=WEBSITE, help="Override the website's starting URL.")
     parser.add_argument("--browser", choices=["chrome", "chromium"], default="chrome")
     parser.add_argument("--browser-path", help="Path to the installed browser executable.")
-    args = parser.parse_args()
+    args = parser.parse_args(args)
     if not args.url:
         parser.error("Supply the website login address with --url https://...")
     try:

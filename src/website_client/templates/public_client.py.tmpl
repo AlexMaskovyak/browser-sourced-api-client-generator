@@ -1,0 +1,12 @@
+"""Typed website reads delegated to the upstream generated SDK."""
+
+from .public_runtime import PublicClient
+$imports
+
+_OMITTED = object()
+
+
+class Client(PublicClient):
+    """Read this website using its recorded address and a private login profile."""
+
+$methods

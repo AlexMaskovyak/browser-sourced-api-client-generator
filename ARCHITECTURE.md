@@ -74,8 +74,9 @@ control request authorization. This policy belongs to `exploration_policy.py`.
 ## Authentication and service changes
 
 The website remains authoritative for authentication and business records. A
-human signs in through the temporary browser. Credentials remain in that browser
-or process memory; discovery exports sanitized evidence, not a reusable login.
+human signs in through a temporary browser. Discovery exports sanitized evidence.
+For a generated application read the runtime saves the confirmed session in a
+private profile tied to the website origin, outside the generated directory.
 
 Login starts with a valid OpenAPI document with empty paths. The same
 `openapi-python-client` generation function handles that document and imported
@@ -90,8 +91,8 @@ dashboard. The browser resolves ordinary anchor addresses, including relative
 links. The page-link module selects the first eligible path within the login
 origin. It supplies a GET operation with an HTML response to the same OpenAPI
 generator used for login. The completed package replaces the original client in
-the same directory after checking for local edits. An empty selection or interrupted sign-in leaves a
-login client. Only the generated client's explicit read sends a request to the
+the same directory after checking for local edits. When neither a link nor a supported JSON read is available, or sign-in is
+interrupted, the original login client remains available. Only the generated client's explicit read sends a request to the
 linked page, using a new browser session.
 
 Discovery and client execution are separate sessions. A generated client's
@@ -109,6 +110,12 @@ types, omission behavior and mutation permission. The generator supplies these
 from compiled contracts; it does not invent business descriptions from names.
 Shared runtime docstrings explain HTTP client ownership and failure behavior.
 Identical saved manifests and generator versions must produce identical output.
+
+## One captured JSON read
+
+The login milestone uses a fresh temporary browser. The recorder attaches before its first navigation. On confirmation it supplies sanitized, same-origin HTTP exchanges to har2sdk for offline inference. The publisher gives an eligible JSON GET to OpenAPI Python Client, which owns query serialization and response models. The public `Client` method calls that generated operation. Its CLI adapter parses arguments and calls the same method. An interrupted login leaves the initial package available.
+
+The website owns account records and session validity. The local runtime profile holds only the selected origin's authorization from the user's explicit sign-in. It lives outside the package. A new consumer process opens a Playwright API request context using that profile. The transport restricts the destination, applies TLS verification, and serializes updates to the local session state. An authentication rejection ends the call. The caller signs in again explicitly.
 
 ## Failure and recovery
 
@@ -130,3 +137,10 @@ Unit tests exercise parsing and policies. Docker installs the built wheel and
 checks browser login, discovery, command chaining and both generated client types
 against a local HTTPS fixture. Compatibility with a real service requires its
 own verification.
+
+## Planned public operation names and groups
+
+- Identify a service by protocol and normalized endpoint. Identify a REST operation by verb and validated route template. For GraphQL, use operation kind, name and canonical document with its referenced fragments. Repeated observations add evidence to an operation. Conflicting contracts produce a reported exclusion.
+- For inferred REST, use the verb and literal route segments. A path parameter becomes `by_<parameter>`. Thus `GET /message?message_id=m1` gives `get_message(message_id=...)`. Preserve wire argument names in the mapping. When available, use the authored OpenAPI operation ID or GraphQL operation name. Use the root field for a supported schema-only GraphQL operation.
+- Generate one canonical service subclient from protocol, host, non-default port and endpoint path. Use the first declared OpenAPI tag as a group. For traffic-only REST, a shared literal collection path and its parameterized member path can establish a resource group. Otherwise keep the operation on the service. A unique public method also appears on the root client. Record page-to-method associations separately so a method used on two screens has one implementation.
+- Normalize public names to snake case with the existing acronym and camel-case rules. Preserve existing public aliases and reserve lifecycle names. Prefix invalid leading digits, keywords and reserved names according to scope (`operation_`, `service_`, `group_`). Sort by canonical identity. For collisions within a scope, append the first eight hexadecimal characters of its SHA-256 identity digest and extend until unique. Omit ambiguous root aliases. CLI names follow the same mapping using hyphens and qualified command words. Use an explicit package name when provided, otherwise the normalized starting hostname plus `-client`.

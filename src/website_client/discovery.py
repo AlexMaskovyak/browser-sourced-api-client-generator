@@ -235,6 +235,23 @@ class Discovery:
         except BrowserError:
             self.failures += 1
 
+    def har_text(self):
+        """Serialize already sanitized exchanges without invoking shape inference."""
+        return json.dumps(
+            {
+                "log": {
+                    "version": "1.2",
+                    "creator": {
+                        "name": "browser-sourced-api-client-generator",
+                        "version": "0.1.0",
+                    },
+                    "entries": self.entries,
+                    "_sanitized": True,
+                }
+            },
+            indent=2,
+        ) + "\n"
+
     def files(self, source):
         endpoints = list(self.endpoints.values())
         groups = {}
@@ -251,7 +268,7 @@ class Discovery:
             if endpoint.get("requestBodyUnmodeled"): item["x-discovery-request-body-unmodeled"] = True
             if "requestSchema" in endpoint: item["requestBody"] = {"required": False, "content": {"application/json": {"schema": endpoint["requestSchema"]}}}
             spec["paths"].setdefault(endpoint["path"], {})[endpoint["method"].lower()] = item
-        files = {"capture.har": json.dumps({"log": {"version": "1.2", "creator": {"name": "browser-sourced-api-client-generator", "version": "0.1.0"}, "entries": self.entries, "_sanitized": True}}, indent=2) + "\n"}
+        files = {"capture.har": self.har_text()}
         for index, spec in enumerate(groups.values(), 1):
             openapi_document(spec)
             files[f"openapi-inferred-{index:04}.json"] = json.dumps(spec, indent=2) + "\n"

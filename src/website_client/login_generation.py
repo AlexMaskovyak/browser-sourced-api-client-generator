@@ -33,17 +33,48 @@ def _website_default(url: str) -> str | None:
     return f"https://{hostname}" + (f":{port}" if port != 443 else "")
 
 
-def generate_login_client(url: str, output: Path, *, link: PageLink | None = None) -> dict:
+def generate_login_client(
+    url: str,
+    output: Path,
+    *,
+    link: PageLink | None = None,
+    definition: dict | None = None,
+    evidence: dict | None = None,
+) -> dict:
     """Package browser login and the discovered page, if any, in one SDK."""
-    definition = {
-        "openapi": "3.0.3",
-        "info": {"title": "Login client", "version": "1.0.0"},
-        "paths": link.openapi_paths() if link else {},
-    }
-    return generate_openapi_client(
-        output, "login-client", json.dumps(definition), website=_website_default(url),
+    definition = (
+        json.loads(json.dumps(definition))
+        if definition is not None
+        else {
+            "openapi": "3.0.3",
+            "info": {"title": "Login client", "version": "1.0.0"},
+            "paths": link.openapi_paths() if link else {},
+        }
+    )
+    if link is not None:
+        for path, methods in link.openapi_paths().items():
+            definition["paths"].setdefault(path, methods)
+        if (
+            definition["paths"][link.path]["get"].get("operationId")
+            != "read_linked_page"
+        ):
+            link = None
+    report = generate_openapi_client(
+        output,
+        "login-client",
+        json.dumps(definition),
+        website=_website_default(url),
         linked_page=link.path if link else None,
     )
+    for name, text in (evidence or {}).items():
+        if Path(name).name != name:
+            raise BrowserError("Invalid capture evidence filename.")
+        path = output / name
+        if path.exists():
+            raise BrowserError("Capture evidence would replace a generated file.")
+        path.write_text(text)
+        path.chmod(0o600)
+    return report
 
 
 def project_snapshot(directory: Path) -> dict:
@@ -52,18 +83,36 @@ def project_snapshot(directory: Path) -> dict:
     for path in (directory, *directory.rglob("*")):
         info = path.lstat()
         snapshot[path.relative_to(directory)] = (
-            info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns,
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
         )
     return snapshot
 
 
-def upgrade_login_client(url: str, output: Path, link: PageLink, initial: dict) -> dict:
+def upgrade_login_client(
+    url: str,
+    output: Path,
+    link: PageLink | None,
+    initial: dict,
+    *,
+    definition: dict | None = None,
+    evidence: dict | None = None,
+) -> dict:
     """Build the linked client in full before replacing this run's initial package."""
-    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".linked-client-") as stage:
+    with tempfile.TemporaryDirectory(
+        dir=output.parent, prefix=".linked-client-"
+    ) as stage:
         linked = Path(stage) / "client"
-        report = generate_login_client(url, linked, link=link)
+        report = generate_login_client(
+            url, linked, link=link, definition=definition, evidence=evidence
+        )
         if project_snapshot(output) != initial:
-            raise BrowserError("The login client changed during sign-in. Retry in a new directory.")
+            raise BrowserError(
+                "The login client changed during sign-in. Retry in a new directory."
+            )
 
         # Keep the original outside staging so even a failed restoration leaves it recoverable.
         previous = output.with_name(f".login-backup-{uuid4().hex}")

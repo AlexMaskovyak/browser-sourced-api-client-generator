@@ -225,6 +225,19 @@ class BrowserSession:
             Array.from(document.querySelectorAll('a[href]:not([download])'), a => a.href)
         ]""")
 
+    def save_session_state(self, directory):
+        """Save this fresh site's confirmed authentication outside generated code."""
+        from .runtime_profile import save_browser_profile
+
+        self._check()
+        save_browser_profile(self._context, directory, self._url)
+
+    def observe_network(self, callback):
+        """Install passive capture before opening and navigating this browser."""
+        if self._context is not None:
+            raise BrowserError("Install network capture before opening the browser.")
+        self._on_event = callback
+
     def _password_visible(self):
         return self._page.locator('input[type="password"]:visible').count() > 0
 

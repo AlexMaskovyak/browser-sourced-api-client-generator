@@ -4,6 +4,7 @@ import http.server
 from html import escape
 import json
 from pathlib import Path
+import secrets
 import ssl
 import subprocess
 import threading
@@ -17,17 +18,9 @@ from exploration_site import response as exploration_response
 MAX_FIXTURE_REQUEST_BODY_BYTES = 4 * 1024
 FIXTURES_DIRECTORY = Path(__file__).resolve().parents[1] / "tests/fixtures"
 
-LOGIN_FORM = (
-    '<form method="post" action="/login">'
-    '<label>Username<input name="username"></label>'
-    '<label>Password<input name="password" type="password"></label>'
-    "<button>Sign in</button></form>"
-)
-VERIFICATION_FORM = (
-    '<form method="post" action="/mfa">'
-    '<label>Verification code<input name="code"></label>'
-    "<button>Verify</button></form>"
-)
+SITE_PAGES = Path(__file__).with_name("message_app")
+LOGIN_FORM = (SITE_PAGES / "login.html").read_text()
+VERIFICATION_FORM = (SITE_PAGES / "mfa.html").read_text()
 
 
 def run_certificate_command(*args):
@@ -299,13 +292,13 @@ class SiteRequestHandler(http.server.BaseHTTPRequestHandler):
 class Site:
     """Own the local service, fixture credentials and request counters."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, handler=SiteRequestHandler):
         self.secrets = {
             "username": f"user-{uuid.uuid4()}@example.test",
             "password": str(uuid.uuid4()),
             "cookie": str(uuid.uuid4()),
             "challenge": str(uuid.uuid4()),
-            "code": "123456",
+            "code": f"{secrets.randbelow(10**8):08d}",
         }
         self.counts = {"password": 0, "mfa": 0, "app": 0}
         self.api_reads = 0
@@ -325,7 +318,7 @@ class Site:
         certificate_path, key_path = prepare_tls(root)
         self.server = http.server.ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            SiteRequestHandler,
+            handler,
         )
         self.server.site = self
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
