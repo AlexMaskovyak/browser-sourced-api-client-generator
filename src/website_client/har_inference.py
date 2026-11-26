@@ -46,9 +46,13 @@ def backend_module() -> Path:
         try:
             package = json.loads((module.parents[1] / "package.json").read_text())
         except (OSError, ValueError):
-            raise BrowserError("har_dependency_required: configured har2sdk is unavailable.") from None
+            raise BrowserError(
+                "har_dependency_required: configured har2sdk is unavailable."
+            ) from None
         if package.get("version") != VERSION or not module.is_file():
-            raise BrowserError("har_dependency_required: configured har2sdk version is incorrect.")
+            raise BrowserError(
+                "har_dependency_required: configured har2sdk version is incorrect."
+            )
         return module
     lock = (BACKEND / "package-lock.json").read_bytes()
     cache = user_cache_path("website-client") / (

@@ -23,6 +23,7 @@ AUTH = re.compile(r"(?:^|[/_.-])(login|log_in|sign_in|signin|sign-in|oauth|token
 AUTH_OPERATION = re.compile(r"auth|token|password|credential|session|log.?in|sign.?in", re.I)
 FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f-]{27,}$", re.I)
+HEX_ID = re.compile(r"^[0-9a-f]{24}$", re.I)
 
 
 def route(url):
@@ -35,7 +36,7 @@ def route(url):
         if re.fullmatch(r"\{id_\d+\}", segment):
             segments.append(segment)
             parameters.append(segment[1:-1])
-        elif segment.isdigit() or UUID.match(segment) or len(segment) >= 32 or "@" in segment:
+        elif segment.isdigit() or UUID.match(segment) or HEX_ID.fullmatch(segment) or len(segment) >= 32 or "@" in segment:
             name = f"id_{index}"
             segments.append("{" + name + "}")
             parameters.append(name)
@@ -228,6 +229,23 @@ class Discovery:
         except BrowserError:
             self.failures += 1
 
+    def har_text(self):
+        """Serialize already sanitized exchanges without invoking shape inference."""
+        return json.dumps(
+            {
+                "log": {
+                    "version": "1.2",
+                    "creator": {
+                        "name": "browser-sourced-api-client-generator",
+                        "version": "0.1.0",
+                    },
+                    "entries": self.entries,
+                    "_sanitized": True,
+                }
+            },
+            indent=2,
+        ) + "\n"
+
     def files(self, source):
         endpoints = list(self.endpoints.values())
         groups = {}
@@ -244,7 +262,7 @@ class Discovery:
             if endpoint.get("requestBodyUnmodeled"): item["x-discovery-request-body-unmodeled"] = True
             if "requestSchema" in endpoint: item["requestBody"] = {"required": False, "content": {"application/json": {"schema": endpoint["requestSchema"]}}}
             spec["paths"].setdefault(endpoint["path"], {})[endpoint["method"].lower()] = item
-        files = {"capture.har": json.dumps({"log": {"version": "1.2", "creator": {"name": "browser-sourced-api-client-generator", "version": "0.1.0"}, "entries": self.entries, "_sanitized": True}}, indent=2) + "\n"}
+        files = {"capture.har": self.har_text()}
         for index, spec in enumerate(groups.values(), 1):
             openapi_document(spec)
             files[f"openapi-inferred-{index:04}.json"] = json.dumps(spec, indent=2) + "\n"
