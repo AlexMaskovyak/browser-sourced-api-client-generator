@@ -10,7 +10,7 @@ def test_generator_and_installed_client_complete_separate_browser_sign_ins(
     from test_login import install_generated_wheel
 
     environment = tmp_path / "installed-login"
-    install_generated_wheel(generated_application.project, environment)
+    install_generated_wheel(generated_application.project_directory, environment)
     signed_in = run_browser_sign_in(site, [
         "login", "--url", site.url, *BROWSER,
     ], executable=str(environment / "bin/login-client"))

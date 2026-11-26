@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import ssl
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -20,11 +21,11 @@ def site(tmp_path, monkeypatch):
     assert_container_environment()
     monkeypatch.setenv("HOME", str(tmp_path))
     message_site = MessageSite(tmp_path)
+    message_site.messages["m1"]["subject"] = f"Private subject canary {uuid4()}"
     try:
         yield message_site
     finally:
         message_site.close()
-
 
 
 @pytest.fixture
@@ -32,7 +33,6 @@ def http_client(site, tmp_path):
     trust = ssl.create_default_context(cafile=str(tmp_path / "ca.crt"))
     with httpx.Client(base_url=site.url.rsplit("/", 1)[0], verify=trust) as client:
         yield client
-
 
 
 @pytest.fixture
@@ -47,7 +47,6 @@ def signed_in_client(site, http_client):
     assert mfa_response.status_code == 303
     assert mfa_response.headers["location"] == "/app"
     return http_client
-
 
 
 @pytest.fixture

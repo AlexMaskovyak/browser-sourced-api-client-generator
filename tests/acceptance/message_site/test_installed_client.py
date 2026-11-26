@@ -24,9 +24,10 @@ def test_installed_python_and_cli_each_return_independently_changed_server_data(
             json.loads(result.stdout)["subject"]
         )
         assert actual_subject == expected_subject
-        assert_single_message_request(site, requests_before, "m2", 200, True)
+        backend_body = assert_single_message_request(site, requests_before, "m2", 200, True)
+        assert backend_body == site.messages["m2"]
+        assert backend_body["subject"] == expected_subject
         assert site.counts == login_counts, "Installed read repeated browser login or dashboard navigation."
-
 
 
 def test_installed_python_and_cli_report_missing_message_without_retry(
@@ -40,9 +41,9 @@ def test_installed_python_and_cli_report_missing_message_without_retry(
         result = run_installed_consumer(application, interface, "unknown")
         assert result.returncode != 0, result.stdout + result.stderr
         assert "404" in result.stdout + result.stderr
-        assert_single_message_request(site, requests_before, "unknown", 404, True)
+        backend_body = assert_single_message_request(site, requests_before, "unknown", 404, True)
+        assert backend_body == {"error": "Unknown message"}
         assert site.counts == login_counts
-
 
 
 def test_installed_python_and_cli_report_expired_auth_without_repeating_login(
@@ -57,5 +58,6 @@ def test_installed_python_and_cli_report_expired_auth_without_repeating_login(
         result = run_installed_consumer(application, interface, "m2")
         assert result.returncode != 0, result.stdout + result.stderr
         assert "authentication_required" in result.stdout + result.stderr
-        assert_single_message_request(site, requests_before, "m2", 401, False)
+        backend_body = assert_single_message_request(site, requests_before, "m2", 401, False)
+        assert backend_body == {"error": "Sign-in required"}
         assert site.counts == login_counts, "Expired authorization triggered a new sign-in."

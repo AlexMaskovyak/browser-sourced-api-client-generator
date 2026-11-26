@@ -10,7 +10,8 @@ Read the result for the stage you are changing. A failed setup means later asser
 | --- | --- | --- |
 | Test website and backend | `acceptance/message_site/test_fixture_controls.py` | Password and MFA control access. A changed record, unknown ID and expired session produce distinguishable results. The site supplies no API definition. |
 | Sign-in | `acceptance/message_site/test_browser_sign_in.py` | The generator and installed client each open a fresh browser, complete both forms and receive the record fetched by the dashboard. |
-| Captured API contract | `acceptance/message_site/test_capture_contract.py` | The dashboard requests its own message. The generator's OpenAPI describes that GET, its query argument and the JSON fields the backend returned. |
+| Capture | `acceptance/message_site/test_capture_contract.py` | The saved HTTP archive pairs the dashboard’s GET with its response. It retains argument names and field types while removing credentials and message values. |
+| Inference | `acceptance/message_site/test_inference_contract.py` | The generator’s OpenAPI describes the GET, its string query argument and the JSON fields the backend returned. |
 | Installed application | `acceptance/message_site/test_installed_client.py` | Python and CLI each request a different record from the one observed. The server log identifies the argument and each caller receives the subject set immediately before its call. Missing records and expired authorization fail with the expected errors. |
 
 The [product plan](../PLAN.md) defines the public interface before implementation. For a new capability, an independent author writes the acceptance test and records the failure against the preceding revision. Implementers may add unit tests to narrow the cause. During review, name the first failing stage and the evidence used to identify it.

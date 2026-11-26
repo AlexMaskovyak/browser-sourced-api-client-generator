@@ -39,7 +39,6 @@ def observe_natural_message(command, site):
     }
 
 
-
 def run_browser_sign_in(site, arguments, *, executable=None, environment=None):
     from terminal_command import Command, eventually
     from test_login import assert_no_credentials
@@ -68,12 +67,10 @@ def run_browser_sign_in(site, arguments, *, executable=None, environment=None):
         command.stop()
 
 
-
 @dataclass
 class GeneratedApplication:
-    project: Path
-    profile: Path
-
+    project_directory: Path
+    profile_directory: Path
 
 
 def resolve_local_schema(document, schema):
@@ -87,22 +84,20 @@ def resolve_local_schema(document, schema):
     return schema
 
 
-
 @dataclass
 class InstalledApplication:
-    python: Path
-    executable: Path
-    consumer: Path
+    python_executable: Path
+    cli_executable: Path
+    consumer_script: Path
     working_directory: Path
     environment: dict
-
 
 
 def install_application(generated_application, tmp_path):
     from test_login import install_generated_wheel
 
     environment_directory = tmp_path / "installed-application"
-    install_generated_wheel(generated_application.project, environment_directory)
+    install_generated_wheel(generated_application.project_directory, environment_directory)
     clean_directory = tmp_path / "independent-consumer"
     clean_directory.mkdir()
     consumer = clean_directory / "consume_message.py"
@@ -113,7 +108,7 @@ def install_application(generated_application, tmp_path):
     }
     environment.update({
         "PATH": str(environment_directory / "bin") + ":/usr/bin:/bin",
-        "WEBSITE_CLIENT_PROFILE": str(generated_application.profile),
+        "WEBSITE_CLIENT_PROFILE": str(generated_application.profile_directory),
         # API execution must not start another browser or prompt for credentials.
         "WEBSITE_CLIENT_BROWSER_PATH": str(tmp_path / "no-browser-executable"),
         "NODE_EXTRA_CA_CERTS": str(tmp_path / "ca.crt"),
@@ -124,25 +119,23 @@ def install_application(generated_application, tmp_path):
     )
 
 
-
 def run_installed_consumer(application, interface, message_id):
     if interface == "python":
-        arguments = [str(application.python), "-I", str(application.consumer), message_id]
+        arguments = [str(application.python_executable), "-I", str(application.consumer_script), message_id]
     else:
-        arguments = [str(application.executable), "get-message", "--message-id", message_id]
+        arguments = [str(application.cli_executable), "get-message", "--message-id", message_id]
     return subprocess.run(
         arguments, cwd=application.working_directory, env=application.environment,
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
     )
 
 
-
 def assert_single_message_request(site, requests_before, message_id, status, authenticated):
-    expected_body = (
-        dict(site.messages[message_id]) if status == 200 else
-        {"error": "Unknown message"} if status == 404 else {"error": "Sign-in required"}
-    )
-    assert site.message_requests[requests_before:] == [{
-        "method": "GET", "path": f"/message?message_id={message_id}",
-        "authenticated": authenticated, "status": status, "body": expected_body,
-    }], "Installed call must make exactly one backend request with the caller's argument."
+    new_requests = site.message_requests[requests_before:]
+    assert len(new_requests) == 1, "Installed call must make exactly one backend request."
+    actual_request = new_requests[0]
+    assert actual_request["method"] == "GET"
+    assert actual_request["path"] == f"/message?message_id={message_id}"
+    assert actual_request["status"] == status
+    assert actual_request["authenticated"] is authenticated
+    return actual_request["body"]

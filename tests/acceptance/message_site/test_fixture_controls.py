@@ -19,7 +19,6 @@ def test_fixture_denies_messages_before_login_after_password_and_after_wrong_mfa
     assert site.counts == {"password": 1, "mfa": 0, "app": 0}
 
 
-
 def test_fixture_controls_and_schema_absence(site, signed_in_client):
     client = signed_in_client
     original_first_message = dict(site.messages["m1"])
